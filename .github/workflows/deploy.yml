@@ -59,9 +59,13 @@ jobs:
           const backendConfig = parse(fs.readFileSync(backendPath, "utf8"));
           backendConfig.services = backendConfig.services || [];
           for (const gk of gatekeepers) {
+            const gkConfigPath = join("packages", gk, "wrangler.jsonc");
+            const gkConfig = parse(fs.readFileSync(gkConfigPath, "utf8"));
+            const serviceName = gkConfig.name || gk;
+            
             const binding = {
               binding: bindingName(gk),
-              service: gk,
+              service: serviceName,
               entrypoint: "GatekeeperVendor",
             };
             if (gk === "gatekeeper-context") {
@@ -76,9 +80,13 @@ jobs:
           const routerConfig = parse(fs.readFileSync(routerPath, "utf8"));
           routerConfig.services = routerConfig.services || [];
           for (const gk of gatekeepers) {
+            const gkConfigPath = join("packages", gk, "wrangler.jsonc");
+            const gkConfig = parse(fs.readFileSync(gkConfigPath, "utf8"));
+            const serviceName = gkConfig.name || gk;
+
             routerConfig.services.push({
               binding: bindingName(gk),
-              service: gk
+              service: serviceName
             });
           }
           fs.writeFileSync(routerPath, JSON.stringify(routerConfig, null, 2));
@@ -87,20 +95,20 @@ jobs:
 
           node inject-bindings.mjs
 
-      - name: Deploy Backend
-        run: |
-          cd packages/workshop-backend
-          npx wrangler deploy
-
       - name: Deploy All Gatekeepers
         run: |
-          # Find all gatekeepers with a wrangler.jsonc and deploy them
+          # Find all gatekeepers with a wrangler.jsonc and deploy them FIRST
           for gk in packages/gatekeeper-*/; do
             if [ -f "$gk/wrangler.jsonc" ]; then
               echo "Deploying $gk..."
               (cd "$gk" && npx wrangler deploy)
             fi
           done
+
+      - name: Deploy Backend
+        run: |
+          cd packages/workshop-backend
+          npx wrangler deploy
 
       - name: Deploy Router (Frontend)
         run: |
