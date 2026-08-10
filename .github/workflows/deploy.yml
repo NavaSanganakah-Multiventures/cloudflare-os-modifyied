@@ -1,0 +1,108 @@
+name: Deploy Cloudflare-OS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      # These secrets must be added in your GitHub repository settings
+      # Settings -> Secrets and variables -> Actions -> New repository secret
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 11.17.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build project
+        run: pnpm run build
+
+      - name: Inject Gatekeeper Bindings
+        run: |
+          # We write a small Node.js script to dynamically add all Gatekeepers to the Backend and Router configs.
+          # This is necessary because the Router and Backend need to know about all deployed Gatekeepers.
+          cat << 'EOF' > inject-bindings.mjs
+          import fs from "node:fs";
+          import { join } from "node:path";
+          import { parse } from "jsonc-parser";
+
+          const gatekeepers = fs.readdirSync("packages")
+            .filter(n => n.startsWith("gatekeeper-") && fs.existsSync(join("packages", n, "wrangler.jsonc")));
+
+          function bindingName(gk) {
+            return gk.toUpperCase().replaceAll("-", "_");
+          }
+
+          console.log("Injecting bindings for:", gatekeepers);
+
+          // 1. Update Backend
+          const backendPath = join("packages", "workshop-backend", "wrangler.jsonc");
+          const backendConfig = parse(fs.readFileSync(backendPath, "utf8"));
+          backendConfig.services = backendConfig.services || [];
+          for (const gk of gatekeepers) {
+            const binding = {
+              binding: bindingName(gk),
+              service: gk,
+              entrypoint: "GatekeeperVendor",
+            };
+            if (gk === "gatekeeper-context") {
+              binding.props = { sharingDomain: "prod" };
+            }
+            backendConfig.services.push(binding);
+          }
+          fs.writeFileSync(backendPath, JSON.stringify(backendConfig, null, 2));
+
+          // 2. Update Router
+          const routerPath = join("packages", "router", "wrangler.jsonc");
+          const routerConfig = parse(fs.readFileSync(routerPath, "utf8"));
+          routerConfig.services = routerConfig.services || [];
+          for (const gk of gatekeepers) {
+            routerConfig.services.push({
+              binding: bindingName(gk),
+              service: gk
+            });
+          }
+          fs.writeFileSync(routerPath, JSON.stringify(routerConfig, null, 2));
+          console.log("Bindings injected successfully!");
+          EOF
+
+          node inject-bindings.mjs
+
+      - name: Deploy Backend
+        run: |
+          cd packages/workshop-backend
+          npx wrangler deploy
+
+      - name: Deploy All Gatekeepers
+        run: |
+          # Find all gatekeepers with a wrangler.jsonc and deploy them
+          for gk in packages/gatekeeper-*/; do
+            if [ -f "$gk/wrangler.jsonc" ]; then
+              echo "Deploying $gk..."
+              (cd "$gk" && npx wrangler deploy)
+            fi
+          done
+
+      - name: Deploy Router (Frontend)
+        run: |
+          cd packages/router
+          npx wrangler deploy
