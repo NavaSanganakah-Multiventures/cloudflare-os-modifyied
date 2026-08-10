@@ -36,12 +36,13 @@ jobs:
       - name: Build project
         run: pnpm run build
 
-      - name: Inject Gatekeeper Bindings, Vars, and KV IDs
+      - name: Inject Gatekeeper Bindings, Vars, KV IDs, and Secrets
         env:
           BACKEND_VARS: ${{ secrets.BACKEND_VARS }}
+          GATEKEEPER_SECRETS: ${{ secrets.GATEKEEPER_SECRETS }}
         run: |
           # We write a small Node.js script to dynamically add all Gatekeepers to the Backend and Router configs.
-          # It also auto-connects KV namespaces by fetching them from Cloudflare.
+          # It also auto-connects KV namespaces by fetching them from Cloudflare and sets Secrets.
           cat << 'EOF' > inject-bindings.mjs
           import fs from "node:fs";
           import { join } from "node:path";
@@ -105,6 +106,17 @@ jobs:
           const publicBaseUrl = backendConfig.vars.PUBLIC_BASE_URL || "https://agent.navasanganakah.com";
 
           backendConfig.services = backendConfig.services || [];
+          
+          // Parse Gatekeeper Secrets
+          let gkSecretsData = {};
+          if (process.env.GATEKEEPER_SECRETS) {
+            try {
+              gkSecretsData = JSON.parse(process.env.GATEKEEPER_SECRETS);
+            } catch (e) {
+              console.error("Failed to parse GATEKEEPER_SECRETS as JSON:", e.message);
+            }
+          }
+
           for (const gk of gatekeepers) {
             const gkConfigPath = join("packages", gk, "wrangler.jsonc");
             const gkConfig = parse(fs.readFileSync(gkConfigPath, "utf8"));
@@ -125,9 +137,25 @@ jobs:
             }
             backendConfig.services.push(binding);
 
-            // Also auto-connect KV for gatekeepers
+            // Auto-connect KV for gatekeepers
             injectKvIds(gkConfig, gk);
             fs.writeFileSync(gkConfigPath, JSON.stringify(gkConfig, null, 2));
+
+            // Inject Secrets if provided
+            const secretsForGk = gkSecretsData[gk];
+            if (secretsForGk) {
+              for (const [key, value] of Object.entries(secretsForGk)) {
+                console.log(`Setting secret ${key} for ${serviceName}...`);
+                try {
+                  execSync(`npx wrangler secret put ${key} --name ${serviceName}`, {
+                    input: value,
+                    stdio: ['pipe', 'inherit', 'ignore']
+                  });
+                } catch (err) {
+                  console.error(`Failed to set secret ${key} for ${serviceName}`);
+                }
+              }
+            }
           }
           
           // Auto-connect KV for backend
