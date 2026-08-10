@@ -105,7 +105,7 @@ jobs:
           const backendVarsList = [
             "ADMINS", "PUBLIC_BASE_URL", "AUTH_GATEKEEPERS", "DISABLE_PASSWORD_AUTH",
             "CF_AI_GATEWAY", "CF_AI_GATEWAY_ACCOUNT_ID", "CF_AI_GATEWAY_API_TOKEN", "CF_AI_GATEWAY_PROVIDERS",
-            "DAILY_LLM_CALL_LIMIT", "ENABLE_CLOUDFLARE_LIMITS", "MINIMUM_CLOUDFLARE_BALANCE", "CF_ACCESS_AUD"
+            "DAILY_LLM_CALL_LIMIT", "ENABLE_CLOUDFLARE_LIMITS", "MINIMUM_CLOUDFLARE_BALANCE", "CF_ACCESS_AUD", "CF_ACCESS_ISS"
           ];
           for (const key of backendVarsList) {
             if (allSecrets[key]) {
