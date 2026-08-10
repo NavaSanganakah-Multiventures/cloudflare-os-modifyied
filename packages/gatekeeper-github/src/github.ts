@@ -23,6 +23,8 @@ import {
   exchangeAuthCode,
   revokeOAuthGrant,
   type ConditionalRequestResult,
+  type GitHubBranchResponse,
+  type GitHubCommitResponse,
   type GitHubIssueCommentResponse,
   type GitHubIssueResponse,
   type GitHubLabelResponse,
@@ -34,12 +36,17 @@ import { assertIssueSearchResultsInRepo, buildIssueSearchQuery } from "./github-
 import GITHUB_LOGO_SVG from "./github-logo.svg";
 import type {
   GitHubActor,
+  GitHubBranch,
+  GitHubCommit,
+  GitHubCommitHandle,
   GitHubCreateIssueOptions,
   GitHubCreatePullRequestOptions,
+  GitHubDeleteFileOptions,
   GitHubDiffCommentTarget,
   GitHubDiffThread,
   GitHubDiscussionEntry,
   GitHubDraftDiffComment,
+  GitHubFileContent,
   GitHubIssue,
   GitHubIssueDetails,
   GitHubIssueFilter,
@@ -64,6 +71,7 @@ import type {
   GitHubRepoMetadata,
   GitHubRepoRef,
   GitHubReviewDecision,
+  GitHubWriteFileOptions,
 } from "./types";
 import TYPES_CODE from "./types.txt";
 import {
@@ -287,6 +295,9 @@ type StoredActionRecord = {
   appliedAt?: number;
   rejectedAt?: number;
   revertInfo?: GitHubRevertInfo;
+  // The real commit produced by an applied writeFile/deleteFile action, for resolving
+  // GitHubCommitHandle.getResult().
+  commitResult?: GitHubCommit;
 };
 
 const NONCE_BYTES = 32;
@@ -375,6 +386,17 @@ function hexEncode(bytes: Uint8Array): string {
   return [...bytes].map(byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
+// UTF-8-safe base64 encoding (btoa alone mangles non-ASCII characters; unescape-based tricks
+// are deprecated). GitHub's contents API expects UTF-8 base64.
+function utf8ToBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+}
+
 function generateNonce(): string {
   return hexEncode(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
 }
@@ -420,6 +442,26 @@ function repoRef(owner: string, repo: string): GitHubRepoRef {
     name: repo,
     fullName: `${owner}/${repo}`,
     url: canonicalRepoUrl(owner, repo),
+  };
+}
+
+function branchTreeUrl(owner: string, repo: string, branch: string): string {
+  return `${canonicalRepoUrl(owner, repo)}/tree/${branch}`;
+}
+
+function branchFromResponse(branch: GitHubBranchResponse, owner: string, repo: string): GitHubBranch {
+  return {
+    name: branch.name,
+    sha: branch.commit.sha,
+    url: branchTreeUrl(owner, repo, branch.name),
+  };
+}
+
+function commitResultFromResponse(commit: GitHubCommitResponse["commit"]): GitHubCommit {
+  return {
+    sha: commit.sha,
+    // html_url is the web URL (https://github.com/owner/repo/commit/…); url is the API URL.
+    url: commit.html_url ?? commit.url,
   };
 }
 
@@ -1956,12 +1998,18 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     }
   }
 
-  #markActionApproved(action: GitHubAction, revertInfo?: GitHubRevertInfo): void {
+  #markActionApproved(action: GitHubAction, options?: {
+    revertInfo?: GitHubRevertInfo;
+    commitResult?: GitHubCommit;
+  }): void {
     const record = this.#requireActionRecord(action.approvalId);
     record.state = "approved";
     record.appliedAt = Date.now();
-    if (revertInfo) {
-      record.revertInfo = revertInfo;
+    if (options?.revertInfo) {
+      record.revertInfo = options.revertInfo;
+    }
+    if (options?.commitResult) {
+      record.commitResult = options.commitResult;
     }
     this.#retireActionRecord(action.approvalId, record);
     this.#pendingActionsCache = undefined;
@@ -1991,6 +2039,12 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       case "replyToDiffComment":
       case "mergePullRequest":
         return kind === "pull" && action.pullId === provisionalId;
+      case "createBranch":
+      case "writeFile":
+      case "deleteFile":
+        // These actions affect the repo, not a specific issue/PR entity, so no pending action
+        // depends on a provisional issue/PR resource.
+        return false;
     }
   }
 
@@ -2056,6 +2110,11 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       if (action.type === "postReview" || action.type === "replyToDiffComment" || action.type === "mergePullRequest") {
         if (kind !== "pull") return false;
         return this.#entityIdMatches(action.pullId, logicalId);
+      }
+
+      if (action.type === "createBranch" || action.type === "writeFile" || action.type === "deleteFile") {
+        // Repo-level actions are never attached to an issue/PR entity.
+        return false;
       }
 
       return action.targetKind === kind && this.#entityIdMatches(action.targetId, logicalId);
@@ -2182,6 +2241,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           ...repoRef(this.ctx.props.owner, this.ctx.props.repo),
           description: result.data.description ?? undefined,
           visibility: result.data.visibility ?? (result.data.private ? "private" : "public"),
+          defaultBranch: result.data.default_branch,
         },
       };
     });
@@ -3369,7 +3429,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           type: "issueComment",
           commentId: response.id,
         };
-        this.#markActionApproved(action, revertInfo);
+        this.#markActionApproved(action, { revertInfo });
         this.#clearCaches();
         return;
       }
@@ -3442,7 +3502,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           type: "reviewComment",
           commentId: response.id,
         };
-        this.#markActionApproved(action, revertInfo);
+        this.#markActionApproved(action, { revertInfo });
         this.#clearCaches();
         return;
       }
@@ -3466,7 +3526,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         return;
       }
       case "writeFile": {
-        await this.#withApi(api => api.createOrUpdateFile(
+        const response = await this.#withApi(api => api.createOrUpdateFile(
           action.owner,
           action.repo,
           action.path,
@@ -3475,12 +3535,14 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           action.branch,
           action.sha,
         ));
-        this.#markActionApproved(action);
+        this.#markActionApproved(action, {
+          commitResult: commitResultFromResponse(response.commit),
+        });
         this.#clearCaches();
         return;
       }
       case "deleteFile": {
-        await this.#withApi(api => api.deleteFile(
+        const response = await this.#withApi(api => api.deleteFile(
           action.owner,
           action.repo,
           action.path,
@@ -3488,7 +3550,9 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           action.sha,
           action.branch,
         ));
-        this.#markActionApproved(action);
+        this.#markActionApproved(action, {
+          commitResult: commitResultFromResponse(response.commit),
+        });
         this.#clearCaches();
         return;
       }
@@ -3665,35 +3729,58 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     return this.#searchPullSummaries(query, pageSize);
   }
 
-  async listBranches(pageSize: number): Promise<Cursor<import("./types").GitHubBranch>> {
-    return new StreamingCursor(pageSize, async (page, perPage) => {
-      const branches = await this.#withApi(api => api.listBranches(this.ctx.props.owner, this.ctx.props.repo, perPage, page));
-      return branches.map(b => ({
-        name: b.name,
-        sha: b.commit.sha,
-        url: b.commit.url,
-      }));
+  async listBranches(pageSize: number): Promise<Cursor<GitHubBranch>> {
+    return new StreamingCursor<GitHubBranch>({
+      fetchPage: async (page, perPage) => {
+        const branches = await this.#withApi(api =>
+          api.listBranches(this.ctx.props.owner, this.ctx.props.repo, perPage, page),
+        );
+        return branches.map(branch => branchFromResponse(branch, this.ctx.props.owner, this.ctx.props.repo));
+      },
+      overlay: branch => branch,
+      filter: () => true,
+      comparator: (a, b) => a.name.localeCompare(b.name),
+      injectedItems: [],
+      pageSize,
     });
   }
 
-  async getBranch(name: string): Promise<import("./types").GitHubBranch> {
+  async getBranch(name: string): Promise<GitHubBranch> {
     const branch = await this.#withApi(api => api.getBranch(this.ctx.props.owner, this.ctx.props.repo, name));
-    return {
-      name: branch.name,
-      sha: branch.commit.sha,
-      url: branch.commit.url,
-    };
+    return branchFromResponse(branch, this.ctx.props.owner, this.ctx.props.repo);
   }
 
-  async readFile(path: string, ref?: string): Promise<import("./types").GitHubFileContent> {
+  async getCommitResult(actionId: number): Promise<GitHubCommit | null> {
+    const record = this.#getActionRecord(actionId);
+    if (!record) {
+      throw new Error(`No GitHub action exists with id ${actionId}.`);
+    }
+    switch (record.state) {
+      case "approved":
+        // The write was applied; return the real commit. (null if the result was never stored,
+        // e.g. for an action type that produces no commit.)
+        return record.commitResult ?? null;
+      case "staged":
+      case "pending":
+        // Still awaiting a decision.
+        return null;
+      case "rejected":
+        throw new Error("The file write was rejected, so no commit was created.");
+    }
+  }
+
+  async readFile(path: string, ref?: string): Promise<GitHubFileContent> {
     const content = await this.#withApi(api => api.getContent(this.ctx.props.owner, this.ctx.props.repo, path, ref));
     if (content.type !== "file") {
       throw new Error(`Path ${path} is not a file (type: ${content.type}).`);
     }
+    if (content.encoding === "none" || content.content === undefined) {
+      throw new Error(`File ${path} is larger than 1 MB, so its content cannot be read via the contents API.`);
+    }
     return {
       path: content.path,
       sha: content.sha,
-      contentBase64: content.content || "",
+      contentBase64: content.content,
     };
   }
 
@@ -3742,7 +3829,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       repo: this.ctx.props.repo,
       path: options.path,
       message: options.message,
-      content: options.contentBase64 ?? btoa(unescape(encodeURIComponent(options.content ?? ""))),
+      content: options.contentBase64 ?? utf8ToBase64(options.content ?? ""),
       branch: options.branch,
       sha: options.sha,
     };
@@ -4043,34 +4130,64 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     return this.#gatekeeper.readFile(path, ref);
   }
 
-  async createBranch(name: string, sha: string): Promise<import("./types").GitHubBranch> {
+  async createBranch(name: string, sha: string): Promise<GitHubBranch> {
     const action = await this.#gatekeeper.prepareCreateBranch(name, sha);
     await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
       title: `Create branch ${name}`,
-      description: `Create branch ${name} pointing to ${sha}.`,
+      description: `Create branch ${name} pointing to ${sha} in ${action.owner}/${action.repo}.`,
       implementsRevert: false,
+      // The gatekeeper doesn't simulate branch creation, so the agent should wait for the
+      // decision before proceeding (otherwise its reads won't reflect the new branch).
+      awaitDecision: true,
     });
-    return { name, sha, url: "" };
+    return { name, sha, url: branchTreeUrl(action.owner, action.repo, name) };
   }
 
-  async writeFile(options: import("./types").GitHubWriteFileOptions): Promise<import("./types").GitHubCommit> {
+  async writeFile(options: GitHubWriteFileOptions): Promise<GitHubCommitHandle> {
     const action = await this.#gatekeeper.prepareWriteFile(options);
+    const preview = (options.content ?? "").slice(0, 200);
     await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
       title: `Write file ${options.path}`,
-      description: `Write file ${options.path} in the GitHub repository.`,
+      description: `Write file ${options.path} in ${action.owner}/${action.repo}` +
+        `${action.branch ? ` on branch ${action.branch}` : " on the default branch"}.` +
+        (options.content !== undefined
+          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\n…" : ""}\n\`\`\``
+          : " Content is provided as base64 (binary)."),
       implementsRevert: false,
+      awaitDecision: true,
     });
-    return { sha: "", url: "" };
+    // The commit is only created on GitHub once the action is approved. Use the returned
+    // handle's getResult() to learn the real commit SHA and URL after the decision.
+    return new GitHubCommitHandleImpl(this.#gatekeeper, action.approvalId);
   }
 
-  async deleteFile(options: import("./types").GitHubDeleteFileOptions): Promise<import("./types").GitHubCommit> {
+  async deleteFile(options: GitHubDeleteFileOptions): Promise<GitHubCommitHandle> {
     const action = await this.#gatekeeper.prepareDeleteFile(options);
     await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
       title: `Delete file ${options.path}`,
-      description: `Delete file ${options.path} from the GitHub repository.`,
+      description: `Delete file ${options.path} from ${action.owner}/${action.repo}` +
+        `${action.branch ? ` on branch ${action.branch}` : " on the default branch"}.`,
       implementsRevert: false,
+      awaitDecision: true,
     });
-    return { sha: "", url: "" };
+    // Same as writeFile: resolve the real commit via getResult() after the decision.
+    return new GitHubCommitHandleImpl(this.#gatekeeper, action.approvalId);
+  }
+}
+
+@validateRpc()
+class GitHubCommitHandleImpl extends RpcTarget implements GitHubCommitHandle {
+  #gatekeeper: GitHubGatekeeperImpl;
+  #actionId: number;
+
+  constructor(gatekeeper: GitHubGatekeeperImpl, actionId: number) {
+    super();
+    this.#gatekeeper = gatekeeper;
+    this.#actionId = actionId;
+  }
+
+  async getResult(): Promise<GitHubCommit | null> {
+    return await this.#gatekeeper.getCommitResult(this.#actionId);
   }
 }
 

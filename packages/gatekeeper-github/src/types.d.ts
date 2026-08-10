@@ -86,12 +86,15 @@ export interface GitHubRepo {
   /**
    * Creates or updates a file in the repository.
    *
-   * To update an existing file, you must provide its current `sha`.
+   * To update an existing file, you must provide its current `sha` (from `readFile`).
+   *
+   * The write is queued for approval and only applied to GitHub after the decision. The
+   * returned handle resolves to the real commit once the write has been applied.
    */
-  writeFile(options: GitHubWriteFileOptions): Promise<GitHubCommit>;
+  writeFile(options: GitHubWriteFileOptions): Promise<GitHubCommitHandle>;
 
-  /** Deletes a file in the repository. */
-  deleteFile(options: GitHubDeleteFileOptions): Promise<GitHubCommit>;
+  /** Deletes a file in the repository. Queued for approval; resolves via the returned handle. */
+  deleteFile(options: GitHubDeleteFileOptions): Promise<GitHubCommitHandle>;
 }
 
 /** A single GitHub issue. */
@@ -196,6 +199,8 @@ export type GitHubRepoRef = {
 export type GitHubRepoMetadata = GitHubRepoRef & {
   description?: string;
   visibility: "public" | "private" | "internal";
+  /** The repository's default branch name (e.g. `main`), when known. */
+  defaultBranch?: string;
 }
 
 /** A GitHub label attached to an issue or pull request. */
@@ -502,14 +507,21 @@ export type GitHubPullRequestMergeOptions = {
 
 export type GitHubBranch = {
   name: string;
+  /** The commit SHA the branch points at. */
   sha: string;
+  /** A GitHub web URL for the branch (e.g. `https://github.com/owner/repo/tree/main`). */
   url: string;
 };
 
 export type GitHubFileContent = {
   path: string;
+  /** The blob SHA of the file. Pass this to `writeFile` when updating an existing file. */
   sha: string;
-  /** The file content encoded in Base64 */
+  /**
+   * The file content encoded in Base64. Decode it to get the raw text/binary content.
+   *
+   * Files larger than 1 MB cannot be read through this API and throw an error instead.
+   */
   contentBase64: string;
 };
 
@@ -535,6 +547,23 @@ export type GitHubDeleteFileOptions = {
   branch?: string;
 };
 
+/**
+ * A handle to a pending `writeFile` or `deleteFile` action.
+ *
+ * The commit is only created on GitHub once the action is approved and applied. Call
+ * `getResult()` to learn the outcome:
+ *
+ * - `null` while the action is still awaiting a decision;
+ * - the real commit (`sha`/`url`) once the write has been applied;
+ * - an error if the action was rejected or can no longer be resolved.
+ */
+export interface GitHubCommitHandle {
+  getResult(): Promise<GitHubCommit | null>;
+}
+
+/**
+ * The result of an applied `writeFile` or `deleteFile` commit.
+ */
 export type GitHubCommit = {
   sha: string;
   url: string;

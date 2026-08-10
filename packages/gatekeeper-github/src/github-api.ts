@@ -24,6 +24,7 @@ export type GitHubRepoResponse = {
   description?: string | null;
   visibility?: "public" | "private" | "internal";
   private?: boolean;
+  default_branch?: string;
   owner: GitHubSimpleUser;
 };
 
@@ -159,7 +160,7 @@ export type GitHubContentResponse = {
   url: string;
   git_url: string;
   html_url: string;
-  download_url: string;
+  download_url: string | null;
 };
 
 export type GitHubCommitResponse = {
@@ -1171,7 +1172,9 @@ export class GitHubApi {
     options: ConditionalRequestOptions = {},
   ): Promise<ConditionalRequestResult<GitHubBranchResponse>> {
     return await this.#conditionalGet<GitHubBranchResponse>(
-      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(branch)}`,
+      // Branch names may contain slashes (e.g. `feature/foo`); encode each segment separately so
+      // the raw slash stays in the URL path, which GitHub's REST API expects.
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${branch.split("/").map(encodeURIComponent).join("/")}`,
       undefined,
       options,
     );
