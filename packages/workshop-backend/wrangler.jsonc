@@ -64,11 +64,13 @@
   "kv_namespaces": [
     {
       "binding": "BLUEPRINTS",
-      "preview_id": "gadgets-blueprint-metadata"
+      "preview_id": "gadgets-blueprint-metadata",
+      "id": "cadafd35bf1549d2b89725d2b6732130"
     },
     {
       "binding": "AVATARS",
-      "preview_id": "gadgets-avatars"
+      "preview_id": "gadgets-avatars",
+      "id": "da3f608204184cef92ff7788c5805518"
     }
   ],
   "r2_buckets": [

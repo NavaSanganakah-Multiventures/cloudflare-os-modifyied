@@ -29,7 +29,8 @@
   "kv_namespaces": [
     {
       "binding": "CONTEXT_COLLECTIONS",
-      "preview_id": "gadgets-context-collections"
+      "preview_id": "gadgets-context-collections",
+      "id": "fef31adef1a64ccc8efcbe22acfba5ff"
     }
   ],
 
