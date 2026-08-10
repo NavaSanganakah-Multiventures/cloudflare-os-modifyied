@@ -101,6 +101,8 @@ jobs:
               process.exit(1);
             }
           }
+          
+          const publicBaseUrl = backendConfig.vars.PUBLIC_BASE_URL || "https://agent.navasanganakah.com";
 
           backendConfig.services = backendConfig.services || [];
           for (const gk of gatekeepers) {
@@ -108,13 +110,18 @@ jobs:
             const gkConfig = parse(fs.readFileSync(gkConfigPath, "utf8"));
             const serviceName = gkConfig.name || gk;
             
+            // Inject BASE_URL for gatekeeper
+            gkConfig.vars = gkConfig.vars || {};
+            const shortName = gk.replace("gatekeeper-", "");
+            gkConfig.vars.BASE_URL = `${publicBaseUrl}/gatekeeper/${shortName}`;
+            
             const binding = {
               binding: bindingName(gk),
               service: serviceName,
               entrypoint: "GatekeeperVendor",
             };
             if (gk === "gatekeeper-context") {
-              binding.props = { sharingDomain: "prod" };
+              binding.props = { sharingDomain: publicBaseUrl };
             }
             backendConfig.services.push(binding);
 
