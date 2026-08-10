@@ -36,7 +36,9 @@ jobs:
       - name: Build project
         run: pnpm run build
 
-      - name: Inject Gatekeeper Bindings
+      - name: Inject Gatekeeper Bindings and Vars
+        env:
+          BACKEND_VARS: ${{ secrets.BACKEND_VARS }}
         run: |
           # We write a small Node.js script to dynamically add all Gatekeepers to the Backend and Router configs.
           # This is necessary because the Router and Backend need to know about all deployed Gatekeepers.
@@ -57,6 +59,20 @@ jobs:
           // 1. Update Backend
           const backendPath = join("packages", "workshop-backend", "wrangler.jsonc");
           const backendConfig = parse(fs.readFileSync(backendPath, "utf8"));
+          
+          // Inject Variables
+          backendConfig.vars = backendConfig.vars || {};
+          if (process.env.BACKEND_VARS) {
+            try {
+              const userVars = JSON.parse(process.env.BACKEND_VARS);
+              Object.assign(backendConfig.vars, userVars);
+              console.log("Injected vars from BACKEND_VARS:", Object.keys(userVars));
+            } catch (e) {
+              console.error("Failed to parse BACKEND_VARS as JSON:", e.message);
+              process.exit(1);
+            }
+          }
+
           backendConfig.services = backendConfig.services || [];
           for (const gk of gatekeepers) {
             const gkConfigPath = join("packages", gk, "wrangler.jsonc");
