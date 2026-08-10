@@ -73,6 +73,9 @@ import type {
   GitHubRepoRef,
   GitHubReviewDecision,
   GitHubWriteFileOptions,
+  GitHubProposeFileChangeOptions,
+  GitHubProposeFileDeletionOptions,
+  GitHubProposedChangeResult,
 } from "./types";
 import TYPES_CODE from "./types.txt";
 import {
@@ -320,6 +323,38 @@ const OAUTH_SCOPES = ["repo", "read:user", "user:email"];
 // the resulting grant is transient.
 const AUTH_SCOPES = ["read:user", "user:email"];
 
+/** Validates that a branch name is legal for GitHub. */
+function validateBranchName(name: string): void {
+  if (name.length === 0 || name.length > 255) {
+    throw new Error(`Branch name must be between 1 and 255 characters: ${name}`);
+  }
+  if (
+    name.startsWith("/") ||
+    name.endsWith("/") ||
+    name.endsWith(".") ||
+    name === "@" ||
+    name.includes("..") ||
+    name.includes("~") ||
+    name.includes("^") ||
+    name.includes(":") ||
+    name.includes("\\") ||
+    name.includes(" ") ||
+    name.includes("\t") ||
+    name.includes("//") ||
+    name.includes("@{")
+  ) {
+    throw new Error(`Invalid GitHub branch name: ${name}`);
+  }
+  if (/[\x00-\x20\x7F]/.test(name)) {
+    throw new Error(`Branch name contains control characters: ${name}`);
+  }
+}
+
+/** Returns the default branch name, falling back to "main" when unknown. */
+function defaultBranchFromMetadata(metadata: GitHubRepoMetadata): string {
+  return metadata.defaultBranch ?? "main";
+}
+
 // Action kinds for repository file mutations.
 const WRITE_REPO_FILE_ACTION: ActionKind = {
   tag: "githubRepoWriteFile",
@@ -471,7 +506,7 @@ function branchFromResponse(branch: GitHubBranchResponse, owner: string, repo: s
 function commitResultFromResponse(commit: GitHubCommitResponse["commit"]): GitHubCommit {
   return {
     sha: commit.sha,
-    // html_url is the web URL (https://github.com/owner/repo/commit/Ã¢ÂÂ¦); url is the API URL.
+    // html_url is the web URL (https://github.com/owner/repo/commit/ÃÂ¢ÃÂÃÂ¦); url is the API URL.
     url: commit.html_url ?? commit.url,
   };
 }
@@ -1444,7 +1479,7 @@ export class GitHubVerifier extends WorkerEntrypoint<Env, GitHubVerifierProps>
       return true;
     } catch (error) {
       // GitHub returns 404 for private repos the token cannot see (to avoid leaking existence), and
-      // 403 in some org-policy cases Ã¢ÂÂ either way the observer lacks read access.
+      // 403 in some org-policy cases ÃÂ¢ÃÂÃÂ either way the observer lacks read access.
       if (error instanceof GitHubApiError && (error.status === 404 || error.status === 403)) {
         return false;
       }
@@ -2985,7 +3020,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           if (reviewBuf.length < 100) reviewsDone = true;
         }
 
-        // Both sources empty Ã¢ÂÂ done.
+        // Both sources empty ÃÂ¢ÃÂÃÂ done.
         if (commentBuf.length === 0 && reviewBuf.length === 0) break;
 
         // Take the entry with the earlier createdAt.
@@ -4014,8 +4049,8 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     };
   }
 
-  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding Ã¢ÂÂ repo,
-  // issue, or pull request Ã¢ÂÂ is scoped to one repository, and issues/PRs inherit the repo's
+  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding ÃÂ¢ÃÂÃÂ repo,
+  // issue, or pull request ÃÂ¢ÃÂÃÂ is scoped to one repository, and issues/PRs inherit the repo's
   // permissions, so the repository is the atomic ACL unit. To admit an observer we simply confirm
   // they can read that repo, using their own token via the verifier (see GitHubVerifier).
   //
@@ -4176,6 +4211,15 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
   }
 
   async writeFile(options: GitHubWriteFileOptions): Promise<GitHubCommitHandle> {
+    const metadata = await this.getMetadata();
+    const defaultBranch = defaultBranchFromMetadata(metadata);
+    const targetBranch = options.branch ?? defaultBranch;
+    if (targetBranch === defaultBranch) {
+      throw new Error(
+        `Direct writes to the default branch (${defaultBranch}) are not allowed. ` +
+        `Use proposeFileChange() to create a feature branch and pull request.`
+      );
+    }
     const action = await this.#gatekeeper.prepareWriteFile(options);
     const preview = (options.content ?? "").slice(0, 200);
     await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
@@ -4183,7 +4227,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Write file ${options.path} in ${action.owner}/${action.repo}` +
         `${action.branch ? ` on branch ${action.branch}` : " on the default branch"}.` +
         (options.content !== undefined
-          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\nÃ¢ÂÂ¦" : ""}\n\`\`\``
+          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\nÃÂ¢ÃÂÃÂ¦" : ""}\n\`\`\``
           : " Content is provided as base64 (binary)."),
       implementsRevert: false,
       awaitDecision: true,
@@ -4196,6 +4240,15 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
   }
 
   async deleteFile(options: GitHubDeleteFileOptions): Promise<GitHubCommitHandle> {
+    const metadata = await this.getMetadata();
+    const defaultBranch = defaultBranchFromMetadata(metadata);
+    const targetBranch = options.branch ?? defaultBranch;
+    if (targetBranch === defaultBranch) {
+      throw new Error(
+        `Direct deletes from the default branch (${defaultBranch}) are not allowed. ` +
+        `Use proposeFileDeletion() to create a feature branch and pull request.`
+      );
+    }
     const action = await this.#gatekeeper.prepareDeleteFile(options);
     await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
       title: `Delete file ${options.path}`,
@@ -4207,6 +4260,64 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     });
     // Same as writeFile: resolve the real commit via getResult() after the decision.
     return new GitHubCommitHandleImpl(this.#gatekeeper, action.approvalId);
+  }
+
+  async proposeFileChange(options: GitHubProposeFileChangeOptions): Promise<GitHubProposedChangeResult> {
+    validateBranchName(options.branchName);
+    const metadata = await this.getMetadata();
+    const defaultBranch = defaultBranchFromMetadata(metadata);
+    if (options.branchName === defaultBranch) {
+      throw new Error(`Branch name cannot be the default branch (${defaultBranch}).`);
+    }
+
+    const defaultBranchRef = await this.getBranch(defaultBranch);
+    const branch = await this.createBranch(options.branchName, defaultBranchRef.sha);
+
+    const commitHandle = await this.writeFile({
+      path: options.path,
+      message: options.message,
+      content: options.content,
+      contentBase64: options.contentBase64,
+      branch: options.branchName,
+      sha: options.sha,
+    });
+
+    const pullRequest = await this.createPullRequest({
+      title: options.prTitle ?? options.message,
+      head: options.branchName,
+      base: defaultBranch,
+      bodyMarkdown: options.prBody ?? `Proposed change to ${options.path}.`,
+    });
+
+    return { branch, commitHandle, pullRequest };
+  }
+
+  async proposeFileDeletion(options: GitHubProposeFileDeletionOptions): Promise<GitHubProposedChangeResult> {
+    validateBranchName(options.branchName);
+    const metadata = await this.getMetadata();
+    const defaultBranch = defaultBranchFromMetadata(metadata);
+    if (options.branchName === defaultBranch) {
+      throw new Error(`Branch name cannot be the default branch (${defaultBranch}).`);
+    }
+
+    const defaultBranchRef = await this.getBranch(defaultBranch);
+    const branch = await this.createBranch(options.branchName, defaultBranchRef.sha);
+
+    const commitHandle = await this.deleteFile({
+      path: options.path,
+      message: options.message,
+      sha: options.sha,
+      branch: options.branchName,
+    });
+
+    const pullRequest = await this.createPullRequest({
+      title: options.prTitle ?? options.message,
+      head: options.branchName,
+      base: defaultBranch,
+      bodyMarkdown: options.prBody ?? `Proposed deletion of ${options.path}.`,
+    });
+
+    return { branch, commitHandle, pullRequest };
   }
 }
 
