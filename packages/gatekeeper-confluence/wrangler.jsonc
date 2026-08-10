@@ -1,5 +1,5 @@
 {
-  "name": "gatekeeper-confluence",
+  "name": "cloudflareos-gk-confluence",
   "main": ".wrangler/validate/src/confluence.ts",
   "build": {
     "command": "pnpm exec capnweb-validate build --out .wrangler/validate",

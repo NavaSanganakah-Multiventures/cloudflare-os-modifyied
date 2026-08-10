@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "workshop-backend",
+  "name": "cloudflareos-backend",
   "main": ".wrangler/validate/src/server.ts",
   "build": {
     "command": "pnpm run build:worker",

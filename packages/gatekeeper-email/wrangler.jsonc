@@ -1,5 +1,5 @@
 {
-  "name": "gatekeeper-email",
+  "name": "cloudflareos-gk-email",
   "main": ".wrangler/validate/src/email.ts",
   "build": {
     "command": "pnpm exec capnweb-validate build --out .wrangler/validate",

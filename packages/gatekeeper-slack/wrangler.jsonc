@@ -1,5 +1,5 @@
 {
-  "name": "gatekeeper-slack",
+  "name": "cloudflareos-gk-slack",
   "main": ".wrangler/validate/src/slack.ts",
   "build": {
     "command": "pnpm exec capnweb-validate build --out .wrangler/validate",

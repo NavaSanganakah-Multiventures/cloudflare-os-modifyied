@@ -1,5 +1,5 @@
 {
-  "name": "gatekeeper-github",
+  "name": "cloudflareos-gk-github",
   "main": ".wrangler/validate/src/github.ts",
   "build": {
     "command": "pnpm exec capnweb-validate build --out .wrangler/validate",

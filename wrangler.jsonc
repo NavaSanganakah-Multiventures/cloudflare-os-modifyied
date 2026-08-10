@@ -11,7 +11,7 @@
   "services": [
     {
       "binding": "WORKSHOP_BACKEND",
-      "service": "workshop-backend"
+      "service": "cloudflareos-backend"
     }
   ]
 }

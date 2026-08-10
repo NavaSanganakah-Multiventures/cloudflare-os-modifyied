@@ -1,5 +1,5 @@
 {
-  "name": "gatekeeper-google",
+  "name": "cloudflareos-gk-google",
   "main": ".wrangler/validate/src/google.ts",
   "build": {
     "command": "pnpm exec capnweb-validate build --out .wrangler/validate",

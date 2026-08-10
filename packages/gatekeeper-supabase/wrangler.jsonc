@@ -1,5 +1,5 @@
 {
-  "name": "gatekeeper-supabase",
+  "name": "cloudflareos-gk-supabase",
   "main": ".wrangler/validate/src/supabase.ts",
   "build": {
     "command": "pnpm exec capnweb-validate build --out .wrangler/validate",

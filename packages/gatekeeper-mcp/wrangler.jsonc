@@ -1,5 +1,5 @@
 {
-  "name": "gatekeeper-mcp",
+  "name": "cloudflareos-gk-mcp",
   "main": ".wrangler/validate/src/mcp.ts",
   "build": {
     "command": "pnpm exec capnweb-validate build --out .wrangler/validate",

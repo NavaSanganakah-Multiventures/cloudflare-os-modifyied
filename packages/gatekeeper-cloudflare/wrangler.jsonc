@@ -1,5 +1,5 @@
 {
-  "name": "gatekeeper-cloudflare",
+  "name": "cloudflareos-gk-cloudflare",
   "main": ".wrangler/validate/src/cloudflare.ts",
   "build": {
     "command": "pnpm exec capnweb-validate build --out .wrangler/validate",

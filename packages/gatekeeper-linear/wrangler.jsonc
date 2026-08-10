@@ -1,5 +1,5 @@
 {
-  "name": "gatekeeper-linear",
+  "name": "cloudflareos-gk-linear",
   "main": ".wrangler/validate/src/linear.ts",
   "build": {
     "command": "pnpm exec capnweb-validate build --out .wrangler/validate",

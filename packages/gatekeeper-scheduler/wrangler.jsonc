@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "gatekeeper-scheduler",
+  "name": "cloudflareos-gk-scheduler",
   "main": ".wrangler/validate/src/worker.ts",
   "build": {
     "command": "pnpm exec capnweb-validate build --out .wrangler/validate",

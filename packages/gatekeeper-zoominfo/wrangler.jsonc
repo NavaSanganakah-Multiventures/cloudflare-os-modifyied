@@ -1,5 +1,5 @@
 {
-  "name": "gatekeeper-zoominfo",
+  "name": "cloudflareos-gk-zoominfo",
   "main": ".wrangler/validate/src/zoominfo.ts",
   "build": {
     "command": "pnpm exec capnweb-validate build --out .wrangler/validate",

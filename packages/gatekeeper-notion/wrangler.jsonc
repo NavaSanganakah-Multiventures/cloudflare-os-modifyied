@@ -1,5 +1,5 @@
 {
-  "name": "gatekeeper-notion",
+  "name": "cloudflareos-gk-notion",
   "main": ".wrangler/validate/src/notion.ts",
   "build": {
     "command": "pnpm exec capnweb-validate build --out .wrangler/validate",

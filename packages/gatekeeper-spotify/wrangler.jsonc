@@ -1,5 +1,5 @@
 {
-  "name": "gatekeeper-spotify",
+  "name": "cloudflareos-gk-spotify",
   "main": ".wrangler/validate/src/spotify.ts",
   "build": {
     "command": "pnpm exec capnweb-validate build --out .wrangler/validate",
