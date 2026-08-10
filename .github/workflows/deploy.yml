@@ -36,22 +36,51 @@ jobs:
       - name: Build project
         run: pnpm run build
 
-      - name: Inject Gatekeeper Bindings and Vars
+      - name: Inject Gatekeeper Bindings, Vars, and KV IDs
         env:
           BACKEND_VARS: ${{ secrets.BACKEND_VARS }}
         run: |
           # We write a small Node.js script to dynamically add all Gatekeepers to the Backend and Router configs.
-          # This is necessary because the Router and Backend need to know about all deployed Gatekeepers.
+          # It also auto-connects KV namespaces by fetching them from Cloudflare.
           cat << 'EOF' > inject-bindings.mjs
           import fs from "node:fs";
           import { join } from "node:path";
           import { parse } from "jsonc-parser";
+          import { execSync } from "node:child_process";
 
           const gatekeepers = fs.readdirSync("packages")
             .filter(n => n.startsWith("gatekeeper-") && fs.existsSync(join("packages", n, "wrangler.jsonc")));
 
           function bindingName(gk) {
             return gk.toUpperCase().replaceAll("-", "_");
+          }
+
+          console.log("Fetching KV namespaces from Cloudflare...");
+          let kvNamespaces = [];
+          try {
+            const kvOutput = execSync("npx wrangler kv:namespace list", { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] });
+            kvNamespaces = JSON.parse(kvOutput);
+          } catch (e) {
+            console.warn("Could not fetch KV namespaces (maybe none exist yet).");
+          }
+
+          function injectKvIds(config, name) {
+            if (!config.kv_namespaces) return;
+            for (const kv of config.kv_namespaces) {
+              if (kv.id) continue;
+              const searchStr1 = (kv.preview_id || "").toLowerCase();
+              const searchStr2 = (kv.binding || "").toLowerCase();
+              const match = kvNamespaces.find(n => 
+                (searchStr1 && n.title.toLowerCase().includes(searchStr1)) || 
+                (searchStr2 && n.title.toLowerCase().includes(searchStr2))
+              );
+              if (match) {
+                console.log(`[${name}] Auto-connected KV ${kv.binding} -> ${match.id} (${match.title})`);
+                kv.id = match.id;
+              } else {
+                console.warn(`[${name}] WARNING: Could not find existing KV namespace for binding ${kv.binding}`);
+              }
+            }
           }
 
           console.log("Injecting bindings for:", gatekeepers);
@@ -88,7 +117,14 @@ jobs:
               binding.props = { sharingDomain: "prod" };
             }
             backendConfig.services.push(binding);
+
+            // Also auto-connect KV for gatekeepers
+            injectKvIds(gkConfig, gk);
+            fs.writeFileSync(gkConfigPath, JSON.stringify(gkConfig, null, 2));
           }
+          
+          // Auto-connect KV for backend
+          injectKvIds(backendConfig, "workshop-backend");
           fs.writeFileSync(backendPath, JSON.stringify(backendConfig, null, 2));
 
           // 2. Update Router
