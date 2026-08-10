@@ -155,10 +155,10 @@ jobs:
                 try {
                   execSync(`npx wrangler secret put ${key} --name ${serviceName}`, {
                     input: secretValue,
-                    stdio: ['pipe', 'inherit', 'ignore']
+                    stdio: ['pipe', 'inherit', 'inherit']
                   });
                 } catch (err) {
-                  console.error(`Failed to set secret ${key} for ${serviceName}`);
+                  console.error(`Failed to set secret ${key} for ${serviceName}: ${err.message}`);
                 }
               }
             }
