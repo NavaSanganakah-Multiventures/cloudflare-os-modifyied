@@ -103,6 +103,21 @@ export interface GitHubRepo {
 
   /** Deletes a file in the repository. Queued for approval; resolves via the returned handle. */
   deleteFile(options: GitHubDeleteFileOptions): Promise<GitHubCommitHandle>;
+
+  /**
+   * Proposes a file change by creating a feature branch, writing the file on that branch,
+   * and opening a pull request back to the default branch.
+   *
+   * The AI agent chooses a meaningful branch name. All side effects (branch creation, file
+   * write, and pull request creation) pass through the approval queue.
+   */
+  proposeFileChange(options: GitHubProposeFileChangeOptions): Promise<GitHubProposedChangeResult>;
+
+  /**
+   * Proposes a file deletion by creating a feature branch, deleting the file on that branch,
+   * and opening a pull request back to the default branch.
+   */
+  proposeFileDeletion(options: GitHubProposeFileDeletionOptions): Promise<GitHubProposedChangeResult>;
 }
 
 /** A single GitHub issue. */
@@ -538,6 +553,67 @@ export type GitHubFileContent = {
    * Files larger than 1 MB cannot be read through this API and throw an error instead.
    */
   contentBase64: string;
+};
+
+export type GitHubProposeFileChangeOptions = {
+  /** Name of the feature branch to create. Chosen by the agent to describe the change. */
+  branchName: string;
+
+  /** Path of the file to create or update. */
+  path: string;
+
+  /** Commit message for the file change. */
+  message: string;
+
+  /** The content to write, as a standard string. */
+  content?: string;
+
+  /** Alternatively, provide base64 content for binary files. */
+  contentBase64?: string;
+
+  /**
+   * The blob SHA of the file being replaced. Required when updating an existing file;
+   * omit when creating a new file. The agent can obtain this by calling readFile() on
+   * the default branch first.
+   */
+  sha?: string;
+
+  /** Optional pull request title. Defaults to the commit message. */
+  prTitle?: string;
+
+  /** Optional pull request body. */
+  prBody?: string;
+};
+
+export type GitHubProposeFileDeletionOptions = {
+  /** Name of the feature branch to create. */
+  branchName: string;
+
+  /** Path of the file to delete. */
+  path: string;
+
+  /** Commit message for the deletion. */
+  message: string;
+
+  /** The blob SHA of the file being deleted. Obtain via readFile() on the default branch. */
+  sha: string;
+
+  /** Optional pull request title. Defaults to the commit message. */
+  prTitle?: string;
+
+  /** Optional pull request body. */
+  prBody?: string;
+};
+
+export type GitHubProposedChangeResult = {
+  /** The newly created feature branch. */
+  branch: GitHubBranch;
+
+  /** Handle to the pending file-write/delete commit. */
+  commitHandle: GitHubCommitHandle;
+
+  /** The newly created pull request. */
+  pullRequest: GitHubPullRequest;
 };
 
 export type GitHubWriteFileOptions = {
