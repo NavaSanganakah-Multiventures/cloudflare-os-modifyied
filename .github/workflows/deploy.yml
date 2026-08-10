@@ -38,8 +38,7 @@ jobs:
 
       - name: Inject Gatekeeper Bindings, Vars, KV IDs, and Secrets
         env:
-          BACKEND_VARS: ${{ secrets.BACKEND_VARS }}
-          GATEKEEPER_SECRETS: ${{ secrets.GATEKEEPER_SECRETS }}
+          ALL_SECRETS: ${{ toJSON(secrets) }}
         run: |
           # We write a small Node.js script to dynamically add all Gatekeepers to the Backend and Router configs.
           # It also auto-connects KV namespaces by fetching them from Cloudflare and sets Secrets.
@@ -86,36 +85,39 @@ jobs:
 
           console.log("Injecting bindings for:", gatekeepers);
 
+          // Parse All GitHub Secrets
+          let allSecrets = {};
+          if (process.env.ALL_SECRETS) {
+            try {
+              allSecrets = JSON.parse(process.env.ALL_SECRETS);
+            } catch (e) {
+              console.error("Failed to parse ALL_SECRETS as JSON:", e.message);
+            }
+          }
+
           // 1. Update Backend
           const backendPath = join("packages", "workshop-backend", "wrangler.jsonc");
           const backendConfig = parse(fs.readFileSync(backendPath, "utf8"));
           
-          // Inject Variables
           backendConfig.vars = backendConfig.vars || {};
-          if (process.env.BACKEND_VARS) {
-            try {
-              const userVars = JSON.parse(process.env.BACKEND_VARS);
-              Object.assign(backendConfig.vars, userVars);
-              console.log("Injected vars from BACKEND_VARS:", Object.keys(userVars));
-            } catch (e) {
-              console.error("Failed to parse BACKEND_VARS as JSON:", e.message);
-              process.exit(1);
+          
+          // Inject standard Backend Vars from separate GitHub Secrets
+          const backendVarsList = [
+            "ADMINS", "PUBLIC_BASE_URL", "AUTH_GATEKEEPERS", "DISABLE_PASSWORD_AUTH",
+            "CF_AI_GATEWAY", "CF_AI_GATEWAY_ACCOUNT_ID", "CF_AI_GATEWAY_API_TOKEN", "CF_AI_GATEWAY_PROVIDERS",
+            "DAILY_LLM_CALL_LIMIT", "ENABLE_CLOUDFLARE_LIMITS", "MINIMUM_CLOUDFLARE_BALANCE", "CF_ACCESS_AUD"
+          ];
+          for (const key of backendVarsList) {
+            if (allSecrets[key]) {
+              backendConfig.vars[key] = allSecrets[key];
+              console.log(`Injected backend var: ${key}`);
             }
           }
           
           const publicBaseUrl = backendConfig.vars.PUBLIC_BASE_URL || "https://agent.navasanganakah.com";
+          backendConfig.vars.PUBLIC_BASE_URL = publicBaseUrl;
 
           backendConfig.services = backendConfig.services || [];
-          
-          // Parse Gatekeeper Secrets
-          let gkSecretsData = {};
-          if (process.env.GATEKEEPER_SECRETS) {
-            try {
-              gkSecretsData = JSON.parse(process.env.GATEKEEPER_SECRETS);
-            } catch (e) {
-              console.error("Failed to parse GATEKEEPER_SECRETS as JSON:", e.message);
-            }
-          }
 
           for (const gk of gatekeepers) {
             const gkConfigPath = join("packages", gk, "wrangler.jsonc");
@@ -141,14 +143,18 @@ jobs:
             injectKvIds(gkConfig, gk);
             fs.writeFileSync(gkConfigPath, JSON.stringify(gkConfig, null, 2));
 
-            // Inject Secrets if provided
-            const secretsForGk = gkSecretsData[gk];
-            if (secretsForGk) {
-              for (const [key, value] of Object.entries(secretsForGk)) {
-                console.log(`Setting secret ${key} for ${serviceName}...`);
+            // Inject OAuth Secrets using individual GitHub Secrets (e.g. GITHUB_CLIENT_ID)
+            const prefix = shortName.toUpperCase().replace("-", "_"); // e.g. GITHUB, MCP_PORTAL
+            const secretsToCheck = ["CLIENT_ID", "CLIENT_SECRET", "SIGNING_SECRET", "WEBHOOK_SECRET"];
+            
+            for (const key of secretsToCheck) {
+              const secretName = `${prefix}_${key}`; // e.g. GITHUB_CLIENT_ID
+              const secretValue = allSecrets[secretName];
+              if (secretValue) {
+                console.log(`Setting secret ${key} for ${serviceName} (from ${secretName})...`);
                 try {
                   execSync(`npx wrangler secret put ${key} --name ${serviceName}`, {
-                    input: value,
+                    input: secretValue,
                     stdio: ['pipe', 'inherit', 'ignore']
                   });
                 } catch (err) {
