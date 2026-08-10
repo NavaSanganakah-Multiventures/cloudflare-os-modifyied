@@ -4,6 +4,7 @@ import {
   ApprovalQueue,
   stripTrailingSlashes,
   type ActionDescription,
+  type ActionKind,
   type AccountDescription,
   type Cursor,
   type Gatekeeper,
@@ -319,6 +320,12 @@ const OAUTH_SCOPES = ["repo", "read:user", "user:email"];
 // the resulting grant is transient.
 const AUTH_SCOPES = ["read:user", "user:email"];
 
+// Auto-approvable action kind for file writes/deletes in a connected repository.
+const REPO_FILE_ACTION: ActionKind = {
+  tag: "githubRepoFile",
+  label: "Repository file changes",
+};
+
 const REPO_RESOURCE: SupportedResource = {
   urlPattern: "https://github.com/:owner/:repo",
   title: "GitHub Repository",
@@ -460,7 +467,7 @@ function branchFromResponse(branch: GitHubBranchResponse, owner: string, repo: s
 function commitResultFromResponse(commit: GitHubCommitResponse["commit"]): GitHubCommit {
   return {
     sha: commit.sha,
-    // html_url is the web URL (https://github.com/owner/repo/commit/…); url is the API URL.
+    // html_url is the web URL (https://github.com/owner/repo/commit/â¦); url is the API URL.
     url: commit.html_url ?? commit.url,
   };
 }
@@ -1433,7 +1440,7 @@ export class GitHubVerifier extends WorkerEntrypoint<Env, GitHubVerifierProps>
       return true;
     } catch (error) {
       // GitHub returns 404 for private repos the token cannot see (to avoid leaking existence), and
-      // 403 in some org-policy cases — either way the observer lacks read access.
+      // 403 in some org-policy cases â either way the observer lacks read access.
       if (error instanceof GitHubApiError && (error.status === 404 || error.status === 403)) {
         return false;
       }
@@ -2974,7 +2981,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           if (reviewBuf.length < 100) reviewsDone = true;
         }
 
-        // Both sources empty → done.
+        // Both sources empty â done.
         if (commentBuf.length === 0 && reviewBuf.length === 0) break;
 
         // Take the entry with the earlier createdAt.
@@ -3299,8 +3306,8 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     return TYPES_CODE;
   }
 
-  async getAutoApprovableActions() {
-    return [];
+  async getAutoApprovableActions(): Promise<ActionKind[]> {
+    return [REPO_FILE_ACTION];
   }
 
   async submitActionForApproval(
@@ -4003,8 +4010,8 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     };
   }
 
-  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding — repo,
-  // issue, or pull request — is scoped to one repository, and issues/PRs inherit the repo's
+  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding â repo,
+  // issue, or pull request â is scoped to one repository, and issues/PRs inherit the repo's
   // permissions, so the repository is the atomic ACL unit. To admit an observer we simply confirm
   // they can read that repo, using their own token via the verifier (see GitHubVerifier).
   //
@@ -4172,10 +4179,12 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Write file ${options.path} in ${action.owner}/${action.repo}` +
         `${action.branch ? ` on branch ${action.branch}` : " on the default branch"}.` +
         (options.content !== undefined
-          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\n…" : ""}\n\`\`\``
+          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\nâ¦" : ""}\n\`\`\``
           : " Content is provided as base64 (binary)."),
       implementsRevert: false,
       awaitDecision: true,
+      actionKind: REPO_FILE_ACTION,
+      autoApprovable: true,
     });
     // The commit is only created on GitHub once the action is approved. Use the returned
     // handle's getResult() to learn the real commit SHA and URL after the decision.
@@ -4190,6 +4199,8 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
         `${action.branch ? ` on branch ${action.branch}` : " on the default branch"}.`,
       implementsRevert: false,
       awaitDecision: true,
+      actionKind: REPO_FILE_ACTION,
+      autoApprovable: true,
     });
     // Same as writeFile: resolve the real commit via getResult() after the decision.
     return new GitHubCommitHandleImpl(this.#gatekeeper, action.approvalId);
