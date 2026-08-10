@@ -83,6 +83,14 @@ export interface GitHubRepo {
   /** Reads a file's content from the repository at a specific revision or branch. */
   readFile(path: string, ref?: string): Promise<GitHubFileContent>;
 
+  /** 
+   * Lists the contents of a directory in the repository.
+   * 
+   * Returns an array of files, directories, and symlinks contained within the specified path.
+   * To list the root directory, pass an empty string `""` or `"/"` as the path.
+   */
+  listDirectory(path: string, ref?: string): Promise<GitHubDirectoryEntry[]>;
+
   /**
    * Creates or updates a file in the repository.
    *
@@ -511,6 +519,13 @@ export type GitHubBranch = {
   sha: string;
   /** A GitHub web URL for the branch (e.g. `https://github.com/owner/repo/tree/main`). */
   url: string;
+};
+
+export type GitHubDirectoryEntry = {
+  name: string;
+  path: string;
+  sha: string;
+  type: "file" | "dir" | "symlink" | "submodule";
 };
 
 export type GitHubFileContent = {

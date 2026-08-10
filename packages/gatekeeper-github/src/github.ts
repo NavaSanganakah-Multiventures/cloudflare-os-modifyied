@@ -3784,6 +3784,19 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     };
   }
 
+  async listDirectory(path: string, ref?: string): Promise<import("./types").GitHubDirectoryEntry[]> {
+    const contents = await this.#withApi(api => api.listDirectory(this.ctx.props.owner, this.ctx.props.repo, path, ref));
+    if (!Array.isArray(contents)) {
+      throw new Error(`Path '${path}' is a file, not a directory. Use readFile() instead.`);
+    }
+    return contents.map(item => ({
+      name: item.name,
+      path: item.path,
+      sha: item.sha,
+      type: item.type as "file" | "dir" | "symlink" | "submodule",
+    }));
+  }
+
   async prepareCreateIssue(options: GitHubCreateIssueOptions): Promise<CreateIssueAction> {
     return {
       type: "createIssue",
@@ -4128,6 +4141,14 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Read file ${path} at ${ref ?? "the default branch"} in the GitHub repository.`,
     });
     return this.#gatekeeper.readFile(path, ref);
+  }
+
+  async listDirectory(path: string, ref?: string): Promise<import("./types").GitHubDirectoryEntry[]> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `List directory ${path}`,
+      description: `List contents of directory ${path || "/"} at ${ref ?? "the default branch"} in the GitHub repository.`,
+    });
+    return this.#gatekeeper.listDirectory(path, ref);
   }
 
   async createBranch(name: string, sha: string): Promise<GitHubBranch> {

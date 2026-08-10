@@ -1208,6 +1208,33 @@ export class GitHubApi {
     return result.data;
   }
 
+  async listDirectory(
+    owner: string,
+    repo: string,
+    path: string,
+    ref?: string,
+  ): Promise<GitHubContentResponse[]> {
+    const result = await this.listDirectoryConditional(owner, repo, path, ref);
+    if (result.status === 304) {
+      throw new Error("GitHub unexpectedly returned 304 for an unconditional list directory request.");
+    }
+    return result.data;
+  }
+
+  async listDirectoryConditional(
+    owner: string,
+    repo: string,
+    path: string,
+    ref?: string,
+    options: ConditionalRequestOptions = {},
+  ): Promise<ConditionalRequestResult<GitHubContentResponse[]>> {
+    return await this.#conditionalGet<GitHubContentResponse[]>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path.replace(/^\/+/, "")}`,
+      ref ? { ref } : undefined,
+      options,
+    );
+  }
+
   async getContentConditional(
     owner: string,
     repo: string,
