@@ -19,15 +19,16 @@ function makeStorage(): AutoApprovalStorage {
 const GK = 1;
 const ENABLER: AiChatAuthorInfo = { type: "user", id: "enabler@example.com", name: "Enabler" };
 
-function enableRule(storage: AutoApprovalStorage, actionTag = "edit", gatekeeperId = GK) {
+function enableRule(storage: AutoApprovalStorage, actionTag = "edit", gatekeeperId = GK,
+    branchPatterns?: string[]) {
   storage.autoApproveTags.put({
-    gatekeeperId, actionKind: { tag: actionTag, label: "Edits" }, enabledBy: ENABLER });
+    gatekeeperId, actionKind: { tag: actionTag, label: "Edits" }, enabledBy: ENABLER, branchPatterns });
 }
 
 function putAction(
     storage: AutoApprovalStorage, id: number,
     opts: { gatekeeperId?: number; actionTag?: string; autoApprovable?: boolean;
-            state?: ActionRecord["state"] } = {}) {
+            state?: ActionRecord["state"]; branchRef?: string } = {}) {
   storage.actions.put({
     id,
     gatekeeperId: opts.gatekeeperId ?? GK,
@@ -42,6 +43,7 @@ function putAction(
       implementsRevert: true,
       actionKind: { tag: opts.actionTag ?? "edit", label: "Edits" },
       autoApprovable: opts.autoApprovable ?? true,
+      branchRef: opts.branchRef,
     },
   });
 }
@@ -210,5 +212,35 @@ describe("AutoApprovalDrainer.drain", () => {
     expect(apply.calls).toEqual([1, 2]);
     expect(getAction(storage, 1).state).toBe("approved");
     expect(getAction(storage, 2).state).toBe("approved");
+  });
+
+  it("respects branch patterns on auto-approval rules", async () => {
+    let storage = makeStorage();
+    enableRule(storage, "edit", GK, ["feature/*", "*", "!main"]);
+
+    putAction(storage, 1, { branchRef: "feature/auto-approval" });
+    putAction(storage, 2, { branchRef: "main" });
+    putAction(storage, 3, { branchRef: "random-branch" });
+
+    let { applyFn, calls } = makeImmediateApply(storage);
+    await new AutoApprovalDrainer(storage, applyFn).drain(GK);
+
+    expect(calls).toEqual([1, 3]);
+    expect(getAction(storage, 1).state).toBe("approved");
+    expect(getAction(storage, 2).state).toBe("pending");
+    expect(getAction(storage, 3).state).toBe("approved");
+  });
+
+  it("treats a rule without branch patterns as matching any branch", async () => {
+    let storage = makeStorage();
+    enableRule(storage);
+
+    putAction(storage, 1, { branchRef: "feature/foo" });
+    putAction(storage, 2, { branchRef: "main" });
+
+    let { applyFn, calls } = makeImmediateApply(storage);
+    await new AutoApprovalDrainer(storage, applyFn).drain(GK);
+
+    expect(calls).toEqual([1, 2]);
   });
 });
