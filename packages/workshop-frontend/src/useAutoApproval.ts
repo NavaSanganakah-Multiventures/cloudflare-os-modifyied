@@ -24,6 +24,7 @@ export function useAutoApproval(overseer: RpcStub<Overseer> | null) {
   const toasts = useKumoToastManager()
   const [catalog, setCatalog] = useState<PreApprovableAction[]>([])
   const [rules, setRules] = useState<Array<{ gatekeeperId: number; actionKind: ActionKind; branchPatterns?: string[] }>>([])
+  const [defaultPatterns, setDefaultPatternsState] = useState<string[] | undefined>(undefined)
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
   const [pending, setPending] = useState<Set<string>>(new Set())
@@ -39,9 +40,10 @@ export function useAutoApproval(overseer: RpcStub<Overseer> | null) {
       return
     }
 
-    const [catalogResult, rulesResult] = await Promise.allSettled([
+    const [catalogResult, rulesResult, patternsResult] = await Promise.allSettled([
       overseer.listPreApprovableActions(),
       overseer.listAutoApprovedActionKinds(),
+      overseer.getDefaultAutoApproveBranchPatterns(),
     ])
 
     if (generation !== refreshGeneration.current) return
@@ -61,6 +63,12 @@ export function useAutoApproval(overseer: RpcStub<Overseer> | null) {
       failed = true
       setRules([])
       console.error('Failed to load auto-approval rules:', rulesResult.reason)
+    }
+
+    if (patternsResult.status === 'fulfilled') {
+      setDefaultPatternsState(patternsResult.value)
+    } else {
+      console.error('Failed to load default auto-approval patterns:', patternsResult.reason)
     }
 
     setLoadError(failed)
@@ -162,5 +170,17 @@ export function useAutoApproval(overseer: RpcStub<Overseer> | null) {
     }
   }, [overseer, refresh, toasts])
 
-  return { entries, isLoading, loadError, pending, refresh, setEnabled, setBranchPatterns }
+  const setDefaultPatterns = useCallback(async (patterns: string[]) => {
+    if (!overseer) return
+    setDefaultPatternsState(patterns)
+    try {
+      await overseer.setDefaultAutoApproveBranchPatterns(patterns)
+    } catch (err) {
+      console.error('Failed to update default patterns:', err)
+      toasts.add({ title: 'Failed to update default patterns', variant: 'error' })
+      await refresh()
+    }
+  }, [overseer, refresh, toasts])
+
+  return { entries, isLoading, loadError, pending, refresh, setEnabled, setBranchPatterns, defaultPatterns, setDefaultPatterns }
 }
