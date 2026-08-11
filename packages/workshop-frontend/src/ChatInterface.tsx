@@ -4274,6 +4274,19 @@ function ChatInterface({
     lastMessageTimestamp: null,
   });
   const provisionalRef = useRef<Map<number, ProvisionalChatState>>(new Map());
+  // Latest action-log record per action id, fed by the action-log subscription. An action chat
+  // message's `actionLog` is a snapshot frozen at message-creation time. When an action is
+  // auto-approved (or otherwise resolved) the updated record can arrive over the action-log
+  // subscription BEFORE the action chat message is indexed here, and the per-entry patch
+  // (applyActionLogUpdateToCachedMessages) is then dropped because the message isn't cached yet.
+  // Reconciling against this map at index time keeps an auto-approved action from lingering as a
+  // "pending" card with Approve/Deny/Auto-approve buttons and a blocked composer.
+  const latestActionLogById = useRef<Map<number, ActionLogEntry>>(new Map());
+  // Action ids are allocated per-Overseer and reset across gadgets, so stale entries from a
+  // previous Overseer could otherwise collide with a new one's ids.
+  useEffect(() => {
+    latestActionLogById.current = new Map();
+  }, [overseer]);
   const draftRef = useRef<Map<number, DraftChatState>>(new Map());
   // Last server-instance generation seen (survives reconnects). Used to detect a full DO restart,
   // in which case in-flight provisional streams were lost and must be discarded. See
@@ -4386,6 +4399,14 @@ function ChatInterface({
     [],
   );
 
+  // Reconcile an action message's frozen actionLog snapshot with the freshest record the
+  // action-log subscription has delivered (see latestActionLogById).
+  const reconcileActionLog = (msg: AiChatMessage): AiChatMessage => {
+    if (msg.type !== "action") return msg;
+    const latest = latestActionLogById.current.get(msg.actionId);
+    return latest ? { ...msg, actionLog: latest } : msg;
+  };
+
   const indexActionMessage = (msg: AiChatMessage) => {
     if (msg.type !== "action") return;
     let locations = cacheRef.current.actionMessages.get(msg.actionId);
@@ -4420,8 +4441,9 @@ function ChatInterface({
     }
 
     for (const msg of page.messages) {
-      messages[msg.sequence] = msg;
-      indexActionMessage(msg);
+      const stored = reconcileActionLog(msg);
+      messages[stored.sequence] = stored;
+      indexActionMessage(stored);
     }
 
     if (page.compacted) {
@@ -5045,9 +5067,12 @@ function ChatInterface({
         cacheRef.current.messages.set(msg.chatId, messages);
       }
 
-      // Set message at sequence index (idempotent)
-      messages[msg.sequence] = msg;
-      indexActionMessage(msg);
+      // Set message at sequence index (idempotent). Reconcile an action message's frozen
+      // actionLog snapshot with the freshest action-log record, covering the race where the
+      // auto-approval update arrived before this message was indexed (and was dropped).
+      const stored = reconcileActionLog(msg);
+      messages[stored.sequence] = stored;
+      indexActionMessage(stored);
 
       // Update last message timestamp
       if (
@@ -5264,6 +5289,7 @@ function ChatInterface({
 
   // Patch cached chat messages on action upserts.
   useActionEntries(overseer, (record) => {
+    latestActionLogById.current.set(record.id, record);
     if (applyActionLogUpdateToCachedMessages(record)) scheduleUpdate();
   });
 
