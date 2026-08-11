@@ -2910,7 +2910,7 @@ class OverseerImpl implements AgentHooks {
         `Container check: ${input.command}`,
         undefined,
         {
-          title: `Ran `${input.command}` in the build container`,
+          title: "Ran " + input.command + " in the build container",
           description:
               `Exit code: ${result.exitCode}${result.exitCode === -1 ? " (timed out)" : ""}` +
               `\n\nOutput (${result.output.length} chars):\n` +
