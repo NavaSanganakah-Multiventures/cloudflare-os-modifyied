@@ -30,17 +30,6 @@ export interface ChatMessage {
   isStreaming?: boolean
 }
 
-export interface PermissionRequest {
-  id: string
-  connectionId: string
-  connectionName: string
-  connectionLogo: string
-  scopes: string[]
-  /** Specific resources being requested (channels, URLs, etc.) */
-  resources?: string[]
-  status: 'pending' | 'granted' | 'denied'
-}
-
 export interface AppFile {
   name: string
   language: string
@@ -55,30 +44,6 @@ export interface DataRow {
   lastActive: string
   unread: boolean
 }
-
-// -----------------------------------------------
-// Sample permission requests (toasts)
-// -----------------------------------------------
-export const samplePermissions: PermissionRequest[] = [
-  {
-    id: 'perm-1',
-    connectionId: 'slack',
-    connectionName: 'Slack',
-    connectionLogo: 'slack',
-    scopes: ['channels:read', 'chat:write', 'users:read'],
-    resources: ['#general', '#engineering'],
-    status: 'pending',
-  },
-  {
-    id: 'perm-2',
-    connectionId: 'google',
-    connectionName: 'Google Sheets',
-    connectionLogo: 'google',
-    scopes: ['spreadsheets.readonly'],
-    resources: ['https://docs.google.com/spreadsheets/d/4d5e6f'],
-    status: 'pending',
-  },
-]
 
 // -----------------------------------------------
 // Sample app files (right panel "App" tab)
