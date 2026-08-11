@@ -2197,10 +2197,7 @@ export async function runAgent(
       (standardFormats ? `${standardFormats}\n\n` : "") +
           `${systemPromptWorkspace}${systemPromptConnections}` +
           (alwaysAvailableResourcesPrompt ? `\n\n${alwaysAvailableResourcesPrompt}` : "") +
-          "\n\nAfter you finish making code changes in this workspace, always run the " +
-          "runContainerCheck tool to verify the build in a container runner. If the result file " +
-          ".agent/container-result.json reports errors, read the file and fix the code, then run " +
-          "the check again.",
+          "\n\nAfter you finish making code changes in this workspace, verify the build locally before finishing your turn.",
     ];
   }
 
