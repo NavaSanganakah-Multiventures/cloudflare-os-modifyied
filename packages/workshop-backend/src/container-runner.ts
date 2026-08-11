@@ -20,12 +20,19 @@ import { createWorkshopLogger } from "./observability";
 
 const logger = createWorkshopLogger("workshop.container");
 
-/** Result of running a single command in the build container. */
+/** Result of running a single command in the build container.
+ *
+ * Mirrors the shared `ContainerRunResult` from @gadgets/workshop-shared/api so the agent tool and the
+ * Overseer hook return the same shape without an adapter. */
 export type ContainerRunResult = {
+  /** Unique id for this run, so an observation can reference it. */
+  runId: string;
   /** Process exit code. A nonzero code resolves normally; it is not thrown as an exception. */
   exitCode: number;
   /** Combined standard output and standard error (stderr is merged into stdout via "combined"). */
   output: string;
+  /** Unix epoch milliseconds when the run completed. */
+  timestamp: number;
 };
 
 /** Options for BuildContainer.runCommand. */
@@ -34,6 +41,12 @@ export type RunCommandOptions = {
   cwd?: string;
   /** Environment additions/overrides for this process. Inherited container env is kept. */
   env?: Record<string, string>;
+  /** Whether this run may make outbound internet requests. Defaults to false (the class default);
+   *  set true only for commands that need to fetch dependencies from a registry. */
+  enableInternet?: boolean;
+  /** Hard timeout in milliseconds for the process. If it hasn't finished by then it is killed and
+   *  a nonzero exitCode is returned. Defaults to 5 minutes. */
+  timeoutMs?: number;
 };
 
 /**
@@ -66,8 +79,13 @@ export class BuildContainer extends Container {
    * already running.
    */
   async runCommand(command: string[], options: RunCommandOptions = {}): Promise<ContainerRunResult> {
+    const timeoutMs = options.timeoutMs ?? 5 * 60_000;
+    const runId = crypto.randomUUID();
+
     if (!this.ctx.container.running) {
-      await this.start();
+      // Start the VM, letting this run opt into outbound internet. (Container disk is ephemeral
+      // and resets when the instance sleeps after sleepAfter of inactivity.)
+      await this.start({ enableInternet: options.enableInternet ?? false });
     }
 
     const process = await this.ctx.container.exec(command, {
@@ -79,11 +97,27 @@ export class BuildContainer extends Container {
       stderr: "combined",
     });
 
-    const out = await process.output();
+    // exec() has no built-in timeout, so enforce one ourselves by killing the process. The
+    // following await on output() then resolves with the (likely nonzero) exit code.
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      process.kill();
+    }, timeoutMs);
+
+    let out;
+    try {
+      out = await process.output();
+    } finally {
+      clearTimeout(timer);
+    }
+
     const decoder = new TextDecoder();
     return {
-      exitCode: out.exitCode,
+      runId,
+      exitCode: timedOut ? -1 : out.exitCode ?? -1,
       output: decoder.decode(out.stdout),
+      timestamp: Date.now(),
     };
   }
 
@@ -91,8 +125,8 @@ export class BuildContainer extends Container {
     logger.info("build container started", { event: "container.build.started" });
   }
 
-  override onStop(): void {
-    logger.info("build container stopped", { event: "container.build.stopped" });
+  override onStop({ exitCode, reason }: { exitCode: number; reason: string }): void {
+    logger.info("build container stopped", { event: "container.build.stopped", exitCode, reason });
   }
 
   override onError(error: unknown): void {
