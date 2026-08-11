@@ -22,15 +22,28 @@ function branchMatchesPatterns(branchRef: string, patterns: string[]): boolean {
   for (const pattern of patterns) {
     let negated = pattern.startsWith("!");
     let glob = negated ? pattern.slice(1) : pattern;
-    let match = glob === "*" || new RegExp("^" + glob.replace(/[.+^$|(){}[]\]/g, "\export interface AutoApprovalStorage {
-  actions: Collection<ActionRecord, number>;
-  autoApproveTags: Collection<AutoApproveTagRecord>;
-}").replace(/*/g, ".*").replace(/?/g, ".") + "$").test(branchRef);
+    let match = matchesGlob(branchRef, glob);
     if (match) {
       included = !negated;
     }
   }
   return included;
+}
+
+// Simple glob matcher supporting only "*" (any sequence).
+function matchesGlob(str: string, pattern: string): boolean {
+  if (pattern === "*") return true;
+  let parts = pattern.split("*");
+  let pos = 0;
+  for (let i = 0; i < parts.length; i++) {
+    let part = parts[i];
+    let idx = str.indexOf(part, pos);
+    if (idx === -1) return false;
+    if (i === 0 && idx !== 0) return false;
+    if (i === parts.length - 1 && idx + part.length !== str.length) return false;
+    pos = idx + part.length;
+  }
+  return true;
 }
 
 // Applies a single eligible pending action: invoke the gatekeeper, mark it approved, persist. The
