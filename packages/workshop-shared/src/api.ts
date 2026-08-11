@@ -1470,6 +1470,14 @@ export interface Overseer extends RpcTarget {
   // entry identifies its connection and reports whether a matching auto-approval rule is enabled.
   listPreApprovableActions(): Promise<PreApprovableAction[]>;
 
+  // Get the workspace-wide default branch patterns that will be applied when a new GitHub repo
+  // gatekeeper is connected. If unset, the platform uses its built-in defaults.
+  getDefaultAutoApproveBranchPatterns(): Promise<string[] | undefined>;
+
+  // Set the workspace-wide default branch patterns for future GitHub repo auto-approval rules.
+  // Existing rules are not affected; the change applies to gatekeepers connected after this call.
+  setDefaultAutoApproveBranchPatterns(patterns: string[]): Promise<void>;
+
   // Accept an agent's pending connection request (a "connectionRequest" chat message). The caller
   // is responsible for having actually created the gatekeeper (via newGatekeeper()) and passes the
   // resulting gatekeeper id. The gatekeeper is surfaced to the agent as a named binding in the

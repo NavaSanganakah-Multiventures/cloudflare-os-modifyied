@@ -184,7 +184,7 @@ export default function Activity({
   if (!isReady) {
     return (
       <div className="flex h-full items-center justify-center text-[13px] text-kumo-subtle">
-        Loading activityâ¦
+        Loading activityÃ¢ÂÂ¦
       </div>
     )
   }
@@ -360,7 +360,7 @@ function AutoApprovalPanel({
   overseer: RpcStub<Overseer>
   reloadTrigger?: number
 }) {
-  const { entries, isLoading, loadError, pending, refresh, setEnabled } = useAutoApproval(overseer)
+  const { entries, isLoading, loadError, pending, refresh, setEnabled, defaultPatterns } = useAutoApproval(overseer)
   const { authenticatedApi } = useAuthenticatedApi()
   const vendorBranding = useVendorBranding(authenticatedApi)
 
@@ -399,7 +399,7 @@ function AutoApprovalPanel({
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-[13px] text-kumo-subtle">
-        Loading auto-approvalâ¦
+        Loading auto-approvalÃ¢ÂÂ¦
       </div>
     )
   }
@@ -443,6 +443,22 @@ function AutoApprovalPanel({
         )}
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
+        {(entries.length === 0 || defaultPatterns) && (
+          <div className="mx-4 my-3 rounded-lg border border-kumo-line bg-kumo-elevated/50 px-3 py-2.5">
+            <p className="m-0 text-[12px] font-medium leading-[16px] tracking-[-0.2px] text-kumo-default">
+              Auto-approval preset for GitHub repos
+            </p>
+            <p className="mt-1 text-[12px] leading-[16px] tracking-[-0.2px] text-kumo-subtle">
+              When you connect a GitHub repo, these actions will be auto-approved on non-default branches:
+              write file, delete file, create branch, create pull request.
+            </p>
+            <p className="mt-1.5 text-[12px] leading-[16px] tracking-[-0.2px] text-kumo-inactive">
+              Branches: <span className="font-mono text-kumo-subtle">
+                {defaultPatterns ? formatBranchPatterns(defaultPatterns) : formatBranchPatterns(["fix/*", "feature/*", "agent/*", "*", "!main"])}
+              </span>
+            </p>
+          </div>
+        )}
         {groups.map(group => (
           <section key={group.gatekeeperId}>
             <div className="sticky top-0 flex items-center gap-2 border-b border-kumo-line bg-kumo-base/90 px-5 py-1.5 backdrop-blur-sm">
@@ -541,7 +557,7 @@ function ReviewRequest({
                 {record.resourceTitle}
               </a>
             ) : record.resourceTitle}
-            <span className="px-1">Â·</span>
+            <span className="px-1">ÃÂ·</span>
             {formatRelativeTime(record.createdAt)}
           </p>
         </div>
