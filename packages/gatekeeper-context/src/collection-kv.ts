@@ -11,8 +11,23 @@ export function publicCollectionsKvKey(domain: string): string {
   return `${domain}${KV_SEP}.public`;
 }
 
+// Parse the public-collections KV snapshot. The registry DO is the only intended writer and
+// always stores a JSON array, but the KV namespace is shared infrastructure: a corrupt, stale, or
+// foreign value at the snapshot key must not throw and break Context & Skills for every reader in
+// the domain. Treat any unreadable or non-array snapshot as "no public collections" and carry on.
 function parsePublicCollections(raw: string): ContextCollectionSummary[] {
-  let list = JSON.parse(raw) as ContextCollectionSummary[];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    console.warn("Context Library: ignoring unreadable public-collections KV snapshot.", { raw });
+    return [];
+  }
+  if (!Array.isArray(parsed)) {
+    console.warn("Context Library: ignoring non-array public-collections KV snapshot.", { raw });
+    return [];
+  }
+  let list = parsed as ContextCollectionSummary[];
   for (let entry of list) {
     entry.lastUpdated = new Date(entry.lastUpdated);
   }
