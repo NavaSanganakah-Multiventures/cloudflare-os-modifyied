@@ -156,7 +156,7 @@ type GatekeeperClass = DurableObjectClass<Gatekeeper<any>>;
 
 // getAgentCatalog is optional on Gatekeeper; ambient capsules always implement it. After confirming
 // the gatekeeper is an ambient capsule, we view its facet through this derived (Pick + Required)
-// shape to call it — same optional-method-on-a-stub pattern as user.ts's SingletonAccountStub.
+// shape to call it â same optional-method-on-a-stub pattern as user.ts's SingletonAccountStub.
 type CatalogGatekeeperFacet =
     Fetcher<Gatekeeper<any> & Required<Pick<Gatekeeper<any>, "getAgentCatalog">>>;
 
@@ -314,7 +314,7 @@ function oneLineReason(reason: string): string {
 // and passed all `addObserver` checks -- i.e. is actually set up to observe data the Gadget has
 // read. This is distinct from the sharing table (which records the owner's *intent* that a user
 // have access): opening requires BOTH a reachable role in the sharing graph AND a complete
-// observer record. See observers-implementation-plan.md §3.
+// observer record. See observers-implementation-plan.md Â§3.
 type ObserverRecord = {
   // The sharing-table key for this user (their profile.id). Primary key of the collection.
   profileId: string;
@@ -340,6 +340,32 @@ function connectionTypeFromCreationSpec(
     case "ambient": return undefined;   // auto-provided, not a user-initiated connection
     case undefined: return undefined;
   }
+}
+
+// Match a branch reference against a list of glob patterns. Patterns are evaluated in order;
+// a leading "!" negates the pattern and denies a match. "*" matches any sequence of characters.
+// Examples: ["fix/*", "feature/*", "!main"] matches "fix/foo" but not "main".
+function branchMatchesPatterns(branchRef: string, patterns: string[]): boolean {
+  let included = false;
+  for (const pattern of patterns) {
+    let negated = pattern.startsWith("!");
+    let glob = negated ? pattern.slice(1) : pattern;
+    // Simple glob: * matches any sequence, ? matches one character.
+    let match = glob === "*" || new RegExp("^" + glob.replace(/[.+^$|(){}[]\]/g, "\function connectionTypeFromCreationSpec(
+    type: GatekeeperCreationSpec["type"] | undefined): ProductAnalyticsConnectionType | undefined {
+  switch (type) {
+    case "gatekeeper": return "gatekeeper";
+    case "aiModel": return "ai_model";
+    case "agentSpawner": return "agent_spawner";
+    case "ambient": return undefined;   // auto-provided, not a user-initiated connection
+    case undefined: return undefined;
+  }
+}").replace(/*/g, ".*").replace(/?/g, ".") + "$").test(branchRef);
+    if (match) {
+      included = !negated;
+    }
+  }
+  return included;
 }
 
 // Blueprint record stored in the Overseer DO's `blueprints` collection.
@@ -494,6 +520,10 @@ export type AutoApproveTagRecord = {
   // Who turned this rule on. Auto-approvals run under this user's authority, so each auto-applied
   // action is attributed to them in the audit log.
   enabledBy: AiChatAuthorInfo;
+  // Optional branch glob patterns. When present, the action's branchRef must match one of the
+  // positive patterns and none of the negated ("!") patterns to auto-approve. When absent or empty,
+  // the rule applies regardless of branch.
+  branchPatterns?: string[];
 };
 
 // Server-only record describing an in-progress agent turn, enabling resumption after a server
@@ -1690,7 +1720,7 @@ class OverseerImpl implements AgentHooks {
   // Which gadget do persistent stubs sealed inside executeCode restore to? Letting executed code
   // choose an owner per callback is a follow-up change; for now restore targets the workspace's
   // first gadget: the default gadget when it exists, else the lowest-numbered gadget (including a
-  // provisional one — hooks recorded against it are torn down by removeGadget() if the provisional
+  // provisional one â hooks recorded against it are torn down by removeGadget() if the provisional
   // gadget is later rejected), else undefined (in which case restoration of such a stub fails with
   // an explicit error).
   // TODO(multi-gadget): Figure out how to allow ctx.restore() to work with multiple gadgets; may
@@ -2089,7 +2119,7 @@ class OverseerImpl implements AgentHooks {
           break;
         }
         case "value": {
-          // Agent callback arguments — embed the actual storable args value directly in env.
+          // Agent callback arguments â embed the actual storable args value directly in env.
           // The storable args already contain TransientStubLoopback Fetchers where transient
           // stubs were, so they work directly in env.
           let stored = this.storage.agentCallbackArgs.get(
@@ -2566,6 +2596,35 @@ class OverseerImpl implements AgentHooks {
     return new GatekeeperClientImpl<any>(this, id, facet);
   }
 
+  // Automatically enable auto-approval rules for the auto-approvable action kinds offered by a
+  // gatekeeper, restricted to the given branch patterns. Used when connecting a GitHub repo so
+  // the agent can create branches, write files, and open PRs on non-default branches without
+  // manual approval, while default-branch writes remain blocked by the gatekeeper.
+  async autoEnableDefaultApprovalRules(gatekeeperId: WorkpieceId, enabledBy: AiChatAuthorInfo,
+      branchPatterns: string[]): Promise<void> {
+    let gatekeeper = this.storage.gatekeepers.get(gatekeeperId);
+    if (!gatekeeper) return;
+    let facet = this.getGatekeeperFacet(gatekeeperId);
+    let kinds: ActionKind[];
+    try {
+      kinds = await facet.getAutoApprovableActions();
+    } catch (err) {
+      logger.warn("failed to auto-enable approval rules: getAutoApprovableActions threw", {
+        event: "auto.approval.enable.failed", gatekeeperId, error: err,
+      });
+      return;
+    }
+    for (const actionKind of kinds) {
+      this.storage.autoApproveTags.put({
+        gatekeeperId,
+        actionKind,
+        enabledBy,
+        branchPatterns,
+      });
+    }
+    this.ctx.waitUntil(this.drainAutoApprovals(gatekeeperId));
+  }
+
   // Destroy a gatekeeper (connection) workpiece. Any binding edges pointing at it are severed so
   // no gadget's env retains a dangling entry. (This is distinct from merely unbinding it from one
   // gadget -- GadgetClient.unbind() -- which leaves the gatekeeper alive, possibly orphaned.)
@@ -2669,7 +2728,7 @@ class OverseerImpl implements AgentHooks {
     // v1 has no per-thread hiding, the only way to let such an observation proceed is if the named
     // observer has already lost access in the sharing graph. If any named observer is still
     // authorized, we cannot prevent them from seeing it, so we block the observation. See
-    // observers-implementation-plan.md §5 Step 5.
+    // observers-implementation-plan.md Â§5 Step 5.
     if (description.excludeObservers && description.excludeObservers.length > 0) {
       await this.#enforceExcludeObservers(description.excludeObservers);
     }
@@ -2837,7 +2896,7 @@ class OverseerImpl implements AgentHooks {
 
   // Record an observation that originated from a built-in agent tool (not a gatekeeper).
   // The `gatekeeperId` is set to the BUILTIN_TOOL_GATEKEEPER_ID sentinel so that downstream
-  // code (which expects a gatekeeper to dereference for approve/reject) never touches it —
+  // code (which expects a gatekeeper to dereference for approve/reject) never touches it â
   // observations bypass the approve/reject paths anyway.
   async recordAgentObservation(
       chatId: number,
@@ -2897,8 +2956,12 @@ class OverseerImpl implements AgentHooks {
 
     // Same auto-approval gate as before, named because awaitDecision uses it too. The drain is
     // deferred because applying calls back into the gatekeeper facet still awaiting submitAction.
-    let willAutoApprove = !!(description.autoApprovable && description.actionKind &&
-        this.storage.autoApproveTags.get(`${gatekeeperId}:${description.actionKind.tag}`) !== undefined);
+    let rule = description.actionKind
+        ? this.storage.autoApproveTags.get(`${gatekeeperId}:${description.actionKind.tag}`)
+        : undefined;
+    let branchMatches = rule === undefined || !rule.branchPatterns || rule.branchPatterns.length === 0 ||
+        (description.branchRef !== undefined && branchMatchesPatterns(description.branchRef, rule.branchPatterns));
+    let willAutoApprove = !!(description.autoApprovable && description.actionKind && rule !== undefined && branchMatches);
 
     // Only agent turns suspend on awaitDecision, and only when a manual decision is pending.
     // Auto-approved actions keep the seamless behavior the user opted into.
@@ -3902,7 +3965,7 @@ class OverseerImpl implements AgentHooks {
       // initiated continuations are exempt so outstanding callbacks are never stranded mid-flow.
       // When the Cloudflare limits flow is disabled, checkUsageAndBalance() always allows.
       // (This runs inside the try so the `finally` below still clears the active-agent state and
-      // emits a stream "clear" — otherwise the UI would spin forever on a block.)
+      // emits a stream "clear" â otherwise the UI would spin forever on a block.)
       let byokRouting: UserGatewayRouting | undefined;
       if (!callbackInitiated && this.ownerId) {
         let ownerStub = this.users.get(this.users.idFromString(this.ownerId));
@@ -3968,7 +4031,7 @@ class OverseerImpl implements AgentHooks {
         // On the first run we always nudge once (the agent may not have understood what
         // was expected). After a nudge, we bail out if no progress was made.
         if (hasBeenNudged && liveChat.activeAgentCallbacks.size >= callbackCountBefore) {
-          // No progress after being nudged — reject remaining callbacks and bail out.
+          // No progress after being nudged â reject remaining callbacks and bail out.
           let count = liveChat.activeAgentCallbacks.size;
           this.rejectAllAgentCallbacks(chatId,
               "Agent failed to resolve callbacks after multiple attempts.");
@@ -4053,7 +4116,7 @@ class OverseerImpl implements AgentHooks {
     } finally {
       // If this turn billed the user's own Cloudflare account, refresh their cached balance now (in
       // the background) so the next turn's billing decision reflects the spend just incurred. Runs
-      // on both the success and error paths — an "insufficient funds" failure is exactly when an
+      // on both the success and error paths â an "insufficient funds" failure is exactly when an
       // up-to-date balance matters most.
       if (byokOwnerStub) {
         this.ctx.waitUntil(refreshCachedBalance(this.env, byokOwnerStub));
@@ -4108,7 +4171,7 @@ class OverseerImpl implements AgentHooks {
     let cb = liveChat.activeAgentCallbacks.get(sequence);
     if (cb) {
       cb.resolve(value);
-      // Remove the entry — the transient stubs will be invalidated when the
+      // Remove the entry â the transient stubs will be invalidated when the
       // deliverAgentCallback RPC returns.
       liveChat.activeAgentCallbacks.delete(sequence);
     }
@@ -4327,13 +4390,13 @@ class OverseerImpl implements AgentHooks {
   // Ensure every singleton account the gadget owner has (e.g. the Context Library) is provisioned
   // for this gadget as an ambient gatekeeper record, folded into each chat's env (named by the
   // gatekeeper's suggested binding name; see prepareChatBindings) so the agent can read it in
-  // executeCode — search/list/read recorded as observations — and optionally wire into a gadget
+  // executeCode â search/list/read recorded as observations â and optionally wire into a gadget
   // via setGadgetBinding if the gadget's persistent code needs it. (Most gadgets never call the
   // library programmatically, so a gadget binding would just be noise.) Idempotent:
   // provisioned once per gadget and re-added if missing. Called on open(), before any agent turn.
   //
   // The session is reached through the owner's stored connected account, not by asserting the owner's
-  // identity to the vendor — so the capability is the account the user actually holds.
+  // identity to the vendor â so the capability is the account the user actually holds.
   async ensureAmbientCapsules(): Promise<void> {
     if (!this.ownerId) return;
     let ownerDo = this.#ownerUserDo();
@@ -4345,7 +4408,7 @@ class OverseerImpl implements AgentHooks {
     // Reconcile existing ambient capsule records against the owner's current singleton accounts. Each
     // record is keyed to a specific accountId; if that account is gone (disconnected) or was replaced
     // (an optional account removed and re-added with a new accountId), the record is stale and would
-    // point the capsule at a deleted account — so remove it. Snapshot the list since we mutate it.
+    // point the capsule at a deleted account â so remove it. Snapshot the list since we mutate it.
     let currentAccountId = new Map(accounts.map(account => [account.vendorId, account.accountId]));
     let bound = new Set<string>();
     // Snapshot before iterating, since removeGatekeeper() mutates the collection.
@@ -4362,10 +4425,10 @@ class OverseerImpl implements AgentHooks {
     if (toAdd.length === 0) return;
 
     // Each singleton account provides a normal Gatekeeper class (imbued via ctx.props with whatever
-    // it needs — e.g. account id and sharing domain). We install it as a Facet exactly like any other
+    // it needs â e.g. account id and sharing domain). We install it as a Facet exactly like any other
     // gatekeeper, so its session and catalog run gadget-side in the gatekeeper's own worker with no
     // further round-trips through the owner's user DO. The account capability stays encapsulated in
-    // that DO — only the class reference crosses out.
+    // that DO â only the class reference crosses out.
     //
     // Provision concurrently so Cap'n Web can batch the owner-DO class lookups; addGatekeeper assigns
     // ids before awaiting, so concurrent adds don't collide.
@@ -4755,7 +4818,7 @@ class OverseerImpl implements AgentHooks {
         ambientIds,
         async gatekeeperId => {
           let record = this.storage.gatekeepers.get(gatekeeperId);
-          if (!record) return null;  // disconnected since the chat froze its set — no catalog.
+          if (!record) return null;  // disconnected since the chat froze its set â no catalog.
           try {
             using authorizer = new RpcStub<ObservationAuthorizer>(new ApprovalQueueImpl(
                 this, gatekeeperId, {from: "agent", chatId}));
@@ -5533,7 +5596,7 @@ class OverseerImpl implements AgentHooks {
 
   // Short-TTL cache for the gatekeeper vendor list. The list is derived from static
   // GATEKEEPER_* bindings, so it barely changes, but the connection hooks below (and the agent's
-  // system prompt) call it on every turn — caching avoids hammering the user DO each time.
+  // system prompt) call it on every turn â caching avoids hammering the user DO each time.
   #vendorsCache: {
     expires: number;
     promise: Promise<{id: string, description: VendorDescription, supportedResources: SupportedResource[]}[]>;
@@ -5591,7 +5654,7 @@ class OverseerImpl implements AgentHooks {
     }
     let lines = [`Resource types offered by "${vendorId}" (${vendor.description.displayName}):`];
     for (let r of vendor.supportedResources) {
-      lines.push(`* ${r.title} — urlPattern: ${r.urlPattern}\n  ${r.description}`);
+      lines.push(`* ${r.title} â urlPattern: ${r.urlPattern}\n  ${r.description}`);
     }
     lines.push(
         `\nTo request one, call requestConnection with vendorId="${vendorId}" and a resourceUrl ` +
@@ -5601,7 +5664,7 @@ class OverseerImpl implements AgentHooks {
 
   // Records a pending connection request. `requested` is true only when a request was actually
   // created (and an accept/deny card will appear); when false, the request was rejected for the
-  // reason in `message` and the agent should fix it and retry — the turn must NOT end (see the
+  // reason in `message` and the agent should fix it and retry â the turn must NOT end (see the
   // `connectionRequested` flag in agent.ts).
   async requestConnection(chatId: number, input: {
     vendorId: string;
@@ -5696,7 +5759,7 @@ class OverseerImpl implements AgentHooks {
       seen.add(id);
       let lines = [
         `* blueprintId: ${id}`,
-        `  ${JSON.stringify(title)} — ${source}`,
+        `  ${JSON.stringify(title)} â ${source}`,
       ];
       let bindingNames = Object.entries(bindings ?? {});
       if (bindingNames.length > 0) {
@@ -5757,7 +5820,7 @@ class OverseerImpl implements AgentHooks {
         `about already *is* one of these, work on that one instead: asking to change an existing ` +
         `output is not a request for a second one.\n\n` +
         formats.map(format =>
-            `* ${format.output.noun} (plural: ${format.output.plural}) — blueprintId: ` +
+            `* ${format.output.noun} (plural: ${format.output.plural}) â blueprintId: ` +
             `${format.blueprintId}` + (format.agentHint ? `; ${format.agentHint}` : ``)).join("\n");
   }
 
@@ -5850,7 +5913,7 @@ class OverseerImpl implements AgentHooks {
             details = `unknown`;
             break;
         }
-        lines.push(`* ${name} — ${JSON.stringify(binding.title)} (${details})` +
+        lines.push(`* ${name} â ${JSON.stringify(binding.title)} (${details})` +
             (binding.description ? `: ${binding.description}` : ``));
       }
     }
@@ -5965,7 +6028,7 @@ class OverseerImpl implements AgentHooks {
   // observer record: best-effort removeObserver on all gatekeeper facets, then delete the record.
   // All calls are best-effort -- an orphaned observer entry only causes superfluous future checks,
   // never a data leak (the leak-relevant gate is authorizeObservation, keyed off the live sharing
-  // graph). See observers-implementation-plan.md §5 Step 6.
+  // graph). See observers-implementation-plan.md Â§5 Step 6.
   async tearDownLostObservers(affected: AffectedCollaborator[]): Promise<void> {
     let gatekeeperIds = [...this.storage.gatekeepers.list()].map(gk => gk.id);
     for (let entry of affected) {
@@ -6011,7 +6074,7 @@ class OverseerImpl implements AgentHooks {
   // already-configured bindings on every open, catching revocation of the user's underlying
   // resource access promptly. Returns when fully verified; throws to deny access.
   //
-  // See observers-implementation-plan.md §5 Step 3.
+  // See observers-implementation-plan.md Â§5 Step 3.
   async ensureObserver(
       profileId: string,
       clientUser: DurableObjectStub<UserDurableObject>,
@@ -6191,7 +6254,7 @@ class OverseerImpl implements AgentHooks {
   }
 
   // Render the observer verification failures as one line per binding, naming the connection and the
-  // account that was refused: `<resourceTitle> (<account label>) — <reason>`. Cold path only (we're
+  // account that was refused: `<resourceTitle> (<account label>) â <reason>`. Cold path only (we're
   // about to deny the open), so the extra User DO round trip per failure is fine. Discloses nothing
   // new: the reason was either already thrown to this same user or authored by us, and the account is
   // their own.
@@ -6222,7 +6285,7 @@ class OverseerImpl implements AgentHooks {
         });
       }
 
-      return `${observerBindingTitle(gk)} (${label}) — ${oneLineReason(failure.reason)}`;
+      return `${observerBindingTitle(gk)} (${label}) â ${oneLineReason(failure.reason)}`;
     }));
 
     return lines.join("\n");
@@ -6997,7 +7060,7 @@ export class GadgetTailLoopback extends WorkerEntrypoint<Cloudflare.Env, GadgetT
   }
 
   // New-style streaming tail worker. Delivers gadget console logs to the product UI in real time.
-  // Do not console.log the tail events here — they spam wrangler dev and are not ops logs.
+  // Do not console.log the tail events here â they spam wrangler dev and are not ops logs.
   tailStream(event: TailStream.TailEvent<TailStream.Onset>)
       : TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType> {
     return {
@@ -7471,6 +7534,14 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       typeUrlPattern,
     };
     let result = await this.impl.addGatekeeper(cls, creationSpec);
+    if (vendorId.toLowerCase() === "github") {
+      // For GitHub repository connections, automatically enable auto-approval for the
+      // auto-approvable action kinds on non-default branches so agents can complete planned
+      // work without requiring the user to sit at the device. Default-branch writes remain
+      // blocked by the GitHub gatekeeper itself, so main is still protected.
+      await this.impl.autoEnableDefaultApprovalRules(result.id, await this.#getClientProfile(),
+          ["fix/*", "feature/*", "agent/*", "*"]);
+    }
     await this.recordConnectionCreated(result, "gatekeeper", vendorId);
     return result;
   }
@@ -7693,7 +7764,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
 
     // Persist one note for replay; raw action cards are not surfaced to the LLM. Concurrent
     // approvals could both pass the gate above and append duplicate notes (the DO input gate is
-    // open across these awaits), but that's cosmetic — #resumeSuspendedAgent still starts one turn.
+    // open across these awaits), but that's cosmetic â #resumeSuspendedAgent still starts one turn.
     let titleList = awaited.map(r => `"${r.description.title}"`).join(", ");
     let summary =
         `The changes you submitted have been approved and applied: ${titleList}. ` +
@@ -7739,7 +7810,8 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
   // opt-in rule (one of the two gates required to auto-apply -- the action's own `autoApprovable`
   // verdict is the other) with the kind's display label, and immediately drains any pending
   // actions that this newly unblocks. Auto-approval rules are workspace-wide per gatekeeper.
-  async setAutoApprovedActionKind(gatekeeperId: WorkpieceId, actionKind: ActionKind)
+  async setAutoApprovedActionKind(gatekeeperId: WorkpieceId, actionKind: ActionKind,
+      branchPatterns?: string[])
       : Promise<void> {
     let gatekeeper = this.impl.storage.gatekeepers.get(gatekeeperId);
     if (!gatekeeper) {
@@ -7751,6 +7823,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       gatekeeperId,
       actionKind,
       enabledBy: profile,
+      branchPatterns,
     });
     // Apply the currently-visible pending action(s) with this tag right away.
     this.impl.ctx.waitUntil(this.impl.drainAutoApprovals(gatekeeperId));
@@ -7764,10 +7837,11 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
 
   // List the enabled auto-approval rules.
   async listAutoApprovedActionKinds()
-      : Promise<Array<{ gatekeeperId: WorkpieceId; actionKind: ActionKind }>> {
+      : Promise<Array<{ gatekeeperId: WorkpieceId; actionKind: ActionKind; branchPatterns?: string[] }>> {
     return [...this.impl.storage.autoApproveTags.list()].map(rule => ({
       gatekeeperId: rule.gatekeeperId,
       actionKind: rule.actionKind,
+      branchPatterns: rule.branchPatterns,
     }));
   }
 
@@ -7876,7 +7950,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     // Bump the timestamp so clients that were offline during the decision still receive the
     // mutated card on reconnect (the catch-up scan is ordered by timestamp).
     msg.timestamp = this.impl.getChatTimestamp();
-    this.impl.storage.chats.put(msg);  // fires the subscriber update() → re-delivers the card
+    this.impl.storage.chats.put(msg);  // fires the subscriber update() â re-delivers the card
 
     await this.#resumeSuspendedAgent(msg.chatId);
   }
@@ -7889,7 +7963,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
 
     msg.state = "denied";
     msg.timestamp = this.impl.getChatTimestamp();
-    this.impl.storage.chats.put(msg);  // fires the subscriber update() → re-delivers the card
+    this.impl.storage.chats.put(msg);  // fires the subscriber update() â re-delivers the card
 
     // Intentionally do NOT resume the agent on deny. The agent's turn already ended when it made the
     // request; leaving it ended lets the user say what they want done instead, rather than forcing
