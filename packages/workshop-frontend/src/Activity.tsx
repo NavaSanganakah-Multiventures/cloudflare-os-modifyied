@@ -184,7 +184,7 @@ export default function Activity({
   if (!isReady) {
     return (
       <div className="flex h-full items-center justify-center text-[13px] text-kumo-subtle">
-        Loading activity…
+        Loading activityâ¦
       </div>
     )
   }
@@ -346,6 +346,13 @@ export default function Activity({
   )
 }
 
+function formatBranchPatterns(patterns: string[] | undefined): string {
+  if (!patterns || patterns.length === 0) return 'any branch'
+  const positive = patterns.filter(p => !p.startsWith('!'))
+  const negative = patterns.filter(p => p.startsWith('!')).map(p => `except ${p.slice(1)}`)
+  return [...positive, ...negative].join(', ')
+}
+
 function AutoApprovalPanel({
   overseer,
   reloadTrigger,
@@ -392,7 +399,7 @@ function AutoApprovalPanel({
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-[13px] text-kumo-subtle">
-        Loading auto-approval…
+        Loading auto-approvalâ¦
       </div>
     )
   }
@@ -466,7 +473,7 @@ function AutoApprovalPanel({
                       {entry.orphaned
                         ? 'This connection no longer offers this action; the rule still applies.'
                         : entry.enabled
-                          ? 'Applied without asking'
+                          ? `Applied without asking on ${formatBranchPatterns(entry.branchPatterns)}`
                           : 'Waits for your approval'}
                     </span>
                   </span>
@@ -534,7 +541,7 @@ function ReviewRequest({
                 {record.resourceTitle}
               </a>
             ) : record.resourceTitle}
-            <span className="px-1">·</span>
+            <span className="px-1">Â·</span>
             {formatRelativeTime(record.createdAt)}
           </p>
         </div>
