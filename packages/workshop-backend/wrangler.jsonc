@@ -38,6 +38,18 @@
     "binding": "BROWSER"
   },
 
+  // Build/test sandbox container: a Cloudflare Container (a Durable Object whose process runs
+  // in a Linux VM from ./Dockerfile) that the coding agent uses to run build/test commands via
+  // container.exec(). BuildContainer is reached via ctx.exports like every other DO here, so no
+  // durable_objects binding is needed. Requires `wrangler deploy` with Docker running locally.
+  "containers": [
+    {
+      "class_name": "BuildContainer",
+      "image": "./Dockerfile",
+      "max_instances": 10
+    }
+  ],
+
   // Gatekeeper service bindings and the Workers AI binding are dynamically
   // added by run-dev-server.js (for dev) and generate-wrangler-prod.js (for
   // production).
@@ -56,6 +68,12 @@
       // login back to the waiting browser.
       "tag": "v2",
       "new_sqlite_classes": [ "PendingLogin" ]
+    },
+    {
+      // BuildContainer: the container-enabled Durable Object. Cloudflare Containers require
+      // new_sqlite_classes (not new_classes) even though BuildContainer itself stores no state.
+      "tag": "v3",
+      "new_sqlite_classes": [ "BuildContainer" ]
     }
   ],
 
