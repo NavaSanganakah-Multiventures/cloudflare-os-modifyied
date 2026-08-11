@@ -6,7 +6,7 @@
 # Container class's port-readiness check has something to probe (see BuildContainer in
 # packages/workshop-backend/src/container-runner.ts).
 
-FROM node:22-bookworm
+FROM --platform=linux/amd64 node:22-bookworm
 
 # pnpm, pinned to the version the monorepo expects (see root package.json "packageManager").
 RUN corepack enable && corepack prepare pnpm@11.17.0 --activate
@@ -20,6 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
+
+# Some native-build tooling (e.g. older node-gyp) invokes `python`; alias it to python3.
+RUN ln -sf /usr/bin/python3 /usr/local/bin/python
 
 # Minimal health server on :8080 returning "ok". Real work is driven via container.exec(); this
 # process only exists to satisfy the port-readiness check during start().
