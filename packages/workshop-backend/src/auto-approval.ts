@@ -15,6 +15,24 @@ export interface AutoApprovalStorage {
   autoApproveTags: Collection<AutoApproveTagRecord>;
 }
 
+// Match a branch reference against a list of glob patterns. Patterns are evaluated in order;
+// a leading "!" negates the pattern and denies a match. "*" matches any sequence of characters.
+function branchMatchesPatterns(branchRef: string, patterns: string[]): boolean {
+  let included = false;
+  for (const pattern of patterns) {
+    let negated = pattern.startsWith("!");
+    let glob = negated ? pattern.slice(1) : pattern;
+    let match = glob === "*" || new RegExp("^" + glob.replace(/[.+^$|(){}[]\]/g, "\export interface AutoApprovalStorage {
+  actions: Collection<ActionRecord, number>;
+  autoApproveTags: Collection<AutoApproveTagRecord>;
+}").replace(/*/g, ".*").replace(/?/g, ".") + "$").test(branchRef);
+    if (match) {
+      included = !negated;
+    }
+  }
+  return included;
+}
+
 // Applies a single eligible pending action: invoke the gatekeeper, mark it approved, persist. The
 // caller has already validated that the record is still pending.
 export type ApplyPendingActionFn = (
@@ -69,6 +87,12 @@ export class AutoApprovalDrainer {
           : undefined;
       if (record.description.autoApprovable !== true || rule === undefined) {
         // A manual gate. Stop rather than skipping ahead to any later auto-eligible action.
+        break;
+      }
+      if (rule.branchPatterns && rule.branchPatterns.length > 0 &&
+          (record.description.branchRef === undefined ||
+           !branchMatchesPatterns(record.description.branchRef, rule.branchPatterns))) {
+        // A branch-pattern gate. The action targets a branch this rule does not cover.
         break;
       }
 
