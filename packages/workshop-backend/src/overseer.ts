@@ -6269,7 +6269,7 @@ class OverseerImpl implements AgentHooks {
   }
 
   // Render the observer verification failures as one line per binding, naming the connection and the
-  // account that was refused: `<resourceTitle> (<account label>) (we are
+  // account that was refused: `<resourceTitle> (<account label>) — <reason>.` Cold path only (we're
   // about to deny the open), so the extra User DO round trip per failure is fine. Discloses nothing
   // new: the reason was either already thrown to this same user or authored by us, and the account is
   // their own.
