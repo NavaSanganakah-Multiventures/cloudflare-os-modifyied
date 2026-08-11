@@ -15,6 +15,43 @@ export interface AutoApprovalStorage {
   autoApproveTags: Collection<AutoApproveTagRecord>;
 }
 
+// Match a branch reference against a list of glob patterns. Patterns are evaluated in order;
+// a leading "!" negates the pattern and denies a match. "*" matches any sequence of characters.
+function branchMatchesPatterns(branchRef: string, patterns: string[]): boolean {
+  let included = false;
+  for (const pattern of patterns) {
+    let negated = pattern.startsWith("!");
+    let glob = negated ? pattern.slice(1) : pattern;
+    let match = matchesGlob(branchRef, glob);
+    if (match) {
+      included = !negated;
+    }
+  }
+  return included;
+}
+
+// Simple glob matcher supporting only "*" (any sequence).
+function matchesGlob(str: string, pattern: string): boolean {
+  if (pattern === "*") return true;
+  // No wildcard means exact match.
+  if (!pattern.includes("*")) return str === pattern;
+  let parts = pattern.split("*");
+  // Leading literal must match the start of the string.
+  if (parts[0] !== "" && !str.startsWith(parts[0])) return false;
+  // Trailing literal must match the end of the string.
+  if (parts[parts.length - 1] !== "" && !str.endsWith(parts[parts.length - 1])) return false;
+  let pos = parts[0].length;
+  let end = str.length - parts[parts.length - 1].length;
+  for (let i = 1; i < parts.length - 1; i++) {
+    let part = parts[i];
+    if (part === "") continue;
+    let idx = str.indexOf(part, pos);
+    if (idx === -1 || idx + part.length > end) return false;
+    pos = idx + part.length;
+  }
+  return pos <= end;
+}
+
 // Applies a single eligible pending action: invoke the gatekeeper, mark it approved, persist. The
 // caller has already validated that the record is still pending.
 export type ApplyPendingActionFn = (
@@ -69,6 +106,12 @@ export class AutoApprovalDrainer {
           : undefined;
       if (record.description.autoApprovable !== true || rule === undefined) {
         // A manual gate. Stop rather than skipping ahead to any later auto-eligible action.
+        break;
+      }
+      if (rule.branchPatterns && rule.branchPatterns.length > 0 &&
+          (record.description.branchRef === undefined ||
+           !branchMatchesPatterns(record.description.branchRef, rule.branchPatterns))) {
+        // A branch-pattern gate. The action targets a branch this rule does not cover.
         break;
       }
 

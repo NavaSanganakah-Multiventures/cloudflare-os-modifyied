@@ -10,6 +10,8 @@ export interface AutoApprovalEntry {
   vendorId?: string
   actionKind: ActionKind
   enabled: boolean
+  // Branch patterns for the auto-approval rule, if it has any.
+  branchPatterns?: string[]
   // Keep orphaned rules visible so a standing grant never becomes impossible to revoke.
   orphaned: boolean
 }
@@ -21,7 +23,7 @@ export function autoApprovalKey(entry: { gatekeeperId: number; actionKind: Actio
 export function useAutoApproval(overseer: RpcStub<Overseer> | null) {
   const toasts = useKumoToastManager()
   const [catalog, setCatalog] = useState<PreApprovableAction[]>([])
-  const [rules, setRules] = useState<Array<{ gatekeeperId: number; actionKind: ActionKind }>>([])
+  const [rules, setRules] = useState<Array<{ gatekeeperId: number; actionKind: ActionKind; branchPatterns?: string[] }>>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
   const [pending, setPending] = useState<Set<string>>(new Set())
@@ -79,19 +81,23 @@ export function useAutoApproval(overseer: RpcStub<Overseer> | null) {
         vendorId: action.vendorId,
         actionKind: action.actionKind,
         enabled: action.alreadyEnabled,
+        branchPatterns: action.branchPatterns,
         orphaned: false,
       })
     }
     for (const rule of rules) {
       const key = autoApprovalKey(rule)
       const known = byKey.get(key)
-      if (known) known.enabled = true
-      else {
+      if (known) {
+        known.enabled = true
+        known.branchPatterns = rule.branchPatterns
+      } else {
         byKey.set(key, {
           gatekeeperId: rule.gatekeeperId,
           resourceTitle: '',
           actionKind: rule.actionKind,
           enabled: true,
+          branchPatterns: rule.branchPatterns,
           orphaned: true,
         })
       }
@@ -109,7 +115,7 @@ export function useAutoApproval(overseer: RpcStub<Overseer> | null) {
       ? [...previous, { gatekeeperId: entry.gatekeeperId, actionKind: entry.actionKind }]
       : previous.filter(rule => autoApprovalKey(rule) !== key))
     try {
-      if (enabled) await overseer.setAutoApprovedActionKind(entry.gatekeeperId, entry.actionKind)
+      if (enabled) await overseer.setAutoApprovedActionKind(entry.gatekeeperId, entry.actionKind, entry.branchPatterns)
       else await overseer.removeAutoApprovedActionKind(entry.gatekeeperId, entry.actionKind.tag)
     } catch (err) {
       console.error('Failed to update auto-approval rule:', err)
@@ -127,5 +133,34 @@ export function useAutoApproval(overseer: RpcStub<Overseer> | null) {
     }
   }, [overseer, refresh, toasts])
 
-  return { entries, isLoading, loadError, pending, refresh, setEnabled }
+  const setBranchPatterns = useCallback(async (entry: AutoApprovalEntry, branchPatterns: string[]) => {
+    if (!overseer) return
+    const key = autoApprovalKey(entry)
+    setPending(previous => new Set(previous).add(key))
+    setCatalog(previous => previous.map(action =>
+      autoApprovalKey(action) === key
+        ? { ...action, branchPatterns }
+        : action))
+    setRules(previous => previous.map(rule =>
+      autoApprovalKey(rule) === key
+        ? { ...rule, branchPatterns }
+        : rule))
+    try {
+      if (entry.enabled) {
+        await overseer.setAutoApprovedActionKind(entry.gatekeeperId, entry.actionKind, branchPatterns)
+      }
+    } catch (err) {
+      console.error('Failed to update branch patterns:', err)
+      toasts.add({ title: 'Failed to update branch patterns', variant: 'error' })
+    } finally {
+      await refresh()
+      setPending(previous => {
+        const next = new Set(previous)
+        next.delete(key)
+        return next
+      })
+    }
+  }, [overseer, refresh, toasts])
+
+  return { entries, isLoading, loadError, pending, refresh, setEnabled, setBranchPatterns }
 }

@@ -65,7 +65,7 @@ export type VendorDescription = {
 
   // If set, this vendor can mint a connected account with no OAuth flow (see
   // GatekeeperVendor.createAccount) and recommends the Workshop auto-provision one account per user.
-  // The account — not the vendor — declares whether it provides an agent singleton and/or a
+  // The account â not the vendor â declares whether it provides an agent singleton and/or a
   // management UI (see AccountDescription.singleton / .providesUi).
   autoProvisionsAccount?: boolean;
 }
@@ -232,13 +232,13 @@ export function stripTrailingSlashes(value: string): string {
 // Tests whether a resource URL matches a SupportedResource `urlPattern` (a URLPattern string).
 //
 // This is deliberately tolerant of trivial URL variations that a strict URLPattern test would
-// reject but that humans and LLMs routinely produce — most importantly a trailing slash, since
+// reject but that humans and LLMs routinely produce â most importantly a trailing slash, since
 // URLPattern treats "/owner/repo" and "/owner/repo/" as different paths. Without this, an agent
 // asking to connect "https://github.com/owner/repo/" would match no resource and the accept modal
 // would open with nothing pre-selected.
 //
 // Callers are responsible for handling the whole-instance catch-all ("https://*") separately
-// (e.g. as a fallback) — this function does not special-case it.
+// (e.g. as a fallback) â this function does not special-case it.
 //
 // Returns false if URLPattern is unavailable in the current runtime or the pattern is invalid.
 export function matchesResourceUrlPattern(pattern: string, url: string): boolean {
@@ -292,7 +292,7 @@ export function resolveRequestedResource(
   if (supportedResources.length === 1) return { ok: true, resource: supportedResources[0] };
 
   const available = supportedResources.length > 0
-    ? supportedResources.map(r => `  * ${r.title} — urlPattern: ${r.urlPattern}`).join('\n')
+    ? supportedResources.map(r => `  * ${r.title} â urlPattern: ${r.urlPattern}`).join('\n')
     : '  (this vendor offers no connectable resources)';
   const lead = resourceUrl
     ? `resourceUrl "${resourceUrl}" does not match any resource type this vendor offers, ` +
@@ -406,7 +406,7 @@ export interface GatekeeperVendor extends WorkerEntrypoint {
   //   - "full": the gatekeeper's full capability scopes (repos, docs, etc.). The resulting
   //     connection is persisted as a usable connected account.
   //   - "auth": only the minimal scopes needed to verify the user's email for sign-in. The grant is
-  //     transient — after `complete()` lets the caller read getAuthenticatedEmail(), the gatekeeper
+  //     transient â after `complete()` lets the caller read getAuthenticatedEmail(), the gatekeeper
   //     discards it. Vendors without `providesAuth` ignore this and always use their full scopes.
   //
   // `options.resourceUrlPatterns`, if given, limits the connection to the authorization needed for
@@ -444,7 +444,7 @@ export interface GatekeeperVendor extends WorkerEntrypoint {
   getTypeScriptTypes(): Promise<string>;
 
   // Mint a NEW connected account, with no OAuth flow. Safe to expose on this public interface: it
-  // only *creates* accounts — it cannot look up or return an existing account — and it takes no
+  // only *creates* accounts â it cannot look up or return an existing account â and it takes no
   // arguments, so it carries no user identity. The Workshop persists the returned account (like an
   // OAuth-connected account) and treats it as the authority thereafter. Present only on vendors that
   // set VendorDescription.autoProvisionsAccount; callers gate on that flag rather than probing, since
@@ -532,7 +532,7 @@ export interface GatekeeperUser extends WorkerEntrypoint {
 
   // For vendors that advertise `providesAuth`, returns the account's email address for use as the
   // user's sign-in identity. The email MUST be verified by the provider (e.g. Google
-  // `email_verified`, a GitHub primary+verified email, or a Cloudflare account email) — the
+  // `email_verified`, a GitHub primary+verified email, or a Cloudflare account email) â the
   // Workshop keys accounts by email, so an unverified address would allow account takeover.
   // Returns null when the account has no verified email or the vendor does not support auth.
   getAuthenticatedEmail(): Promise<string | null>;
@@ -557,7 +557,7 @@ export interface GatekeeperUser extends WorkerEntrypoint {
 
   // Get a Durable Object class implementing the account's agent singleton, for accounts whose
   // describe() sets AccountDescription.singleton. The Workshop installs this gatekeeper into the
-  // owner's gadgets like any other gatekeeper — as a Facet under the Overseer — and auto-provides
+  // owner's gadgets like any other gatekeeper â as a Facet under the Overseer â and auto-provides
   // its session to the agent as an unnamed capsule. Because it is a normal Gatekeeper, the session
   // (Gatekeeper.startSession) and catalog (Gatekeeper.getAgentCatalog) run gadget-side in the
   // gatekeeper's own worker with no round-trip back through this account DO; every read is still
@@ -1002,7 +1002,7 @@ export type ActionDescription = {
   //
   // Set this for actions whose effects the gatekeeper does NOT simulate. Because a not-yet-approved
   // action isn't reflected by later reads, an agent that keeps going would observe a world where
-  // its action "didn't happen" — and tends to get confused: re-trying, second-guessing, or undoing
+  // its action "didn't happen" â and tends to get confused: re-trying, second-guessing, or undoing
   // its own work. When this is set, the harness driving the agent should suspend the current turn
   // once the action is submitted and resume it after the user decides (or leave it ended on deny),
   // rather than letting the agent proceed against state the action hasn't been applied to.
@@ -1049,6 +1049,11 @@ export type ActionDescription = {
   // any tag-keyed rule -- those always require manual approval. `actionKind.tag` is what auto-
   // approval rules and the future policy engine key on; `actionKind.label` is shown in the UI.
   actionKind?: ActionKind;
+
+  // Optional branch or ref the action targets. Gatekeepers that operate on versioned branches
+  // (e.g., GitHub repositories) can set this so auto-approval rules can be scoped to branch
+  // patterns. Leave unset when the action is not branch-specific.
+  branchRef?: string;
 }
 
 // Describes a registered hook, for display purposes (e.g. so the user can see what hooks are

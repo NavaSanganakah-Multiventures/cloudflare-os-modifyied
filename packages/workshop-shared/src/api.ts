@@ -584,7 +584,7 @@ export interface AuthenticatedApi extends RpcTarget {
 
   // Returns a capability for managing deployment-wide admin settings, or null when the caller is not
   // an admin. The access check happens once here, so the returned stub's methods need no per-call
-  // checks. (Authentication config — sign-in providers, password login — is intentionally not
+  // checks. (Authentication config ÃÂ¢ÃÂÃÂ sign-in providers, password login ÃÂ¢ÃÂÃÂ is intentionally not
   // managed here; it stays env-var driven.)
   getAdminApi(): Promise<RpcStub<AdminApi> | null>;
 
@@ -605,7 +605,7 @@ export type GatekeeperAppInfo = {
 };
 
 // ---------------------------------------------------------------------------
-// Context Library — pluggable separate worker (packages/gatekeeper-context)
+// Context Library ÃÂ¢ÃÂÃÂ pluggable separate worker (packages/gatekeeper-context)
 // ---------------------------------------------------------------------------
 //
 // The Context Library lives in its own Worker, bound as the auto-provisioned gatekeeper
@@ -654,7 +654,7 @@ export type AdminResource = {
   enabled: boolean;
 };
 
-// Provisioning mode for an auto-provisioning ("ambient") gatekeeper — one that mints a connected
+// Provisioning mode for an auto-provisioning ("ambient") gatekeeper ÃÂ¢ÃÂÃÂ one that mints a connected
 // account with no OAuth flow (VendorDescription.autoProvisionsAccount), e.g. the Context Library:
 //   - 'disabled': not available; no account is provisioned and any existing one is dormant.
 //   - 'optional': users opt in from the Connectors page; not forced on anyone (the default).
@@ -772,7 +772,7 @@ export type AdminFormat = {
 // Capability for managing deployment-wide admin settings, obtained via
 // AuthenticatedApi.getAdminApi() (which is null for non-admins). The access check happens when the
 // capability is minted, so these methods don't re-check. Covers branding, agent instructions, and
-// which gatekeeper connectors/resources are offered — NOT authentication config (that's env-var
+// which gatekeeper connectors/resources are offered ÃÂ¢ÃÂÃÂ NOT authentication config (that's env-var
 // driven). Each setter throws on invalid input.
 export interface AdminApi {
   // Read all admin-managed settings for the admin UI in one call.
@@ -1453,14 +1453,14 @@ export interface Overseer extends RpcTarget {
   //
   // Auto-approval rules are workspace-wide per gatekeeper: approving an action kind approves it
   // no matter which gadget invokes it.
-  setAutoApprovedActionKind(gatekeeperId: WorkpieceId, actionKind: ActionKind): Promise<void>;
+  setAutoApprovedActionKind(gatekeeperId: WorkpieceId, actionKind: ActionKind, branchPatterns?: string[]): Promise<void>;
 
   // Remove the auto-approval rule for `tag` on the given gatekeeper; matching actions then
   // require manual approval again.
   removeAutoApprovedActionKind(gatekeeperId: WorkpieceId, tag: string): Promise<void>;
 
   // List the currently-enabled auto-approval rules.
-  listAutoApprovedActionKinds(): Promise<Array<{ gatekeeperId: WorkpieceId; actionKind: ActionKind }>>;
+  listAutoApprovedActionKinds(): Promise<Array<{ gatekeeperId: WorkpieceId; actionKind: ActionKind; branchPatterns?: string[] }>>;
 
   // List the auto-approvable action kinds offered by gatekeepers bound in this workspace. Each
   // entry identifies its connection and reports whether a matching auto-approval rule is enabled.
@@ -1962,7 +1962,7 @@ export type AiChatMessageBody = {
   // vendor's SupportedResource.urlPattern values, e.g. "https://github.com/:owner/:repo" or the
   // whole-instance "https://*"). The backend guarantees every connection request resolves to a
   // concrete resource (see resolveRequestedResource), and the accept modal pre-selects exactly this
-  // resource — so accepting never opens a blank "create new connection" picker.
+  // resource ÃÂ¢ÃÂÃÂ so accepting never opens a blank "create new connection" picker.
   resourceUrlPattern?: string;
 
   // Why the agent wants this connection. Shown to the user to inform their decision.
@@ -2497,6 +2497,10 @@ export type PreApprovableAction = {
   actionKind: ActionKind;
   alreadyEnabled: boolean;
 
+  // Branch patterns for the enabled rule, if any. Empty/absent means the rule applies to any
+  // branch. The UI can surface these so users know which branches are auto-approved.
+  branchPatterns?: string[];
+
   // Vendor of the gatekeeper holding this connection. Absent for vendorless gatekeepers.
   vendorId?: string;
 };
@@ -2670,8 +2674,8 @@ export type BlueprintGadgetSummary = {
   dirty?: boolean;        // true if last publish failed and needs retry
 };
 
-// Where a blueprint the user owns came from. This distinguishes the case the UI cares about — the
-// source workspace still exists, so it can be opened and it owns deletion of the blueprint — from
+// Where a blueprint the user owns came from. This distinguishes the case the UI cares about ÃÂ¢ÃÂÃÂ the
+// source workspace still exists, so it can be opened and it owns deletion of the blueprint ÃÂ¢ÃÂÃÂ from
 // the two cases where it does not, so no caller has to infer that from display text. `workspaceId`
 // is reachable only in the case where opening it is meaningful.
 export type BlueprintSource =
