@@ -182,7 +182,7 @@ export const sampleMessages: ChatMessage[] = [
       {
         id: 'tc2',
         name: 'request_connection',
-        label: 'Requesting Slack access â #general, #engineering',
+        label: 'Requesting Slack access — #general, #engineering',
         status: 'complete',
         duration: 320,
         icon: 'connection',
@@ -323,7 +323,7 @@ export const sampleMessages: ChatMessage[] = [
         duration: 280,
         icon: 'shield',
         input: { connection: 'slack', additionalScopes: ['chat:write'], targetResource: '#general' },
-        output: 'Additional scope granted â can now post to #general',
+        output: 'Additional scope granted — can now post to #general',
       },
       {
         id: 'tc13',
