@@ -1,4 +1,16 @@
-import type { GitHubRepo } from "@gadgets/workshop-shared/gatekeeper";
+// Local stub for the repository binding until the container runner feature is fully integrated.
+type GitHubFileContent = { contentBase64: string; sha: string; path: string };
+type GitHubCommitHandle = { getResult(): Promise<{ sha: string } | null>; };
+type GitHubRepo = {
+  readFile(path: string, ref?: string): Promise<GitHubFileContent>;
+  writeFile(options: {
+    path: string;
+    message: string;
+    content: string;
+    sha?: string;
+    branch?: string;
+  }): Promise<GitHubCommitHandle>;
+};
 
 // Unique identifier for one container run request.
 export type ContainerRunId = string;

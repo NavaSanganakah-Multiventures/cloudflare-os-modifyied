@@ -630,8 +630,6 @@ Gives up on handling the current callbacks, rejecting all outstanding callbacks 
 // =======================================================================================
 
 import { StreamingToolInputParser } from './streaming-json-parser.js';
-import { detectDefaultContainerCommand, makeContainerRunRequest } from './container-runner.js';
-import { detectDefaultContainerCommand, makeContainerRunRequest } from './container-runner.js';
 
 type CodePreviewEntry = {
   toolName: "writeFile" | "editFile";
@@ -2419,48 +2417,6 @@ export async function runAgent(
           toolCallNotes.set(toolCallId, {
             error: toolErrorText(error)
           });
-          throw error;
-        }
-      }
-    }),
-
-    runContainerCheck: defineTool({
-      name: "runContainerCheck",
-      label: "Run container check",
-      description:
-          "Queue a container-based build or test check on this workspace. After you " +
-          "complete code changes, use this tool to trigger a GitHub Actions runner that executes " +
-          "the appropriate command (e.g., pnpm run build). The result is written to " +
-          ".agent/container-result.json.",
-      parameters: Type.Object({
-        workpiece: workpieceParam,
-        command: Type.Optional(Type.Array(Type.String(), {
-          description: "Optional command array. If omitted, the command is auto-detected.",
-        })),
-        branch: Type.String({ description: "Git branch on which the check should run." }),
-      }),
-      execute: async (toolCallId, {workpiece, command, branch}) => {
-        try {
-          let resolved = hooks.resolveWorkpieceRoot(resolveToolWorkpieceId(workpiece), true, chatId);
-          const rootMap = getSessionYDoc().getMap<Y.Text>(resolved.rootName);
-          const files = Array.from(rootMap.keys());
-          const chosenCommand = command && command.length > 0 ? command : detectDefaultContainerCommand(files);
-          const request = makeContainerRunRequest(chosenCommand, branch);
-          const requestContent = JSON.stringify(request, null, 2);
-          applyPendingEditToYdoc(getSessionYDoc(), {
-            toolName: "writeFile",
-            rootName: resolved.rootName,
-            filename: ".agent/container-request.json",
-            content: requestContent,
-          });
-          return toolResult(jsonToolResultText({
-            runId: request.runId,
-            status: "queued",
-            command: chosenCommand,
-            message: ".agent/container-request.json written. Runner will execute the command.",
-          }));
-        } catch (error) {
-          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
           throw error;
         }
       }

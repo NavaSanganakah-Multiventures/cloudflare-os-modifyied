@@ -1478,13 +1478,6 @@ export interface Overseer extends RpcTarget {
   // Existing rules are not affected; the change applies to gatekeepers connected after this call.
   setDefaultAutoApproveBranchPatterns(patterns: string[]): Promise<void>;
 
-  // Request execution of a shell command in a external CI container (GitHub Actions runner).
-  // Returns a run id that can be polled with getContainerRunResult.
-  requestContainerRun(command: string[], branch: string): Promise<string>;
-
-  // Get the result of a previously requested container run, if it has completed.
-  getContainerRunResult(runId: string, branch: string): Promise<ContainerRunResult | undefined>;
-
   // Accept an agent's pending connection request (a "connectionRequest" chat message). The caller
   // is responsible for having actually created the gatekeeper (via newGatekeeper()) and passes the
   // resulting gatekeeper id. The gatekeeper is surfaced to the agent as a named binding in the
