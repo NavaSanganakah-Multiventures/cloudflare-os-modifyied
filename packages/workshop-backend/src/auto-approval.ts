@@ -33,17 +33,23 @@ function branchMatchesPatterns(branchRef: string, patterns: string[]): boolean {
 // Simple glob matcher supporting only "*" (any sequence).
 function matchesGlob(str: string, pattern: string): boolean {
   if (pattern === "*") return true;
+  // No wildcard means exact match.
+  if (!pattern.includes("*")) return str === pattern;
   let parts = pattern.split("*");
-  let pos = 0;
-  for (let i = 0; i < parts.length; i++) {
+  // Leading literal must match the start of the string.
+  if (parts[0] !== "" && !str.startsWith(parts[0])) return false;
+  // Trailing literal must match the end of the string.
+  if (parts[parts.length - 1] !== "" && !str.endsWith(parts[parts.length - 1])) return false;
+  let pos = parts[0].length;
+  let end = str.length - parts[parts.length - 1].length;
+  for (let i = 1; i < parts.length - 1; i++) {
     let part = parts[i];
+    if (part === "") continue;
     let idx = str.indexOf(part, pos);
-    if (idx === -1) return false;
-    if (i === 0 && idx !== 0) return false;
-    if (i === parts.length - 1 && idx + part.length !== str.length) return false;
+    if (idx === -1 || idx + part.length > end) return false;
     pos = idx + part.length;
   }
-  return true;
+  return pos <= end;
 }
 
 // Applies a single eligible pending action: invoke the gatekeeper, mark it approved, persist. The
