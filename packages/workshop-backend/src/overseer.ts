@@ -7849,7 +7849,8 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     // suspended forever (the drain applies the action but never resumes the agent).
     let affectedChats = new Set<number>();
     for (let pending of this.impl.storage.actions.list()) {
-      if (pending.state === "pending" && pending.gatekeeperId === gatekeeperId
+      if (pending.type === "action" && pending.state === "pending"
+          && pending.gatekeeperId === gatekeeperId
           && pending.caller.from === "agent" && pending.description.awaitDecision) {
         affectedChats.add(pending.caller.chatId);
       }
