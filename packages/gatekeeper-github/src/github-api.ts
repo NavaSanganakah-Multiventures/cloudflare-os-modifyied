@@ -183,6 +183,37 @@ export type GitHubRefResponse = {
   };
 };
 
+export type GitHubWorkflowResponse = {
+  id: number;
+  name: string;
+  path: string;
+  state: "active" | "deleted" | "disabled" | "disabled_inactivity";
+  created_at: string;
+  updated_at: string;
+  url: string;
+  html_url: string;
+};
+
+export type GitHubWorkflowRunResponse = {
+  id: number;
+  name: string;
+  head_branch: string;
+  head_sha: string;
+  run_number: number;
+  event: string;
+  status: "queued" | "in_progress" | "completed";
+  conclusion: "success" | "failure" | "neutral" | "cancelled" | "skipped" | "timed_out" | "action_required" | null;
+  workflow_id: number;
+  url: string;
+  html_url: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GitHubWorkflowRunsResponse = {
+  total_count: number;
+  workflow_runs: GitHubWorkflowRunResponse[];
+};
 export class GitHubApiError extends Error {
   status: number;
   details?: unknown;
@@ -1291,5 +1322,73 @@ export class GitHubApi {
         },
       },
     )).data;
+  }
+
+  async listWorkflows(owner: string, repo: string): Promise<GitHubWorkflowResponse[]> {
+    const result = await this.#request<{ workflows: GitHubWorkflowResponse[] }>(
+      "GET",
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows`,
+    );
+    return result.data.workflows;
+  }
+
+  async getWorkflow(owner: string, repo: string, workflowId: number): Promise<GitHubWorkflowResponse> {
+    const result = await this.#request<GitHubWorkflowResponse>(
+      "GET",
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/${workflowId}`,
+    );
+    return result.data;
+  }
+
+  async dispatchWorkflow(
+    owner: string,
+    repo: string,
+    workflowId: number,
+    ref: string,
+    inputs?: Record<string, string>,
+  ): Promise<void> {
+    await this.#request<void>(
+      "POST",
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/${workflowId}/dispatches`,
+      {
+        body: { ref, inputs },
+      },
+    );
+  }
+
+  async listWorkflowRuns(
+    owner: string,
+    repo: string,
+    workflowId: number,
+    options: {
+      branch?: string;
+      event?: string;
+      status?: "queued" | "in_progress" | "completed";
+      per_page: number;
+      page: number;
+    },
+  ): Promise<GitHubWorkflowRunResponse[]> {
+    const result = await this.#request<GitHubWorkflowRunsResponse>(
+      "GET",
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/${workflowId}/runs`,
+      { query: options },
+    );
+    return result.data.workflow_runs;
+  }
+
+  async getWorkflowRun(owner: string, repo: string, runId: number): Promise<GitHubWorkflowRunResponse> {
+    const result = await this.#request<GitHubWorkflowRunResponse>(
+      "GET",
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${runId}`,
+    );
+    return result.data;
+  }
+
+  async getWorkflowRunLogsUrl(owner: string, repo: string, runId: number): Promise<string> {
+    const result = await this.#request<{ logs_url: string }>(
+      "GET",
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${runId}`,
+    );
+    return result.data.logs_url;
   }
 }
