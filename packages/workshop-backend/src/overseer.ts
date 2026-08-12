@@ -8986,6 +8986,7 @@ class UseOverseerInterface extends RpcTarget implements Overseer {
       owner: await this.owner.whoami(),
       role: "use",
       defaultGadgetId: this.impl.defaultGadgetId,
+      workspaceInstructions: this.impl.storage.workspaceInstructions.get(),
     };
 
     let titleSubscriber = {
