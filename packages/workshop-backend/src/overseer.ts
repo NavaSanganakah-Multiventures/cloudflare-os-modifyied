@@ -428,6 +428,10 @@ const MAX_CHAT_ATTACHMENTS_PER_MESSAGE = 5;
 const MAX_CHAT_ATTACHMENT_TOTAL_BYTES = 5 * 1024 * 1024;
 // Staged attachments (not associated with chat) older than this may be deleted when the gadget next stages an attachment.
 const MAX_STAGED_CHAT_ATTACHMENT_AGE_MS = 24 * 60 * 60 * 1000;
+
+// Built-in branch-pattern guard for auto-approval rules on repo-style gatekeepers (e.g. GitHub).
+// Keeps auto-approved writes off the default branch when no workspace default has been configured.
+export const DEFAULT_AUTO_APPROVE_BRANCH_PATTERNS: string[] = ["fix/*", "feature/*", "agent/*", "*", "!main"];
 const CHAT_ATTACHMENT_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function validateChatAttachmentId(id: string): string {
@@ -7842,10 +7846,11 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
 
     let profile = await this.#getClientProfile();
     // When the caller does not specify branch patterns (e.g., the UI toggle or "Always approve"
-    // button in the activity panel), fall back to the workspace default so GitHub repo rules
-    // stay restricted to non-default branches.
+    // button in the activity panel), fall back to the workspace default and then the built-in
+    // guard so repo-style gatekeepers do not auto-approve writes to the default branch.
     if (branchPatterns === undefined) {
-      branchPatterns = this.impl.storage.defaultAutoApproveBranchPatterns.get();
+      branchPatterns = this.impl.storage.defaultAutoApproveBranchPatterns.get() ??
+          DEFAULT_AUTO_APPROVE_BRANCH_PATTERNS;
     }
     this.impl.storage.autoApproveTags.put({
       gatekeeperId,
