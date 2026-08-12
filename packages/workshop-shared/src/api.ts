@@ -1464,7 +1464,7 @@ export interface Overseer extends RpcTarget {
   removeAutoApprovedActionKind(gatekeeperId: WorkpieceId, tag: string): Promise<void>;
 
   // List the currently-enabled auto-approval rules.
-  listAutoApprovedActionKinds(): Promise<Array<{ gatekeeperId: WorkpieceId; actionKind: ActionKind; branchPatterns?: string[] }>>;
+  listAutoApprovedActionKinds(): Promise<Array<{ gatekeeperId: WorkpieceId; actionKind: ActionKind; branchPatterns?: string[]; resourceTitle: string; vendorId?: string }>>;
 
   // List the auto-approvable action kinds offered by gatekeepers bound in this workspace. Each
   // entry identifies its connection and reports whether a matching auto-approval rule is enabled.

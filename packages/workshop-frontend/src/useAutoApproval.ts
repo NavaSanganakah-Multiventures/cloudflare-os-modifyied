@@ -23,7 +23,7 @@ export function autoApprovalKey(entry: { gatekeeperId: number; actionKind: Actio
 export function useAutoApproval(overseer: RpcStub<Overseer> | null) {
   const toasts = useKumoToastManager()
   const [catalog, setCatalog] = useState<PreApprovableAction[]>([])
-  const [rules, setRules] = useState<Array<{ gatekeeperId: number; actionKind: ActionKind; branchPatterns?: string[] }>>([])
+  const [rules, setRules] = useState<Array<{ gatekeeperId: number; actionKind: ActionKind; branchPatterns?: string[]; resourceTitle?: string; vendorId?: string }>>([])
   const [defaultPatterns, setDefaultPatternsState] = useState<string[] | undefined>(undefined)
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
@@ -102,10 +102,11 @@ export function useAutoApproval(overseer: RpcStub<Overseer> | null) {
       } else {
         byKey.set(key, {
           gatekeeperId: rule.gatekeeperId,
-          resourceTitle: '',
+          resourceTitle: rule.resourceTitle ?? '',
           actionKind: rule.actionKind,
           enabled: true,
           branchPatterns: rule.branchPatterns,
+          vendorId: rule.vendorId,
           orphaned: true,
         })
       }

@@ -428,6 +428,10 @@ const MAX_CHAT_ATTACHMENTS_PER_MESSAGE = 5;
 const MAX_CHAT_ATTACHMENT_TOTAL_BYTES = 5 * 1024 * 1024;
 // Staged attachments (not associated with chat) older than this may be deleted when the gadget next stages an attachment.
 const MAX_STAGED_CHAT_ATTACHMENT_AGE_MS = 24 * 60 * 60 * 1000;
+
+// Built-in branch-pattern guard for auto-approval rules on repo-style gatekeepers (e.g. GitHub).
+// Keeps auto-approved writes off the default branch when no workspace default has been configured.
+export const DEFAULT_AUTO_APPROVE_BRANCH_PATTERNS: string[] = ["fix/*", "feature/*", "agent/*", "*", "!main"];
 const CHAT_ATTACHMENT_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function validateChatAttachmentId(id: string): string {
@@ -2818,12 +2822,16 @@ class OverseerImpl implements AgentHooks {
       }
       assertChatAttachmentSupportedByProvider(provider, content.state.mimeType, content.data.byteLength);
       total += content.data.byteLength;
-      result.push({
+      let ref: ChatAttachmentRef = {
         id,
         mimeType: content.state.mimeType,
         name: content.state.name,
         size: content.data.byteLength,
-      });
+      };
+      if (isAllowedChatAttachmentImageMimeType(content.state.mimeType)) {
+        ref.content = content.data;
+      }
+      result.push(ref);
     }
     if (total > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
       throw new Error("Attached files are too large.");
@@ -7837,6 +7845,13 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     }
 
     let profile = await this.#getClientProfile();
+    // When the caller does not specify branch patterns (e.g., the UI toggle or "Always approve"
+    // button in the activity panel), fall back to the workspace default and then the built-in
+    // guard so repo-style gatekeepers do not auto-approve writes to the default branch.
+    if (branchPatterns === undefined) {
+      branchPatterns = this.impl.storage.defaultAutoApproveBranchPatterns.get() ??
+          DEFAULT_AUTO_APPROVE_BRANCH_PATTERNS;
+    }
     this.impl.storage.autoApproveTags.put({
       gatekeeperId,
       actionKind,
@@ -7869,12 +7884,17 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
 
   // List the enabled auto-approval rules.
   async listAutoApprovedActionKinds()
-      : Promise<Array<{ gatekeeperId: WorkpieceId; actionKind: ActionKind; branchPatterns?: string[] }>> {
-    return [...this.impl.storage.autoApproveTags.list()].map(rule => ({
-      gatekeeperId: rule.gatekeeperId,
-      actionKind: rule.actionKind,
-      branchPatterns: rule.branchPatterns,
-    }));
+      : Promise<Array<{ gatekeeperId: WorkpieceId; actionKind: ActionKind; branchPatterns?: string[]; resourceTitle: string; vendorId?: string }>> {
+    return [...this.impl.storage.autoApproveTags.list()].map(rule => {
+      let gatekeeper = this.impl.storage.gatekeepers.get(rule.gatekeeperId);
+      return {
+        gatekeeperId: rule.gatekeeperId,
+        actionKind: rule.actionKind,
+        branchPatterns: rule.branchPatterns,
+        resourceTitle: gatekeeper?.resourceTitle || "(title unavailable)",
+        vendorId: gatekeeper?.creationSpec?.type === "gatekeeper" ? gatekeeper.creationSpec.vendorId : undefined,
+      };
+    });
   }
 
   async getDefaultAutoApproveBranchPatterns(): Promise<string[] | undefined> {
@@ -7894,10 +7914,9 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       }
     }
 
-    // TODO: a single gatekeeper failing (e.g. a rejected RPC) currently fails the whole catalog,
-    // since we let getAutoApprovableActions() reject. Eventually we should isolate per-gatekeeper
-    // failures and surface them to the UI (e.g. return the actions we could gather plus a list of
-    // gatekeepers we couldn't reach) so one bad connection doesn't hide everyone else's actions.
+    // Isolated per-gatekeeper calls: a single failing gatekeeper must not hide the auto-approvable
+    // actions of every other connection. We still surface the actions we could gather; failures
+    // are logged and can be exposed to the UI later.
     let perGatekeeper = [...boundIds]
         .map(id => this.impl.storage.gatekeepers.get(id))
         .filter(gk => gk !== undefined)
@@ -7920,7 +7939,19 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       });
     });
 
-    return (await Promise.all(perGatekeeper)).flat();
+    let settled = await Promise.allSettled(perGatekeeper);
+    let flat: PreApprovableAction[] = [];
+    for (let result of settled) {
+      if (result.status === "fulfilled") {
+        flat.push(...result.value);
+      } else {
+        logger.warn("failed to load auto-approvable actions for a gatekeeper", {
+          event: "auto.approval.catalog.gatekeeper.failed",
+          error: result.reason,
+        });
+      }
+    }
+    return flat;
   }
 
   // Find a pending connectionRequest message by id. The request id encodes the chat id as a prefix
