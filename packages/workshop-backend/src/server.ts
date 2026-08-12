@@ -31,6 +31,32 @@ import { createWorkshopLogger } from "./observability";
 
 const logger = createWorkshopLogger("workshop.server");
 
+// Parse the ADMINS config into a list of usernames. ADMINS is ideally a JSON array, but a
+// plain comma-separated string (or a single username/email) is also accepted so that a non-JSON
+// value like "alice@example.com" doesn't crash admin checks with a JSON parse error.
+function parseAdmins(admins: unknown): string[] {
+  if (Array.isArray(admins)) {
+    return admins.map(a => String(a).trim()).filter(Boolean);
+  }
+  if (typeof admins === "string") {
+    let trimmed = admins.trim();
+    if (!trimmed) return [];
+    // Prefer the JSON array form, but fall back to a plain comma-separated list.
+    if (trimmed.startsWith("[")) {
+      try {
+        let parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.map(a => String(a).trim()).filter(Boolean);
+        }
+      } catch {
+        // Not valid JSON; fall through to comma-separated handling below.
+      }
+    }
+    return trimmed.split(",").map(s => s.trim()).filter(Boolean);
+  }
+  throw new TypeError("ADMINS must be configured as an array of usernames or a comma-separated string.");
+}
+
 // Set once we've asked the AdminSettings DO to install the bundled format blueprints (see the
 // fetch handler), so later requests skip the call. The DO holds the real answer.
 let formatBlueprintInstallStarted = false;
@@ -93,17 +119,14 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
 
     if (!name || !admins) return false;
 
-    if (typeof admins === "string") {
-      // Admins should be a JSON binding of array type, but `.env` doesn't actually let you
-      // specify JSON bindings, so we also support a string that parses as JSON array.
-      admins = JSON.parse(admins);
+    // Admin checks must never throw or surface errors: a misconfigured ADMINS value should
+    // fail closed (deny admin access) rather than leak config details such as an admin's
+    // username/email in a thrown error message.
+    try {
+      return parseAdmins(admins).includes(name);
+    } catch {
+      return false;
     }
-
-    if (!Array.isArray(admins)) {
-      throw new TypeError("ADMINS must be configured as an array of usernames.");
-    }
-
-    return admins.includes(name);
   }
 
   whoami(): Promise<AiChatAuthorInfo> {
@@ -550,7 +573,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   // accounts are auto-provisioned singletons (one per vendor), so the vendor id identifies them.
   async listGatekeeperApps(): Promise<GatekeeperAppInfo[]> {
     // listProvidedAccounts provisions auto-provisioned accounts first (idempotent), so their apps
-    // appear in the nav even before the user opens a gadget — in a single round trip.
+    // appear in the nav even before the user opens a gadget Ã¢ÂÂ in a single round trip.
     let accounts = await this.user.listProvidedAccounts();
     return accounts
         .filter(account => account.description.providesUi)
@@ -606,7 +629,7 @@ async function serveBlueprintScreenshot(env: Env, blueprintId: string): Promise<
 }
 
 // Returned by startGatekeeperLogin(). Wraps the PendingLogin DO so the client awaits the login
-// result through a capability (this stub) rather than a guessable id — no login id is ever exposed
+// result through a capability (this stub) rather than a guessable id Ã¢ÂÂ no login id is ever exposed
 // to the client. Disposing the stub (e.g. when the pop-up closes or the component unmounts) cancels
 // the in-flight wait and lets the DO be evicted.
 @validateRpc()
@@ -645,7 +668,7 @@ class PublicApiImpl extends RpcTarget implements PublicApi {
     if (!desc.providesAuth) throw new Error(`"${vendorId}" does not provide authentication.`);
 
     // The PendingLogin DO is the rendezvous between this request and the (separate) OAuth-callback
-    // invocation. The client never sees its id — we hand back an `attempt` stub instead.
+    // invocation. The client never sees its id Ã¢ÂÂ we hand back an `attempt` stub instead.
     const pendingId = this.ctx.exports.PendingLogin.newUniqueId();
     const pending = this.ctx.exports.PendingLogin.get(pendingId);
     const callback = this.ctx.exports.LoginConnectCallbackImpl(
