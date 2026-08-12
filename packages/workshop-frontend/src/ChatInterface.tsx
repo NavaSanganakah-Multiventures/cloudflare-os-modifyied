@@ -5223,45 +5223,50 @@ function ChatInterface({
   // Subscribe to chat updates
   useEffect(() => {
     let isMounted = true;
+    let disposed = false;
+    let brokenUnsubscribe: (() => void) | undefined;
 
     const subscribe = async () => {
       try {
         // Subscribe using startAfter if we have a last message timestamp
         const startAfter = cacheRef.current.lastMessageTimestamp || undefined;
 
-        // Don't await - subscribeToChat returns a promise that doesn't resolve until disconnect
-        // Store the promise itself as the subscription
-        // Pass the subscriber instance (which is now a proper class instance)
-        const subscription = overseer.subscribeToChat(
+        // subscribeToChat resolves to the subscription stub once it is established.
+        const subscription = await overseer.subscribeToChat(
           subscriberRef.current,
           startAfter,
         );
 
-        subscriptionRef.current = subscription;
-
-        if (isMounted) {
-          setIsSubscribed(true);
-
-          // After subscribing, load the list of chats and models
-          // This is safe because subscription will catch any new activity
-          const [chats, models] = await Promise.all([
-            overseer.listChats(),
-            overseer.listModels(),
-          ]);
-
-          chats.forEach((chat) => {
-            cacheRef.current.chats.set(chat.id, chat);
-          });
-          bumpChatListVersion();
-          setChatListReady(true);
-
-          setAvailableModels(models);
-
-          setSelectedModel(getStoredSelectedModel(models));
-
-          forceUpdate();
+        if (!isMounted || disposed) {
+          subscription[Symbol.dispose]();
+          return;
         }
+
+        subscriptionRef.current = subscription;
+        setIsSubscribed(true);
+
+        // After subscribing, load the list of chats and models
+        // This is safe because subscription will catch any new activity
+        const [chats, models] = await Promise.all([
+          overseer.listChats(),
+          overseer.listModels(),
+        ]);
+
+        if (!isMounted) return;
+
+        chats.forEach((chat) => {
+          cacheRef.current.chats.set(chat.id, chat);
+        });
+        bumpChatListVersion();
+        setChatListReady(true);
+
+        setAvailableModels(models);
+
+        setSelectedModel(getStoredSelectedModel(models));
+
+        forceUpdate();
       } catch (err) {
+        if (!isMounted) return;
         if (!logRpcFailure("Failed to subscribe to chats:", err)) {
           reportIssue('chat.subscription-load', err)
           toasts.add({ title: "Unable to load conversations", variant: "error" });
@@ -5271,21 +5276,27 @@ function ChatInterface({
 
     subscribe();
 
-    // Set up reconnection handling
-    overseer.onRpcBroken?.((error) => {
+    // Set up reconnection handling. The subscriber stub is disposed on disconnect server-side;
+    // re-subscribe so the UI continues to receive messages/stream events after a DO migration.
+    brokenUnsubscribe = overseer.onRpcBroken?.((error) => {
       console.warn("RPC connection broken:", error);
+      if (!isMounted) return;
       setIsSubscribed(false);
-      // Cache persists, component will get new overseer prop and resubscribe
+      // Re-run this effect to establish a fresh subscription.
+      setReconnectNonce((n) => n + 1);
     });
 
     return () => {
       isMounted = false;
+      disposed = true;
+      brokenUnsubscribe?.();
       if (subscriptionRef.current) {
         subscriptionRef.current[Symbol.dispose]();
+        subscriptionRef.current = undefined;
       }
       // Note: subscriberRef.current stays alive for potential resubscription
     };
-  }, [overseer]);
+  }, [overseer, reconnectNonce]);
 
   // Patch cached chat messages on action upserts.
   useActionEntries(overseer, (record) => {
