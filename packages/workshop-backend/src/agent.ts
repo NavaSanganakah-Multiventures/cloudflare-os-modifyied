@@ -2502,10 +2502,16 @@ export async function runAgent(
               "Whether this run may make outbound internet requests, e.g. to fetch " +
               "dependencies from a registry. Default false.",
         })),
+        timeoutMs: Type.Optional(Type.Number({
+          description:
+              "Hard timeout in milliseconds for the command and the container start. If it hasn't " +
+              "finished by then the process is killed and exitCode -1 is returned. Defaults to " +
+              "300000 (5 minutes).",
+        })),
       }),
-      execute: async (toolCallId, {command, cwd, enableInternet}) => {
+      execute: async (toolCallId, {command, cwd, enableInternet, timeoutMs}) => {
         try {
-          let result = await hooks.runContainerCheck(chatId, {command, cwd, enableInternet});
+          let result = await hooks.runContainerCheck(chatId, {command, cwd, enableInternet, timeoutMs});
           let formatted =
               "Exit code: " + result.exitCode + (result.exitCode === -1 ? " (timed out)" : "") +
               "\nrunId: " + result.runId + "\n\n" + result.output;
