@@ -27,11 +27,20 @@ function parsePublicCollections(raw: string): ContextCollectionSummary[] {
     console.warn("Context Library: ignoring non-array public-collections KV snapshot.", { raw });
     return [];
   }
-  let list = parsed as ContextCollectionSummary[];
-  for (let entry of list) {
-    entry.lastUpdated = new Date(entry.lastUpdated);
+  const result: ContextCollectionSummary[] = [];
+  for (const entry of parsed) {
+    if (entry && typeof entry.id === 'string' && typeof entry.title === 'string' &&
+        (entry.documentCount === undefined || typeof entry.documentCount === 'number') &&
+        (entry.lastUpdated === undefined || typeof entry.lastUpdated === 'string' || entry.lastUpdated instanceof Date)) {
+      result.push({
+        ...entry,
+        lastUpdated: entry.lastUpdated ? new Date(entry.lastUpdated) : new Date(),
+      });
+    } else {
+      console.warn("Context Library: ignoring malformed public-collections KV entry.", { entry });
+    }
   }
-  return list;
+  return result;
 }
 
 // The public collections for a domain (readable by every user in that domain).
