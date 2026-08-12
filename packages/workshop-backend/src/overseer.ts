@@ -1,6 +1,6 @@
 import { RpcCompatible, RpcStub, RpcTarget } from "capnweb";
 import { validateRpc } from "capnweb-validate";
-import { Overseer, GadgetMetadata, UiBundle, WorkpieceId, WorkpieceSummary, WorkpiecesSubscriber, GadgetClient, GadgetBindingInfo, GatekeeperClient, ActionState, ActionLogEntry, ActionsSubscriber, CodeUpdate, CodeSubscriber, AiChatMetadata, AiChatMessage, AiChatHistoryPage, AiChatSubscriber, AiChatAuthorInfo, AiModelConfig, AiChatMessageBody, AgentSpawnerConfig, ConsoleLogSubscriber, ConsoleLogEvent, CapsuleSpecifier, CollaboratorInfo, CollaboratorRole, AffectedCollaborator, ShareLinkInfo, GatekeeperCreationSpec, ObserverConfigCallback, ObserverBindingNeed, ObserverBindingFailure, BlueprintBindingAnnotation, BlueprintBinding, BlueprintMetadata, BlueprintOutput, MessageFormatRef, isOutputIcon, SpawnerEnvTarget, BlueprintGadgetSummary, AiChatStreamEvent, BlueprintScreenshotUpload, BLUEPRINT_SCREENSHOT_R2_PREFIX, blueprintScreenshotUrl, ChatAttachmentUpload, ChatAttachmentHandle, ChatAttachmentRef, BoundHookInfo, PreApprovableAction, PresenceParticipant, PresenceSubscriber, SlashCommandChoice, SlashCommandRequest, validateBindingName, createOpenGadgetError, OPEN_GADGET_ERROR_CODES, resolveSiteName } from '@gadgets/workshop-shared/api';
+import { Overseer, GadgetMetadata, UiBundle, WorkpieceId, WorkpieceSummary, WorkpiecesSubscriber, GadgetClient, GadgetBindingInfo, GatekeeperClient, ActionState, ActionLogEntry, ActionsSubscriber, CodeUpdate, CodeSubscriber, AiChatMetadata, AiChatMessage, AiChatHistoryPage, AiChatSubscriber, AiChatAuthorInfo, AiModelConfig, AiChatMessageBody, AgentSpawnerConfig, ConsoleLogSubscriber, ConsoleLogEvent, CapsuleSpecifier, CollaboratorInfo, CollaboratorRole, AffectedCollaborator, ShareLinkInfo, GatekeeperCreationSpec, ObserverConfigCallback, ObserverBindingNeed, ObserverBindingFailure, BlueprintBindingAnnotation, BlueprintBinding, BlueprintMetadata, BlueprintOutput, MessageFormatRef, isOutputIcon, SpawnerEnvTarget, BlueprintGadgetSummary, AiChatStreamEvent, BlueprintScreenshotUpload, BLUEPRINT_SCREENSHOT_R2_PREFIX, blueprintScreenshotUrl, ChatAttachmentUpload, ChatAttachmentHandle, ChatAttachmentRef, BoundHookInfo, PreApprovableAction, PresenceParticipant, PresenceSubscriber, SlashCommandChoice, SlashCommandRequest, validateBindingName, createOpenGadgetError, OPEN_GADGET_ERROR_CODES, resolveSiteName, MAX_WORKSPACE_INSTRUCTIONS_LENGTH } from '@gadgets/workshop-shared/api';
 import { Gatekeeper, HookInitiator, ResourceDescription, ApprovalQueue, ActionDescription, ObservationAuthorizer, ObservationDescription, VendorDescription, SupportedResource, resolveRequestedResource, HookController, HookDescription, AGENT_CATALOG_MAX_ENTRIES, ActionKind } from "@gadgets/workshop-shared/gatekeeper";
 import {
   DurableObject, WorkerEntrypoint, RpcStub as NativeRpcStub,
@@ -726,6 +726,10 @@ function makeOverseerStorage(storage: DurableObjectStorage) {
 
       // The workspace title. (Each chat, gatekeeper, and gadget has its own title, elsewhere.)
       title: "Untitled Workspace",
+
+      // Workspace-specific agent system-prompt instructions, appended to the agent's system prompt
+      // in addition to the deployment-wide instanceInstructions. "" when unset.
+      workspaceInstructions: "",
 
       // If present, this gadget was migrated from version zero, when a workspace had only one
       // gadget. Many stored records that normally contain a `gadgetId` might be missing it; they
@@ -2911,7 +2915,7 @@ class OverseerImpl implements AgentHooks {
 
   // Record an observation that originated from a built-in agent tool (not a gatekeeper).
   // The `gatekeeperId` is set to the BUILTIN_TOOL_GATEKEEPER_ID sentinel so that downstream
-  // code (which expects a gatekeeper to dereference for approve/reject) never touches it — built-in
+  // code (which expects a gatekeeper to dereference for approve/reject) never touches it â built-in
   // observations bypass the approve/reject paths anyway.
   async recordAgentObservation(
       chatId: number,
@@ -5644,6 +5648,10 @@ class OverseerImpl implements AgentHooks {
     }
   }
 
+  async getWorkspaceInstructions(): Promise<string> {
+    return this.storage.workspaceInstructions.get();
+  }
+
   async listConnectableVendors(): Promise<{id: string, displayName: string}[]> {
     try {
       let vendors = await this.#listGatekeeperVendorsCached();
@@ -5669,7 +5677,7 @@ class OverseerImpl implements AgentHooks {
     }
     let lines = [`Resource types offered by "${vendorId}" (${vendor.description.displayName}):`];
     for (let r of vendor.supportedResources) {
-      lines.push(`* ${r.title} — ${r.urlPattern}`)
+      lines.push(`* ${r.title} â ${r.urlPattern}`)
     }
     lines.push(
         `\nTo request one, call requestConnection with vendorId="${vendorId}" and a resourceUrl ` +
@@ -5774,7 +5782,7 @@ class OverseerImpl implements AgentHooks {
       seen.add(id);
       let lines = [
         `* blueprintId: ${id}`,
-        `  ${JSON.stringify(title)} — ${source}`,
+        `  ${JSON.stringify(title)} â ${source}`,
       ];
       let bindingNames = Object.entries(bindings ?? {});
       if (bindingNames.length > 0) {
@@ -5835,7 +5843,7 @@ class OverseerImpl implements AgentHooks {
         `about already *is* one of these, work on that one instead: asking to change an existing ` +
         `output is not a request for a second one.\n\n` +
         formats.map(format =>
-            `* ${format.output.noun} (plural: ${format.output.plural}) — ` +
+            `* ${format.output.noun} (plural: ${format.output.plural}) â ` +
             `${format.blueprintId}` + (format.agentHint ? `; ${format.agentHint}` : ``)).join("\n");
   }
 
@@ -5928,7 +5936,7 @@ class OverseerImpl implements AgentHooks {
             details = `unknown`;
             break;
         }
-        lines.push(`* ${name} — ${JSON.stringify(binding.title)} (${details})` +
+        lines.push(`* ${name} â ${JSON.stringify(binding.title)} (${details})` +
             (binding.description ? `: ${binding.description}` : ``));
       }
     }
@@ -6269,7 +6277,7 @@ class OverseerImpl implements AgentHooks {
   }
 
   // Render the observer verification failures as one line per binding, naming the connection and the
-  // account that was refused: `<resourceTitle> (<account label>) — <reason>.` Cold path only (we're
+  // account that was refused: `<resourceTitle> (<account label>) â <reason>.` Cold path only (we're
   // about to deny the open), so the extra User DO round trip per failure is fine. Discloses nothing
   // new: the reason was either already thrown to this same user or authored by us, and the account is
   // their own.
@@ -6300,7 +6308,7 @@ class OverseerImpl implements AgentHooks {
         });
       }
 
-      return `${observerBindingTitle(gk)} (${label}) — ${failure.reason}`;
+      return `${observerBindingTitle(gk)} (${label}) â ${failure.reason}`;
     }));
 
     return lines.join("\n");
@@ -7248,6 +7256,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       sharingProhibited: this.impl.storage.prohibitAllSharing.get(),
       role: "build",
       defaultGadgetId: this.impl.defaultGadgetId,
+      workspaceInstructions: this.impl.storage.workspaceInstructions.get(),
     };
     if (!this.isOwner) {
       result.owner = await this.owner.whoami();
@@ -7267,6 +7276,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       sharingProhibited: this.impl.storage.prohibitAllSharing.get(),
       role: "build",
       defaultGadgetId: this.impl.defaultGadgetId,
+      workspaceInstructions: this.impl.storage.workspaceInstructions.get(),
     };
 
     // For collaborators, include owner info.
@@ -7277,6 +7287,12 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     let titleSubscriber = {
       update(value: string) {
         metadata.title = value;
+        callback(metadata).catch(unsubscribe);
+      }
+    };
+    let workspaceInstructionsSubscriber = {
+      update(value: string) {
+        metadata.workspaceInstructions = value;
         callback(metadata).catch(unsubscribe);
       }
     };
@@ -7297,12 +7313,14 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       this.impl.storage.title.unsubscribe(titleSubscriber);
       this.impl.storage.totalCost.unsubscribe(costSubscriber);
       this.impl.storage.prohibitAllSharing.unsubscribe(sharingProhibitedSubscriber);
+      this.impl.storage.workspaceInstructions.unsubscribe(workspaceInstructionsSubscriber);
       callback[Symbol.dispose]();
     };
 
     this.impl.storage.title.subscribe(titleSubscriber);
     this.impl.storage.totalCost.subscribe(costSubscriber);
     this.impl.storage.prohibitAllSharing.subscribe(sharingProhibitedSubscriber);
+    this.impl.storage.workspaceInstructions.subscribe(workspaceInstructionsSubscriber);
 
     callback(metadata).catch(unsubscribe);
 
