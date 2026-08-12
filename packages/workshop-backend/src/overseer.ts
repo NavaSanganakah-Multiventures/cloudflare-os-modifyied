@@ -8975,6 +8975,10 @@ class UseOverseerInterface extends RpcTarget implements Overseer {
     };
   }
 
+  async getWorkspaceInstructions(): Promise<string> {
+    return this.impl.storage.workspaceInstructions.get();
+  }
+
   async subscribeToMetadata(
       callback: RpcStub<(metadata: GadgetMetadata) => void>)
       : Promise<RpcStub<{}>> {
@@ -9047,10 +9051,6 @@ class UseOverseerInterface extends RpcTarget implements Overseer {
   // --- Denied methods (build-only) ---
 
   async setTitle(_title: string): Promise<void> { this.#deny(); }
-  async getWorkspaceInstructions(): Promise<string> {
-    return this.impl.storage.workspaceInstructions.get();
-  }
-
   async setWorkspaceInstructions(_instructions: string): Promise<void> { this.#deny(); }
   async setPinned(_pinned: boolean): Promise<void> { this.#deny(); }
   async deleteSelf(): Promise<void> { this.#deny(); }
@@ -9075,11 +9075,11 @@ class UseOverseerInterface extends RpcTarget implements Overseer {
   async enableHook(_id: number): Promise<void> { this.#deny(); }
   async disableHook(_id: number): Promise<void> { this.#deny(); }
   async deleteHook(_id: number): Promise<void> { this.#deny(); }
-  async setAutoApprovedActionKind(_gatekeeperId: WorkpieceId, _actionKind: ActionKind)
+  async setAutoApprovedActionKind(_gatekeeperId: WorkpieceId, _actionKind: ActionKind, _branchPatterns?: string[])
       : Promise<void> { this.#deny(); }
   async removeAutoApprovedActionKind(_gatekeeperId: WorkpieceId, _tag: string): Promise<void> { this.#deny(); }
   async listAutoApprovedActionKinds()
-      : Promise<Array<{ gatekeeperId: WorkpieceId; actionKind: ActionKind }>> {
+      : Promise<Array<{ gatekeeperId: WorkpieceId; actionKind: ActionKind; branchPatterns?: string[]; resourceTitle: string; vendorId?: string }>> {
     this.#deny();
   }
   async acceptConnectionRequest(_requestId: string, _result: {gatekeeperId: number}): Promise<void> { this.#deny(); }
