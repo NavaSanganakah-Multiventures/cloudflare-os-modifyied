@@ -693,6 +693,9 @@ export type GatekeeperVendorInfo = {
 // Maximum length (characters) of the admin-authored agent system-prompt instructions.
 export const MAX_INSTANCE_INSTRUCTIONS_LENGTH = 8000;
 
+// Maximum length (characters) of the workspace-specific agent system-prompt instructions.
+export const MAX_WORKSPACE_INSTRUCTIONS_LENGTH = 8000;
+
 // Maximum length (characters) of the admin-authored site name shown next to the top-bar logo.
 export const MAX_SITE_NAME_LENGTH = 40;
 
@@ -1058,6 +1061,11 @@ export type GadgetMetadata = {
   // a default gadget from the API.
   defaultGadgetId?: WorkpieceId;
 
+  // Workspace-specific agent system-prompt instructions ("" when unset). These are appended to the
+  // agent's system prompt in addition to the deployment-wide instanceInstructions, letting each
+  // workspace customize how its agent behaves.
+  workspaceInstructions?: string;
+
   // TODO:
   // - created / modified / activity times
   // - icon? thumbnail?
@@ -1342,6 +1350,14 @@ export interface Overseer extends RpcTarget {
 
   // Change the workspace title.
   setTitle(title: string): Promise<void>;
+
+  // Get this workspace's agent system-prompt instructions ("" when none are set).
+  getWorkspaceInstructions(): Promise<string>;
+
+  // Replace this workspace's agent system-prompt instructions. Pass "" to clear. Rejects over
+  // MAX_WORKSPACE_INSTRUCTIONS_LENGTH. These are appended to the agent's system prompt in addition
+  // to the deployment-wide admin instructions.
+  setWorkspaceInstructions(instructions: string): Promise<void>;
 
   // Pin or unpin this workspace in the user's list.
   setPinned(pinned: boolean): Promise<void>;
