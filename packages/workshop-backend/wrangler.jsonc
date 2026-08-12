@@ -85,6 +85,13 @@
     }
   ],
 
+  // Outbound email for security alerts to the admin. Requires the Cloudflare Email
+  // Service send_email binding (Workers Paid plan) and a verified destination
+  // address. See docs/SECURITY_ALERTS.md.
+  "send_email": [
+    { "name": "EMAIL" }
+  ],
+
   // When deploying to prod, you may want to bundle the frontend as assets on the backend, like so.
   // But it's not the only way to do it.
   //
