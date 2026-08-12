@@ -28,6 +28,7 @@ import { verifyCfAccessJwt } from "./access.js";
 import { resolveUiFeatureFlags } from "./feature-flags";
 import { serveSiteLogo, SITE_LOGO_PATH } from "./site-logo.js";
 import { createWorkshopLogger } from "./observability";
+import { reportSecurityEvent } from "@gadgets/workshop-shared/security-alerts";
 
 const logger = createWorkshopLogger("workshop.server");
 
@@ -124,7 +125,13 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     // username/email in a thrown error message.
     try {
       return parseAdmins(admins).includes(name);
-    } catch {
+    } catch (err) {
+      // Fail closed, and alert the admin without leaking the bad value.
+      reportSecurityEvent(this.env, {
+        type: "admin_config_misparse",
+        severity: "error",
+        summary: "ADMINS binding could not be parsed; admin access denied until fixed.",
+      }, this.ctx);
       return false;
     }
   }
@@ -573,7 +580,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   // accounts are auto-provisioned singletons (one per vendor), so the vendor id identifies them.
   async listGatekeeperApps(): Promise<GatekeeperAppInfo[]> {
     // listProvidedAccounts provisions auto-provisioned accounts first (idempotent), so their apps
-    // appear in the nav even before the user opens a gadget Ã¢ÂÂ in a single round trip.
+    // appear in the nav even before the user opens a gadget ÃÂ¢ÃÂÃÂ in a single round trip.
     let accounts = await this.user.listProvidedAccounts();
     return accounts
         .filter(account => account.description.providesUi)
@@ -629,7 +636,7 @@ async function serveBlueprintScreenshot(env: Env, blueprintId: string): Promise<
 }
 
 // Returned by startGatekeeperLogin(). Wraps the PendingLogin DO so the client awaits the login
-// result through a capability (this stub) rather than a guessable id Ã¢ÂÂ no login id is ever exposed
+// result through a capability (this stub) rather than a guessable id ÃÂ¢ÃÂÃÂ no login id is ever exposed
 // to the client. Disposing the stub (e.g. when the pop-up closes or the component unmounts) cancels
 // the in-flight wait and lets the DO be evicted.
 @validateRpc()
@@ -668,7 +675,7 @@ class PublicApiImpl extends RpcTarget implements PublicApi {
     if (!desc.providesAuth) throw new Error(`"${vendorId}" does not provide authentication.`);
 
     // The PendingLogin DO is the rendezvous between this request and the (separate) OAuth-callback
-    // invocation. The client never sees its id Ã¢ÂÂ we hand back an `attempt` stub instead.
+    // invocation. The client never sees its id ÃÂ¢ÃÂÃÂ we hand back an `attempt` stub instead.
     const pendingId = this.ctx.exports.PendingLogin.newUniqueId();
     const pending = this.ctx.exports.PendingLogin.get(pendingId);
     const callback = this.ctx.exports.LoginConnectCallbackImpl(
@@ -875,8 +882,19 @@ export default {
         resp?.webSocket?.close();
       };
 
-      resp = await newWorkersRpcResponse(req,
-          new PublicApiImpl(ctx, env, abortSession, accessPayload));
+      try {
+        resp = await newWorkersRpcResponse(req,
+            new PublicApiImpl(ctx, env, abortSession, accessPayload));
+      } catch (err) {
+        // An unhandled failure constructing the RPC session must not leak internal
+        // detail to the client. Alert the admin and return a generic error.
+        reportSecurityEvent(env, {
+          type: "unhandled_server_error",
+          severity: "fatal",
+          summary: "Unhandled error while initializing the API RPC session.",
+        }, ctx);
+        return new Response("Internal Server Error", { status: 500 });
+      }
 
       if (aborted) {
         // Oops, we missed the abortSession() call while awaiting, apply now.
