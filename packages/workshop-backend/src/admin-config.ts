@@ -4,7 +4,7 @@
 //
 // This covers the "soft" deployment customizations only (branding, agent instructions, and which
 // gatekeeper connectors/resources are offered). Authentication/authorization config (sign-in
-// providers, password login) is deliberately NOT here â it stays env-var driven so it can't be
+// providers, password login) is deliberately NOT here — it stays env-var driven so it can't be
 // changed by a compromised admin session. Everything here is enabled by default; the admin UI opts
 // things *out*.
 
@@ -14,7 +14,7 @@ import { ADMIN_CONFIG_KEY, BlueprintKvEnv, readBlueprintKvRecord, sanitizeBluepr
 
 export type AdminConfig = {
   // Whether new account signups are allowed (default true). Note: this is an access toggle, not
-  // authentication config â which auth providers exist and whether password login is on stay
+  // authentication config — which auth providers exist and whether password login is on stay
   // env-driven (see auth/config.ts).
   signupsEnabled: boolean;
   // Site name shown next to the top-bar logo, or "" to use DEFAULT_SITE_NAME. Resolve it for
@@ -35,7 +35,7 @@ export type AdminConfig = {
   // Fully-disabled gatekeeper vendor ids.
   disabledGatekeepers: string[];
   // Per-vendor provisioning mode for auto-provisioning ("ambient") gatekeepers (e.g. the Context
-  // Library). Absent â the default ("optional", see provisioning-policy.ts). Only meaningful for
+  // Library). Absent ⇒ the default ("optional", see provisioning-policy.ts). Only meaningful for
   // vendors that declare autoProvisionsAccount.
   ambientGatekeeperModes: Record<string, AmbientGatekeeperMode>;
 
