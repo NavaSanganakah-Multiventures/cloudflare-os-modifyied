@@ -10,8 +10,11 @@
 // image and returns its output. See:
 //   https://developers.cloudflare.com/containers/execute-commands/
 //
-// The agent-facing wiring (a tool + system-prompt note + an Overseer hook) is tracked as a
-// follow-up; this file plus the Dockerfile and wrangler config register the container itself.
+// The agent-facing wiring lives in agent.ts (the `runContainerCheck` tool) and overseer.ts
+// (OverseerImpl.runContainerCheck, which reaches this container via
+// getContainer(ctx.exports.BuildContainer)); this file plus the Dockerfile and the wrangler
+// config register the container itself. pi auto-describes tools from the registry, so no
+// separate system-prompt note is needed.
 // The image (./Dockerfile, relative to wrangler.jsonc) is a generic Node + pnpm + git sandbox,
 // so the agent can stream project files in via exec() and then run any language's build tooling.
 
