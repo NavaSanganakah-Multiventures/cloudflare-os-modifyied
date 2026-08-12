@@ -2915,7 +2915,7 @@ class OverseerImpl implements AgentHooks {
 
   // Record an observation that originated from a built-in agent tool (not a gatekeeper).
   // The `gatekeeperId` is set to the BUILTIN_TOOL_GATEKEEPER_ID sentinel so that downstream
-  // code (which expects a gatekeeper to dereference for approve/reject) never touches it â built-in
+  // code (which expects a gatekeeper to dereference for approve/reject) never touches it Ã¢ÂÂ built-in
   // observations bypass the approve/reject paths anyway.
   async recordAgentObservation(
       chatId: number,
@@ -5677,7 +5677,7 @@ class OverseerImpl implements AgentHooks {
     }
     let lines = [`Resource types offered by "${vendorId}" (${vendor.description.displayName}):`];
     for (let r of vendor.supportedResources) {
-      lines.push(`* ${r.title} â ${r.urlPattern}`)
+      lines.push(`* ${r.title} Ã¢ÂÂ ${r.urlPattern}`)
     }
     lines.push(
         `\nTo request one, call requestConnection with vendorId="${vendorId}" and a resourceUrl ` +
@@ -5782,7 +5782,7 @@ class OverseerImpl implements AgentHooks {
       seen.add(id);
       let lines = [
         `* blueprintId: ${id}`,
-        `  ${JSON.stringify(title)} â ${source}`,
+        `  ${JSON.stringify(title)} Ã¢ÂÂ ${source}`,
       ];
       let bindingNames = Object.entries(bindings ?? {});
       if (bindingNames.length > 0) {
@@ -5843,7 +5843,7 @@ class OverseerImpl implements AgentHooks {
         `about already *is* one of these, work on that one instead: asking to change an existing ` +
         `output is not a request for a second one.\n\n` +
         formats.map(format =>
-            `* ${format.output.noun} (plural: ${format.output.plural}) â ` +
+            `* ${format.output.noun} (plural: ${format.output.plural}) Ã¢ÂÂ ` +
             `${format.blueprintId}` + (format.agentHint ? `; ${format.agentHint}` : ``)).join("\n");
   }
 
@@ -5936,7 +5936,7 @@ class OverseerImpl implements AgentHooks {
             details = `unknown`;
             break;
         }
-        lines.push(`* ${name} â ${JSON.stringify(binding.title)} (${details})` +
+        lines.push(`* ${name} Ã¢ÂÂ ${JSON.stringify(binding.title)} (${details})` +
             (binding.description ? `: ${binding.description}` : ``));
       }
     }
@@ -6277,7 +6277,7 @@ class OverseerImpl implements AgentHooks {
   }
 
   // Render the observer verification failures as one line per binding, naming the connection and the
-  // account that was refused: `<resourceTitle> (<account label>) â <reason>.` Cold path only (we're
+  // account that was refused: `<resourceTitle> (<account label>) Ã¢ÂÂ <reason>.` Cold path only (we're
   // about to deny the open), so the extra User DO round trip per failure is fine. Discloses nothing
   // new: the reason was either already thrown to this same user or authored by us, and the account is
   // their own.
@@ -6308,7 +6308,7 @@ class OverseerImpl implements AgentHooks {
         });
       }
 
-      return `${observerBindingTitle(gk)} (${label}) â ${failure.reason}`;
+      return `${observerBindingTitle(gk)} (${label}) Ã¢ÂÂ ${failure.reason}`;
     }));
 
     return lines.join("\n");
@@ -7340,6 +7340,17 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
   async setTitle(title: string): Promise<void> {
     this.impl.storage.title.put(title);
     await this.owner.updateTitle(this.impl.ctx.id.toString(), title);
+  }
+
+  async getWorkspaceInstructions(): Promise<string> {
+    return this.impl.storage.workspaceInstructions.get();
+  }
+
+  async setWorkspaceInstructions(instructions: string): Promise<void> {
+    if (instructions.length > MAX_WORKSPACE_INSTRUCTIONS_LENGTH) {
+      throw new Error(`Instructions too long (max ${MAX_WORKSPACE_INSTRUCTIONS_LENGTH} characters).`);
+    }
+    this.impl.storage.workspaceInstructions.put(instructions);
   }
 
   async setPinned(pinned: boolean): Promise<void> {
@@ -8960,6 +8971,7 @@ class UseOverseerInterface extends RpcTarget implements Overseer {
       owner: await this.owner.whoami(),
       role: "use",
       defaultGadgetId: this.impl.defaultGadgetId,
+      workspaceInstructions: this.impl.storage.workspaceInstructions.get(),
     };
   }
 
@@ -9025,6 +9037,7 @@ class UseOverseerInterface extends RpcTarget implements Overseer {
   // --- Denied methods (build-only) ---
 
   async setTitle(_title: string): Promise<void> { this.#deny(); }
+  async setWorkspaceInstructions(_instructions: string): Promise<void> { this.#deny(); }
   async setPinned(_pinned: boolean): Promise<void> { this.#deny(); }
   async deleteSelf(): Promise<void> { this.#deny(); }
   async createGadget(_title: string): Promise<RpcStub<GadgetClient>> { this.#deny(); }
