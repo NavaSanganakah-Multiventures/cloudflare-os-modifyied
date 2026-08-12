@@ -32,6 +32,8 @@ import {
   type GitHubPullFileResponse,
   type GitHubPullRequestResponse,
   type GitHubPullRequestReviewCommentResponse,
+  type GitHubWorkflowResponse,
+  type GitHubWorkflowRunResponse,
 } from "./github-api";
 import { assertIssueSearchResultsInRepo, buildIssueSearchQuery } from "./github-search";
 import GITHUB_LOGO_SVG from "./github-logo.svg";
@@ -76,6 +78,10 @@ import type {
   GitHubProposeFileChangeOptions,
   GitHubProposeFileDeletionOptions,
   GitHubProposedChangeResult,
+  type GitHubWorkflow,
+  type GitHubWorkflowDispatchOptions,
+  type GitHubWorkflowRunFilter,
+  type GitHubWorkflowRun,
 } from "./types";
 import TYPES_CODE from "./types.txt";
 import {
@@ -269,6 +275,13 @@ type WriteFileAction = BaseAction & {
   sha?: string;
 };
 
+type DispatchWorkflowAction = BaseAction & {
+  type: "dispatchWorkflow";
+  workflowIdOrPath: string | number;
+  ref: string;
+  inputs?: Record<string, string>;
+};
+
 type DeleteFileAction = BaseAction & {
   type: "deleteFile";
   path: string;
@@ -292,6 +305,7 @@ type GitHubAction =
   | CreateBranchAction
   | WriteFileAction
   | DeleteFileAction;
+  | DispatchWorkflowAction;
 
 type StoredActionRecord = {
   action: GitHubAction;
@@ -351,6 +365,36 @@ function validateBranchName(name: string): void {
 }
 
 /** Returns the default branch name, falling back to "main" when unknown. */
+function normalizeWorkflow(response: GitHubWorkflowResponse): GitHubWorkflow {
+  return {
+    id: response.id,
+    name: response.name,
+    path: response.path,
+    state: response.state,
+    createdAt: new Date(response.created_at),
+    updatedAt: new Date(response.updated_at),
+    url: response.url,
+    htmlUrl: response.html_url,
+  };
+}
+
+function normalizeWorkflowRun(response: GitHubWorkflowRunResponse): GitHubWorkflowRun {
+  return {
+    id: response.id,
+    name: response.name,
+    headBranch: response.head_branch,
+    headSha: response.head_sha,
+    runNumber: response.run_number,
+    event: response.event,
+    status: response.status,
+    conclusion: response.conclusion,
+    workflowId: response.workflow_id,
+    url: response.url,
+    htmlUrl: response.html_url,
+    createdAt: new Date(response.created_at),
+    updatedAt: new Date(response.updated_at),
+  };
+}
 function defaultBranchFromMetadata(metadata: GitHubRepoMetadata): string {
   return metadata.defaultBranch ?? "main";
 }
@@ -373,6 +417,11 @@ const CREATE_BRANCH_ACTION: ActionKind = {
 const CREATE_PULL_REQUEST_ACTION: ActionKind = {
   tag: "githubCreatePullRequest",
   label: "Create pull requests",
+};
+
+const DISPATCH_WORKFLOW_ACTION: ActionKind = {
+  tag: "githubDispatchWorkflow",
+  label: "Dispatch GitHub Actions workflows",
 };
 
 const REPO_RESOURCE: SupportedResource = {
@@ -3617,6 +3666,15 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         this.#clearCaches();
         return;
       }
+      case "dispatchWorkflow": {
+        const workflowId = await this.#resolveWorkflowId(action.workflowIdOrPath);
+        await this.#withApi(api =>
+          api.dispatchWorkflow(action.owner, action.repo, workflowId, action.ref, action.inputs),
+        );
+        this.#markActionApproved(action);
+        this.#clearCaches();
+        return;
+      }
     }
   }
 
@@ -3743,6 +3801,11 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       case "createBranch":
       case "writeFile":
       case "deleteFile":
+      case "dispatchWorkflow":
+        return {
+          message: "A dispatched GitHub Actions workflow run cannot be reverted.",
+          canRetry: false,
+        };
         return {
           message: "This GitHub action cannot be automatically reverted.",
           canRetry: false,
@@ -3750,6 +3813,101 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     }
   }
 
+  async #resolveWorkflowId(idOrPath: string | number): Promise<number> {
+    if (typeof idOrPath === "number") return idOrPath;
+    const workflows = await this.#withApi(api =>
+      api.listWorkflows(this.ctx.props.owner, this.ctx.props.repo),
+    );
+    const match = workflows.find(w =>
+      w.path === idOrPath ||
+      w.path.endsWith(`/${idOrPath}`) ||
+      w.name === idOrPath,
+    );
+    if (!match) throw new Error(`Workflow not found: ${idOrPath}`);
+    return match.id;
+  }
+
+  async prepareDispatchWorkflow(
+    workflowIdOrPath: string | number,
+    ref: string,
+    inputs?: Record<string, string>,
+  ): Promise<DispatchWorkflowAction> {
+    return {
+      type: "dispatchWorkflow",
+      approvalId: this.#nextActionId(),
+      submittedAt: Date.now(),
+      owner: this.ctx.props.owner,
+      repo: this.ctx.props.repo,
+      workflowIdOrPath,
+      ref,
+      inputs,
+    };
+  }
+
+  async listWorkflows(pageSize: number): Promise<Cursor<GitHubWorkflow>> {
+    return new StreamingCursor<GitHubWorkflow>({
+      fetchPage: async () => {
+        const workflows = await this.#withApi(api =>
+          api.listWorkflows(this.ctx.props.owner, this.ctx.props.repo),
+        );
+        return workflows.map(normalizeWorkflow);
+      },
+      overlay: w => w,
+      filter: () => true,
+      comparator: (a, b) => a.name.localeCompare(b.name),
+      injectedItems: [],
+      pageSize,
+    });
+  }
+
+  async getWorkflow(idOrPath: string | number): Promise<GitHubWorkflow> {
+    const workflowId = await this.#resolveWorkflowId(idOrPath);
+    const response = await this.#withApi(api =>
+      api.getWorkflow(this.ctx.props.owner, this.ctx.props.repo, workflowId),
+    );
+    return normalizeWorkflow(response);
+  }
+
+  async listWorkflowRuns(
+    idOrPath: string | number,
+    filter: GitHubWorkflowRunFilter | undefined,
+    pageSize: number,
+  ): Promise<Cursor<GitHubWorkflowRun>> {
+    const workflowId = await this.#resolveWorkflowId(idOrPath);
+    return new StreamingCursor<GitHubWorkflowRun>({
+      fetchPage: async (page, perPage) => {
+        const runs = await this.#withApi(api =>
+          api.listWorkflowRuns(this.ctx.props.owner, this.ctx.props.repo, workflowId, {
+            branch: filter?.branch,
+            event: filter?.event,
+            status: filter?.status,
+            per_page: perPage,
+            page,
+          }),
+        );
+        return runs.map(normalizeWorkflowRun);
+      },
+      overlay: r => r,
+      filter: () => true,
+      comparator: (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+      injectedItems: [],
+      pageSize,
+    });
+  }
+
+  async getWorkflowRun(runId: number): Promise<GitHubWorkflowRun> {
+    const response = await this.#withApi(api =>
+      api.getWorkflowRun(this.ctx.props.owner, this.ctx.props.repo, runId),
+    );
+    return normalizeWorkflowRun(response);
+  }
+
+  async getWorkflowRunLogs(runId: number): Promise<string> {
+    const url = await this.#withApi(api =>
+      api.getWorkflowRunLogsUrl(this.ctx.props.owner, this.ctx.props.repo, runId),
+    );
+    return url;
+  }
   async repoMetadata(): Promise<GitHubRepoMetadata> {
     return this.#getRepoMetadata();
   }
@@ -4342,6 +4500,57 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     });
 
     return { branch, commitHandle, pullRequest };
+  async listWorkflows(options?: GitHubPageOptions): Promise<Cursor<GitHubWorkflow>> {
+    await this.#approvalQueue.authorizeObservation({
+      title: "List GitHub Actions workflows",
+      description: "List workflows in the GitHub repository.",
+    });
+    return this.#gatekeeper.listWorkflows(options?.resultsPerPage ?? 50);
+  }
+
+  async getWorkflow(idOrPath: string | number): Promise<GitHubWorkflow> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `Read workflow ${String(idOrPath)}`,
+      description: `Read metadata for workflow ${String(idOrPath)}.`,
+    });
+    return this.#gatekeeper.getWorkflow(idOrPath);
+  }
+
+  async dispatchWorkflow(idOrPath: string | number, options: GitHubWorkflowDispatchOptions): Promise<void> {
+    const action = await this.#gatekeeper.prepareDispatchWorkflow(idOrPath, options.ref, options.inputs);
+    await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
+      title: `Dispatch workflow ${String(idOrPath)}`,
+      description: `Trigger workflow ${String(idOrPath)} on ref ${options.ref}.`,
+      implementsRevert: false,
+      awaitDecision: true,
+      actionKind: DISPATCH_WORKFLOW_ACTION,
+      autoApprovable: false,
+    });
+  }
+
+  async listWorkflowRuns(idOrPath: string | number, filter?: GitHubWorkflowRunFilter): Promise<Cursor<GitHubWorkflowRun>> {
+    await this.#approvalQueue.authorizeObservation({
+      title: "List workflow runs",
+      description: `List runs for workflow ${String(idOrPath)}.`,
+    });
+    return this.#gatekeeper.listWorkflowRuns(idOrPath, filter, filter?.resultsPerPage ?? 50);
+  }
+
+  async getWorkflowRun(runId: number): Promise<GitHubWorkflowRun> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `Read workflow run ${runId}`,
+      description: `Read status and conclusion for run ${runId}.`,
+    });
+    return this.#gatekeeper.getWorkflowRun(runId);
+  }
+
+  async getWorkflowRunLogs(runId: number): Promise<string> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `Read workflow run logs ${runId}`,
+      description: `Get logs URL for workflow run ${runId}.`,
+    });
+    return this.#gatekeeper.getWorkflowRunLogs(runId);
+  }
   }
 }
 
