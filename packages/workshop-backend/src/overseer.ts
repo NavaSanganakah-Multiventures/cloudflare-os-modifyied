@@ -8996,12 +8996,21 @@ class UseOverseerInterface extends RpcTarget implements Overseer {
       }
     };
 
+    let workspaceInstructionsSubscriber = {
+      update(value: string) {
+        metadata.workspaceInstructions = value;
+        callback(metadata).catch(unsubscribe);
+      }
+    };
+
     let unsubscribe = () => {
       this.impl.storage.title.unsubscribe(titleSubscriber);
+      this.impl.storage.workspaceInstructions.unsubscribe(workspaceInstructionsSubscriber);
       callback[Symbol.dispose]();
     };
 
     this.impl.storage.title.subscribe(titleSubscriber);
+    this.impl.storage.workspaceInstructions.subscribe(workspaceInstructionsSubscriber);
 
     callback(metadata).catch(unsubscribe);
 
@@ -9038,6 +9047,10 @@ class UseOverseerInterface extends RpcTarget implements Overseer {
   // --- Denied methods (build-only) ---
 
   async setTitle(_title: string): Promise<void> { this.#deny(); }
+  async getWorkspaceInstructions(): Promise<string> {
+    return this.impl.storage.workspaceInstructions.get();
+  }
+
   async setWorkspaceInstructions(_instructions: string): Promise<void> { this.#deny(); }
   async setPinned(_pinned: boolean): Promise<void> { this.#deny(); }
   async deleteSelf(): Promise<void> { this.#deny(); }
