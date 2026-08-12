@@ -16,6 +16,11 @@
       "new_sqlite_classes": [ "UserAccount", "EmailGatekeeperImpl", "EmailAddress" ]
     }
   ],
+
+  // Outbound email for security alerts to the admin. See docs/SECURITY_ALERTS.md.
+  "send_email": [
+    { "name": "EMAIL" }
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,
