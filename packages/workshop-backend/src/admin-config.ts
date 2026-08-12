@@ -4,7 +4,7 @@
 //
 // This covers the "soft" deployment customizations only (branding, agent instructions, and which
 // gatekeeper connectors/resources are offered). Authentication/authorization config (sign-in
-// providers, password login) is deliberately NOT here — it stays env-var driven so it can't be
+// providers, password login) is deliberately NOT here â it stays env-var driven so it can't be
 // changed by a compromised admin session. Everything here is enabled by default; the admin UI opts
 // things *out*.
 
@@ -14,7 +14,7 @@ import { ADMIN_CONFIG_KEY, BlueprintKvEnv, readBlueprintKvRecord, sanitizeBluepr
 
 export type AdminConfig = {
   // Whether new account signups are allowed (default true). Note: this is an access toggle, not
-  // authentication config — which auth providers exist and whether password login is on stay
+  // authentication config â which auth providers exist and whether password login is on stay
   // env-driven (see auth/config.ts).
   signupsEnabled: boolean;
   // Site name shown next to the top-bar logo, or "" to use DEFAULT_SITE_NAME. Resolve it for
@@ -35,7 +35,7 @@ export type AdminConfig = {
   // Fully-disabled gatekeeper vendor ids.
   disabledGatekeepers: string[];
   // Per-vendor provisioning mode for auto-provisioning ("ambient") gatekeepers (e.g. the Context
-  // Library). Absent ⇒ the default ("optional", see provisioning-policy.ts). Only meaningful for
+  // Library). Absent â the default ("optional", see provisioning-policy.ts). Only meaningful for
   // vendors that declare autoProvisionsAccount.
   ambientGatekeeperModes: Record<string, AmbientGatekeeperMode>;
 
@@ -319,4 +319,17 @@ export function formatInstanceInstructions(instructions: string): string {
       `The administrator of this deployment has provided the following additional instructions. ` +
       `Follow them unless they conflict with the user's safety or the instructions above.\n\n` +
       `<deployment_instructions>\n${trimmed}\n</deployment_instructions>`;
+}
+
+// Wrap the workspace-specific instructions in a clearly-delimited block for the system prompt, or ""
+// when unset. Callers are responsible for separating this from the preceding prompt with a blank
+// line.
+export function formatWorkspaceInstructions(instructions: string): string {
+  let trimmed = instructions.trim();
+  if (!trimmed) return "";
+  return `# Workspace-specific instructions\n\n` +
+      `The owner of this workspace has provided the following additional instructions. ` +
+      `Follow them unless they conflict with the deployment-wide instructions above or the user's ` +
+      `safety.\n\n` +
+      `<workspace_instructions>\n${trimmed}\n</workspace_instructions>`;
 }
