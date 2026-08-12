@@ -10,6 +10,7 @@ import {
   verifyCfAccessJwt,
   type CfAccessEnv,
 } from "./access.js";
+import { reportSecurityEvent } from "@gadgets/workshop-shared/security-alerts";
 
 // The bounded string fields can expand when encoded as UTF-8 or JSON escapes.
 const MAX_BODY_BYTES = 128 * 1024;
@@ -135,6 +136,15 @@ export async function handleClientErrorRequest(
   if (input === "invalid") return new Response("Invalid JSON", { status: 400 });
   const report = normalizeFrontendErrorReport(input);
   if (!report) return new Response("Invalid frontend error report", { status: 400 });
+
+  // Surface fatal or unhandled frontend failures to the admin as a security alert.
+  if (report.severity === "fatal" || report.handled === false) {
+    reportSecurityEvent(env, {
+      type: "frontend_security_error",
+      severity: report.severity === "fatal" ? "fatal" : "error",
+      summary: "Unhandled frontend error on " + report.failureSite + ".",
+    }, ctx);
+  }
 
   try {
     const dispatch = reporter.report(toReporterEvent(report));
