@@ -123,6 +123,18 @@ export class BuildContainer extends Container {
     let out;
     try {
       out = await process.output();
+    } catch (error) {
+      // exec()/output() can throw if the container crashes or the command cannot be started.
+      // Return a structured failure so the agent can diagnose instead of crashing the DO.
+      return {
+        runId,
+        exitCode: -1,
+        output:
+          "Container exec failed before completion.
+" +
+          String((error as { message?: unknown }).message ?? error),
+        timestamp: Date.now(),
+      };
     } finally {
       clearTimeout(timer);
     }
@@ -146,6 +158,7 @@ export class BuildContainer extends Container {
 
   override onError(error: unknown): void {
     logger.error("build container failed to start", { event: "container.build.error", error });
-    throw error;
+    // Do not re-throw: this is the Container lifecycle error handler. The runtime propagates
+    // the failure; throwing here would terminate the DO process.
   }
 }
