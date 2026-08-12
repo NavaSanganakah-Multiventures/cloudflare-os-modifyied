@@ -43,7 +43,7 @@ export type SecurityAlertEnv = Readonly<{
   ALERTS_ENABLED?: string;
 }>;
 
-type WaitUntil = Pick<ExecutionContext, "waitUntil">;
+type WaitUntil = { waitUntil(promise: Promise<unknown>): void };
 
 const RATE_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const MAX_TEXT_LEN = 500;
