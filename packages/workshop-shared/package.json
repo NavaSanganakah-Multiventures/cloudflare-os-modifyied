@@ -28,6 +28,10 @@
     "./external-message-gateway": {
       "types": "./src/external-message-gateway.ts",
       "import": "./src/external-message-gateway.ts"
+    },
+    "./security-alerts": {
+      "types": "./src/security-alerts.ts",
+      "import": "./src/security-alerts.ts"
     }
   },
   "scripts": {
