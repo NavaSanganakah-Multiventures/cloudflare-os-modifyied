@@ -87,8 +87,20 @@ export class BuildContainer extends Container {
 
     if (!this.ctx.container.running) {
       // Start the VM, letting this run opt into outbound internet. (Container disk is ephemeral
-      // and resets when the instance sleeps after sleepAfter of inactivity.)
-      await this.start({ enableInternet: options.enableInternet ?? false });
+      // and resets when the instance sleeps after sleepAfter of inactivity.) Guard start() with
+      // the same per-run timeout as the command: if the container won't come up in time, fail the
+      // run instead of holding the DO indefinitely (review: no timeout on container start()).
+      let startTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          this.start({ enableInternet: options.enableInternet ?? false }),
+          new Promise<never>((_, reject) => {
+            startTimer = setTimeout(() => reject(new Error("build container start timed out")), timeoutMs);
+          }),
+        ]);
+      } finally {
+        if (startTimer) clearTimeout(startTimer);
+      }
     }
 
     const process = await this.ctx.container.exec(command, {
