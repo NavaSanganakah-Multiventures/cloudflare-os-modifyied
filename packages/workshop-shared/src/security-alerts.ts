@@ -62,7 +62,7 @@ export function sanitizeAlertText(text: string): string {
   let scrubbed = text
     .replace(EMAIL_RE, "[redacted-email]")
     .replace(TOKEN_RE, "[redacted-token]");
-  if (scrubbed.length > MAX_TEXT_LEN) scrubbed = scrubbed.slice(0, MAX_TEXT_LEN) + "…";
+  if (scrubbed.length > MAX_TEXT_LEN) scrubbed = scrubbed.slice(0, MAX_TEXT_LEN) + "...";
   return scrubbed;
 }
 
