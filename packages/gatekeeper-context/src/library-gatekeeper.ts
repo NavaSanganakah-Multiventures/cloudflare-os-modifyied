@@ -25,6 +25,7 @@ import {
 import type { EnabledCollectionInfo } from "./context-types.js";
 import { domainName, DEFAULT_SHARING_DOMAIN } from "./domain.js";
 import APP_HTML from "./generated/app.txt";
+import { reportSecurityEvent } from "@gadgets/workshop-shared/security-alerts";
 
 // The Context Library icon: the Phosphor "BookOpen" glyph as a self-contained SVG data URI (no
 // external/branded asset), matching AvatarImage's { url } shape.
@@ -94,7 +95,7 @@ interface ContextSearchResult {
 }
 
 type ContextListingEntry =
-  // A collection: its id is a collectionId — pass it to list()/search() to see inside, not read().
+  // A collection: its id is a collectionId â pass it to list()/search() to see inside, not read().
   | { type: "collection"; id: string; title: string; description?: string; documentCount: number }
   | { type: "directory"; path: string; name: string }
   // A document: its docId is what read() takes.
@@ -242,6 +243,11 @@ export class ContextGatekeeper
               collectionId: collection.id,
               error,
             });
+            reportSecurityEvent(this.env, {
+              type: "context_skill_load_failed",
+              severity: "warn",
+              summary: "Failed to load Agent Skills from a Context collection.",
+            }, this.ctx);
             return null;
           }
         }));
@@ -396,7 +402,7 @@ export class GatekeeperVendor extends WorkerEntrypoint<Cloudflare.Env, Gatekeepe
       tagline: "Author and consult shared context collections",
       description:
         "The Context Library lets you and your team author collections of context documents " +
-        "that agents can consult to learn how to perform tasks. It is always available — no " +
+        "that agents can consult to learn how to perform tasks. It is always available â no " +
         "connection needed.",
       autoProvisionsAccount: true,
       providesAuth: false,
