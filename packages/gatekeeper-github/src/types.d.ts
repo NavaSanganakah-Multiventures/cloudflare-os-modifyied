@@ -118,6 +118,23 @@ export interface GitHubRepo {
    * and opening a pull request back to the default branch.
    */
   proposeFileDeletion(options: GitHubProposeFileDeletionOptions): Promise<GitHubProposedChangeResult>;
+  /** Lists GitHub Actions workflows in this repository. */
+  listWorkflows(options?: GitHubPageOptions): Promise<Cursor<GitHubWorkflow>>;
+
+  /** Gets a workflow by its numeric ID or file path (e.g. .github/workflows/ci.yml). */
+  getWorkflow(idOrPath: string | number): Promise<GitHubWorkflow>;
+
+  /** Dispatches a workflow run on the given ref. Queued for approval because it is a side effect. */
+  dispatchWorkflow(idOrPath: string | number, options: GitHubWorkflowDispatchOptions): Promise<void>;
+
+  /** Lists recent runs for a workflow. */
+  listWorkflowRuns(idOrPath: string | number, filter?: GitHubWorkflowRunFilter): Promise<Cursor<GitHubWorkflowRun>>;
+
+  /** Gets a workflow run by its numeric ID. */
+  getWorkflowRun(runId: number): Promise<GitHubWorkflowRun>;
+
+  /** Returns the logs download URL for a workflow run. */
+  getWorkflowRunLogs(runId: number): Promise<string>;
 }
 
 /** A single GitHub issue. */
@@ -528,6 +545,43 @@ export type GitHubPullRequestMergeOptions = {
   expectedHeadSha?: string;
 }
 
+export type GitHubWorkflow = {
+  id: number;
+  name: string;
+  path: string;
+  state: "active" | "deleted" | "disabled" | "disabled_inactivity";
+  createdAt: Date;
+  updatedAt: Date;
+  url: string;
+  htmlUrl: string;
+};
+
+export type GitHubWorkflowDispatchOptions = {
+  ref: string;
+  inputs?: Record<string, string>;
+};
+
+export type GitHubWorkflowRunFilter = GitHubPageOptions & {
+  branch?: string;
+  event?: string;
+  status?: "queued" | "in_progress" | "completed";
+};
+
+export type GitHubWorkflowRun = {
+  id: number;
+  name: string;
+  headBranch: string;
+  headSha: string;
+  runNumber: number;
+  event: string;
+  status: "queued" | "in_progress" | "completed";
+  conclusion: "success" | "failure" | "neutral" | "cancelled" | "skipped" | "timed_out" | "action_required" | null;
+  workflowId: number;
+  url: string;
+  htmlUrl: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
 export type GitHubBranch = {
   name: string;
   /** The commit SHA the branch points at. */
