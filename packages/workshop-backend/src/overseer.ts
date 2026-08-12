@@ -2902,9 +2902,23 @@ class OverseerImpl implements AgentHooks {
     enableInternet?: boolean;
     timeoutMs?: number;
   }): Promise<ContainerRunResult> {
-    let result = await getContainer(this.ctx.exports.BuildContainer, `chat-${chatId}`).runCommand(
-        ["bash", "-lc", input.command],
-        {cwd: input.cwd, enableInternet: input.enableInternet, timeoutMs: input.timeoutMs});
+    let result: ContainerRunResult;
+    try {
+      result = await getContainer(this.ctx.exports.BuildContainer, `chat-${chatId}`).runCommand(
+          ["bash", "-lc", input.command],
+          {cwd: input.cwd, enableInternet: input.enableInternet, timeoutMs: input.timeoutMs});
+    } catch (error) {
+      // A failed run still leaves an audit trail (review: no error handling around runCommand).
+      await this.recordAgentObservation(
+          chatId,
+          `Container check failed: ${input.command}`,
+          undefined,
+          {
+            title: `Failed to run ${input.command} in the build container`,
+            description: `Error: ${String((error as { message?: unknown })?.message ?? error)}`.slice(0, 4000),
+          });
+      throw error;
+    }
     await this.recordAgentObservation(
         chatId,
         `Container check: ${input.command}`,
