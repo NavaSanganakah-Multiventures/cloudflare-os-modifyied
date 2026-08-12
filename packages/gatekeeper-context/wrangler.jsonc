@@ -25,6 +25,11 @@
     }
   ],
 
+  // Outbound email for security alerts to the admin. See docs/SECURITY_ALERTS.md.
+  "send_email": [
+    { "name": "EMAIL" }
+  ],
+
   // Public-collections snapshot KV. preview_id preserves existing dev data.
   "kv_namespaces": [
     {
