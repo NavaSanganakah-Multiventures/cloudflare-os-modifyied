@@ -31,6 +31,7 @@ import EMAIL_CONFIGURATOR_HTML from "./generated/email-configurator-ui.txt";
 import type { EmailMailboxConfiguratorRpc } from "./configurator/email-configurator-types";
 import EMAIL_LOGO_SVG from "./email-logo.svg";
 import { obsContext } from "./observability.js";
+import { reportSecurityEvent } from "@gadgets/workshop-shared/security-alerts";
 
 const VENDOR_ID = "email";
 
@@ -243,8 +244,14 @@ export default {
       logger.error("email delivery failed", {
         event: "email.delivery.failed", error: err,
       });
-      // If no hook is configured or delivery fails, reject the email.
-      message.setReject("Delivery failed: " + err);
+      // Alert the admin without leaking the raw error back to the SMTP sender.
+      reportSecurityEvent(env, {
+        type: "email_delivery_failed",
+        severity: "error",
+        summary: "An inbound email could not be delivered to its configured hook.",
+      }, ctx);
+      // Reject with a generic reason: the raw error may contain internal details.
+      message.setReject("Delivery failed");
     }
   }
 };
@@ -460,7 +467,7 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
   // Mint a verifier representing this account. The email gatekeeper uses the "low-stakes" observer
   // strategy (see EmailGatekeeperImpl.addObserver): a mailbox here is a fresh address minted on the
   // deployment's own domain specifically for the Gadget, so the Gadget's collaborators are the
-  // intended audience. The verifier carries no identity and is never consulted — but the overseer
+  // intended audience. The verifier carries no identity and is never consulted â but the overseer
   // mints one on every open, so it must exist and not throw.
   @skipRpcValidation()
   async getVerifier(): Promise<Fetcher<GatekeeperUserVerifier>> {
