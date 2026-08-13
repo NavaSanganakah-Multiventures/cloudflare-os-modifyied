@@ -1,31 +1,45 @@
 import { describe, it, expect } from "vitest";
 import { GitHubGatekeeperImpl } from "../src/github.js";
-import { ActionKind } from "@gadgets/workshop-shared/api";
 
 describe("GitHubGatekeeperImpl", () => {
-  it("includes all auto-approvable actions in getAutoApprovableActions", async () => {
-    // getAutoApprovableActions doesn't use instance state, so a fake environment is sufficient
+  it("lists the expected auto-approvable actions with correct branchScoped flags", async () => {
+    // getAutoApprovableActions doesn't use instance state, so a fake environment is sufficient.
     const fakeState = {} as any;
     const fakeEnv = {} as any;
     const gk = new GitHubGatekeeperImpl(fakeState, fakeEnv);
-    
+
     const actions = await gk.getAutoApprovableActions();
-    const tags = actions.map(a => a.tag);
-    
-    expect(tags).toContain("githubCreatePullRequest");
-    expect(tags).toContain("githubDispatchWorkflow");
-    expect(tags).toContain("githubMergePullRequest");
-    expect(tags).toContain("githubCreateIssue");
-    expect(tags).toContain("githubSetTitle");
-    expect(tags).toContain("githubSetBody");
-    expect(tags).toContain("githubAddLabels");
-    expect(tags).toContain("githubRemoveLabels");
-    expect(tags).toContain("githubChangeState");
-    expect(tags).toContain("githubPostComment");
-    expect(tags).toContain("githubPostReview");
-    expect(tags).toContain("githubReplyDiffComment");
-    expect(tags).toContain("githubWriteFile");
-    expect(tags).toContain("githubDeleteFile");
-    expect(tags).toContain("githubCreateBranch");
+    const byTag = new Map(actions.map(a => [a.tag, a]));
+
+    // merge is fully manual: it must NOT be auto-approvable.
+    expect(byTag.has("githubMergePullRequest")).toBe(false);
+
+    // Branch-scoped actions: gated by branch patterns; declare a branchRef.
+    for (const tag of [
+      "githubWriteFile",
+      "githubDeleteFile",
+      "githubCreateBranch",
+      "githubCreatePullRequest",
+      "githubDispatchWorkflow",
+    ]) {
+      expect(byTag.has(tag)).toBe(true);
+      expect(byTag.get(tag)!.branchScoped).toBe(true);
+    }
+
+    // Non-branch-scoped actions: ignore branch patterns; auto-apply when a rule exists.
+    for (const tag of [
+      "githubCreateIssue",
+      "githubSetTitle",
+      "githubSetBody",
+      "githubAddLabels",
+      "githubRemoveLabels",
+      "githubChangeState",
+      "githubPostComment",
+      "githubPostReview",
+      "githubReplyDiffComment",
+    ]) {
+      expect(byTag.has(tag)).toBe(true);
+      expect(byTag.get(tag)!.branchScoped).toBe(false);
+    }
   });
 });
