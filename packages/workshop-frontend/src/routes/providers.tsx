@@ -7,6 +7,7 @@ import {
   AiGatewayInfo,
   AiModelProvider,
   SUGGESTED_MODELS,
+  SuggestedModelInfo,
 } from '@gadgets/workshop-shared/api'
 import {
   Plus,
@@ -23,7 +24,20 @@ export const Route = createFileRoute('/providers')({ component: ProvidersPage })
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
-const PROVIDER_ORDER = Object.keys(SUGGESTED_MODELS) as AiModelProvider[]
+const PROVIDER_ORDER: AiModelProvider[] = ['openai', 'anthropic', 'google', 'cloudflare', 'ollama']
+
+function flattenSuggestedModels(dynamic?: SuggestedModelInfo[]): SuggestedModelInfo[] {
+  if (dynamic && dynamic.length > 0) return dynamic
+  return PROVIDER_ORDER.flatMap(provider =>
+    Object.entries(SUGGESTED_MODELS[provider]).map(([modelId, m]) => ({
+      provider,
+      modelId,
+      name: m.name,
+      contextWindow: m.contextWindow,
+      outputLimit: m.outputLimit,
+    }))
+  )
+}
 
 const PRIMARY_BTN =
   'press inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-kumo-brand px-3.5 text-[13px] font-medium tracking-[-0.25px] text-white transition-colors hover:bg-kumo-brand-hover'
@@ -170,7 +184,8 @@ function ProvidersPage() {
   const isBuiltIn = (modelId: string): boolean => {
     if (!aiConfig?.enabled) return false
     const enabled = new Set((aiConfig as Extract<AiGatewayInfo, { enabled: true }>).enabledProviders)
-    return PROVIDER_ORDER.some((p) => enabled.has(p) && modelId in SUGGESTED_MODELS[p])
+    const suggested = flattenSuggestedModels(aiConfig.suggestedModels)
+    return suggested.some(m => enabled.has(m.provider) && m.modelId === modelId)
   }
 
   const handleDelete = async (model: AiChatAuthorInfo) => {
