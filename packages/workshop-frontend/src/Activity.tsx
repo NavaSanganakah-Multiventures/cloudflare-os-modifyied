@@ -184,7 +184,7 @@ export default function Activity({
   if (!isReady) {
     return (
       <div className="flex h-full items-center justify-center text-[13px] text-kumo-subtle">
-        Loading activityÃ¢ÂÂ¦
+        Loading activityÃÂ¢ÃÂÃÂ¦
       </div>
     )
   }
@@ -399,7 +399,7 @@ function AutoApprovalPanel({
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-[13px] text-kumo-subtle">
-        Loading auto-approvalÃ¢ÂÂ¦
+        Loading auto-approvalÃÂ¢ÃÂÃÂ¦
       </div>
     )
   }
@@ -489,7 +489,9 @@ function AutoApprovalPanel({
                       {entry.orphaned
                         ? 'This connection no longer offers this action; the rule still applies.'
                         : entry.enabled
-                          ? `Applied without asking on ${formatBranchPatterns(entry.branchPatterns)}`
+                          ? entry.actionKind.branchScoped === false
+                            ? 'Applied without asking'
+                            : `Applied without asking on ${formatBranchPatterns(entry.branchPatterns)}`
                           : 'Waits for your approval'}
                     </span>
                   </span>
@@ -557,7 +559,7 @@ function ReviewRequest({
                 {record.resourceTitle}
               </a>
             ) : record.resourceTitle}
-            <span className="px-1">ÃÂ·</span>
+            <span className="px-1">ÃÂÃÂ·</span>
             {formatRelativeTime(record.createdAt)}
           </p>
         </div>
