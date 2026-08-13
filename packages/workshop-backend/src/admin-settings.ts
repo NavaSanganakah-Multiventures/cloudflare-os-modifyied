@@ -1,4 +1,4 @@
-import { AdminApi, AdminFormat, AdminFormatPatch, AdminResourceVendor, AdminSettingsView, AmbientGatekeeperMode, BannerColor, BlueprintPublicInfo, MAX_ANNOUNCEMENT_LENGTH, MAX_INSTANCE_INSTRUCTIONS_LENGTH, MAX_SITE_NAME_LENGTH, isAmbientGatekeeperMode, isBannerColor, isHexColor } from '@gadgets/workshop-shared/api';
+import { AdminApi, AiModelProvider, AdminFormat, AdminFormatPatch, AdminResourceVendor, AdminSettingsView, AmbientGatekeeperMode, BannerColor, BlueprintPublicInfo, MAX_ANNOUNCEMENT_LENGTH, MAX_INSTANCE_INSTRUCTIONS_LENGTH, MAX_SITE_NAME_LENGTH, SuggestedModelInfo, isAmbientGatekeeperMode, isBannerColor, isHexColor } from '@gadgets/workshop-shared/api';
 import { GatekeeperVendor } from '@gadgets/workshop-shared/gatekeeper';
 import { DurableObject } from 'cloudflare:workers';
 import { RpcTarget } from 'capnweb';
@@ -15,6 +15,12 @@ import { formatBlueprintsManifestVersion, installFormatBlueprints } from './form
 import { FORMAT_BLUEPRINTS } from './generated/format-blueprints.js';
 
 const logger = createWorkshopLogger("workshop.admin.settings");
+
+const AI_MODEL_PROVIDERS: readonly string[] = ["openai", "anthropic", "google", "cloudflare", "ollama"];
+function isAiModelProvider(value: string): value is AiModelProvider {
+  return AI_MODEL_PROVIDERS.includes(value);
+}
+
 
 function makeAdminSettingsStorage(storage: DurableObjectStorage) {
   return createTypedStorage(storage, {
@@ -311,6 +317,7 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
       accentColor: config.accentColor,
       resourceVendors: await this.#listResourceConfig(config, adminUserId),
       formats: await this.#listFormatConfig(config),
+      suggestedModels: config.suggestedModels,
     };
   }
 
@@ -543,6 +550,46 @@ export class AdminSettings extends DurableObject<Cloudflare.Env> {
   }
 }
 
+
+  // --- System suggested models ---
+
+  async addSuggestedModel(entry: SuggestedModelInfo): Promise<void> {
+    const provider = entry.provider;
+    const modelId = entry.modelId.trim();
+    const name = entry.name.trim();
+    if (!modelId) throw new Error("Model ID is required.");
+    if (!name) throw new Error("Model name is required.");
+    if (typeof entry.contextWindow !== "number" || entry.contextWindow <= 0) {
+      throw new Error("Context window must be a positive number.");
+    }
+    if (entry.outputLimit !== undefined && entry.outputLimit <= 0) {
+      throw new Error("Output limit must be a positive number.");
+    }
+    if (!isAiModelProvider(provider)) throw new Error(`Unsupported provider: ${provider}`);
+
+    await this.#mutateAdminConfig(config => {
+      const next = config.suggestedModels.filter(m => !(m.provider === provider && m.modelId === modelId));
+      next.push({
+        provider,
+        modelId,
+        name,
+        contextWindow: entry.contextWindow,
+        ...(entry.outputLimit !== undefined ? {outputLimit: entry.outputLimit} : {}),
+        ...(entry.reasoning !== undefined ? {reasoning: entry.reasoning} : {}),
+        ...(entry.input !== undefined && entry.input.length > 0 ? {input: entry.input} : {}),
+        ...(entry.enabled !== undefined ? {enabled: entry.enabled} : {}),
+      });
+      return {...config, suggestedModels: next};
+    });
+  }
+
+  async removeSuggestedModel(provider: AiModelProvider, modelId: string): Promise<void> {
+    await this.#mutateAdminConfig(config => {
+      const next = config.suggestedModels.filter(m => !(m.provider === provider && m.modelId === modelId));
+      return next.length === config.suggestedModels.length ? null : {...config, suggestedModels: next};
+    });
+  }
+
 // Capability for managing deployment-wide admin settings, obtained via
 // AuthenticatedApi.getAdminApi() (which is null for non-admins). The admin access check happens once
 // when the capability is minted in server.ts, so these methods don't re-check. This is a thin
@@ -642,5 +689,18 @@ export class AdminApiImpl extends RpcTarget implements AdminApi {
 
   setFormatOrder(blueprintIds: string[]): Promise<void> {
     return this.admin.setFormatOrder(blueprintIds);
+  }
+
+  async addSuggestedModel(model: SuggestedModelInfo): Promise<void> {
+    if (!model.modelId.trim()) throw new Error("Model ID is required.");
+    if (!model.name.trim()) throw new Error("Model name is required.");
+    if (typeof model.contextWindow !== "number" || model.contextWindow <= 0) {
+      throw new Error("Context window must be a positive number.");
+    }
+    await this.admin.addSuggestedModel(model);
+  }
+
+  removeSuggestedModel(provider: AiModelProvider, modelId: string): Promise<void> {
+    return this.admin.removeSuggestedModel(provider, modelId);
   }
 }
