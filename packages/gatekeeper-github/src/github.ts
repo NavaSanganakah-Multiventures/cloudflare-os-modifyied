@@ -368,75 +368,84 @@ function defaultBranchFromMetadata(metadata: GitHubRepoMetadata): string {
 const WRITE_REPO_FILE_ACTION: ActionKind = {
   tag: "githubRepoWriteFile",
   label: "Write repository files",
+  branchScoped: true,
 };
 const DELETE_REPO_FILE_ACTION: ActionKind = {
   tag: "githubRepoDeleteFile",
   label: "Delete repository files",
+  branchScoped: true,
 };
 
 const CREATE_BRANCH_ACTION: ActionKind = {
   tag: "githubCreateBranch",
   label: "Create branches",
+  branchScoped: true,
 };
 
 const CREATE_PULL_REQUEST_ACTION: ActionKind = {
   tag: "githubCreatePullRequest",
   label: "Create pull requests",
+  branchScoped: true,
 };
 
 const POST_COMMENT_ACTION: ActionKind = {
   tag: "githubPostComment",
   label: "Post comments",
+  branchScoped: false,
 };
 
 const CREATE_ISSUE_ACTION: ActionKind = {
   tag: "githubCreateIssue",
   label: "Create issues",
+  branchScoped: false,
 };
 
 const SET_TITLE_ACTION: ActionKind = {
   tag: "githubSetTitle",
   label: "Change title",
+  branchScoped: false,
 };
 
 const SET_BODY_ACTION: ActionKind = {
   tag: "githubSetBody",
   label: "Change body",
+  branchScoped: false,
 };
 
 const ADD_LABELS_ACTION: ActionKind = {
   tag: "githubAddLabels",
   label: "Add labels",
+  branchScoped: false,
 };
 
 const REMOVE_LABELS_ACTION: ActionKind = {
   tag: "githubRemoveLabels",
   label: "Remove labels",
+  branchScoped: false,
 };
 
 const CHANGE_STATE_ACTION: ActionKind = {
   tag: "githubChangeState",
   label: "Change state (open/close)",
+  branchScoped: false,
 };
 
 const POST_REVIEW_ACTION: ActionKind = {
   tag: "githubPostReview",
   label: "Post reviews",
+  branchScoped: false,
 };
 
 const REPLY_DIFF_COMMENT_ACTION: ActionKind = {
   tag: "githubReplyDiffComment",
   label: "Reply to diff comments",
-};
-
-const MERGE_PULL_REQUEST_ACTION: ActionKind = {
-  tag: "githubMergePullRequest",
-  label: "Merge pull requests",
+  branchScoped: false,
 };
 
 const DISPATCH_WORKFLOW_ACTION: ActionKind = {
   tag: "githubDispatchWorkflow",
   label: "Dispatch workflow",
+  branchScoped: true,
 };
 
 const REPO_RESOURCE: SupportedResource = {
@@ -580,7 +589,7 @@ function branchFromResponse(branch: GitHubBranchResponse, owner: string, repo: s
 function commitResultFromResponse(commit: GitHubCommitResponse["commit"]): GitHubCommit {
   return {
     sha: commit.sha,
-    // html_url is the web URL (https://github.com/owner/repo/commit/ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦); url is the API URL.
+    // html_url is the web URL (https://github.com/owner/repo/commit/ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦); url is the API URL.
     url: commit.html_url ?? commit.url,
   };
 }
@@ -1553,7 +1562,7 @@ export class GitHubVerifier extends WorkerEntrypoint<Env, GitHubVerifierProps>
       return true;
     } catch (error) {
       // GitHub returns 404 for private repos the token cannot see (to avoid leaking existence), and
-      // 403 in some org-policy cases ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ either way the observer lacks read access.
+      // 403 in some org-policy cases ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ either way the observer lacks read access.
       if (error instanceof GitHubApiError && (error.status === 404 || error.status === 403)) {
         return false;
       }
@@ -3095,7 +3104,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           if (reviewBuf.length < 100) reviewsDone = true;
         }
 
-        // Both sources empty ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ done.
+        // Both sources empty ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ done.
         if (commentBuf.length === 0 && reviewBuf.length === 0) break;
 
         // Take the entry with the earlier createdAt.
@@ -3435,7 +3444,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       POST_COMMENT_ACTION,
       POST_REVIEW_ACTION,
       REPLY_DIFF_COMMENT_ACTION,
-      MERGE_PULL_REQUEST_ACTION,
       DISPATCH_WORKFLOW_ACTION,
     ];
   }
@@ -4168,8 +4176,8 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     };
   }
 
-  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ repo,
-  // issue, or pull request ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ is scoped to one repository, and issues/PRs inherit the repo's
+  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ repo,
+  // issue, or pull request ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ is scoped to one repository, and issues/PRs inherit the repo's
   // permissions, so the repository is the atomic ACL unit. To admit an observer we simply confirm
   // they can read that repo, using their own token via the verifier (see GitHubVerifier).
   //
@@ -4362,7 +4370,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Write file ${options.path} in ${action.owner}/${action.repo}` +
         `${action.branch ? ` on branch ${action.branch}` : " on the default branch"}.` +
         (options.content !== undefined
-          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\nÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦" : ""}\n\`\`\``
+          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\nÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦" : ""}\n\`\`\``
           : " Content is provided as base64 (binary)."),
       implementsRevert: false,
       awaitDecision: true,
@@ -4704,8 +4712,6 @@ class GitHubPullRequestImpl extends GitHubIssueImpl implements GitHubPullRequest
       title: `Merge pull request #${this.logicalId}`,
       description: `Merge pull request #${this.logicalId}${options?.method ? ` using ${options.method}` : ""}.`,
       implementsRevert: false,
-      actionKind: MERGE_PULL_REQUEST_ACTION,
-      autoApprovable: true,
     });
   }
 }
