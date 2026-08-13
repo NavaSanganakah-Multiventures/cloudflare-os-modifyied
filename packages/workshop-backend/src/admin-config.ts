@@ -8,7 +8,7 @@
 // changed by a compromised admin session. Everything here is enabled by default; the admin UI opts
 // things *out*.
 
-import { AmbientGatekeeperMode, BannerConfig, BlueprintBinding, BlueprintMetadata, BlueprintOutput, DEFAULT_BANNER_COLOR, OutputFormatOffer, isAmbientGatekeeperMode, isBannerColor, isOutputIcon } from "@gadgets/workshop-shared/api";
+import { AmbientGatekeeperMode, BannerConfig, BlueprintBinding, BlueprintMetadata, BlueprintOutput, DEFAULT_BANNER_COLOR, OutputFormatOffer, SUGGESTED_MODELS, SuggestedModelInfo, isAmbientGatekeeperMode, isBannerColor, isOutputIcon } from "@gadgets/workshop-shared/api";
 import { SupportedResource } from "@gadgets/workshop-shared/gatekeeper";
 import { ADMIN_CONFIG_KEY, BlueprintKvEnv, readBlueprintKvRecord, sanitizeBlueprintOutput } from "./blueprint-archive.js";
 
@@ -38,6 +38,10 @@ export type AdminConfig = {
   // Library). Absent ⇒ the default ("optional", see provisioning-policy.ts). Only meaningful for
   // vendors that declare autoProvisionsAccount.
   ambientGatekeeperModes: Record<string, AmbientGatekeeperMode>;
+
+  // Admin-managed additions/overrides for the deployment's suggested-model catalog. Entries here
+  // shadow built-in defaults by provider + modelId.
+  suggestedModels: SuggestedModelInfo[];
 
   // The blueprints offered as this deployment's standard output formats. What a user gets from
   // "New Slides", and what the agent is told to prefer. Order is menu order.
@@ -76,6 +80,7 @@ export const DEFAULT_ADMIN_CONFIG: AdminConfig = {
   disabledResources: {},
   disabledGatekeepers: [],
   ambientGatekeeperModes: {},
+  suggestedModels: [],
   formats: [],
 };
 
@@ -247,6 +252,30 @@ function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
 }
 
+
+// Keep only well-formed admin-managed suggested models.
+function parseSuggestedModels(value: unknown): SuggestedModelInfo[] {
+  if (!Array.isArray(value)) return [];
+  const out: SuggestedModelInfo[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const {provider, modelId, name, contextWindow, outputLimit, reasoning, input, enabled} = raw as Partial<SuggestedModelInfo>;
+    if (!provider || !modelId || typeof provider !== "string" || typeof modelId !== "string") continue;
+    if (!name || typeof name !== "string") continue;
+    if (typeof contextWindow !== "number" || contextWindow <= 0) continue;
+    const key = `${provider}:${modelId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const model: SuggestedModelInfo = {provider, modelId, name, contextWindow};
+    if (typeof outputLimit === "number" && outputLimit > 0) model.outputLimit = outputLimit;
+    if (typeof reasoning === "boolean") model.reasoning = reasoning;
+    if (Array.isArray(input)) model.input = input.filter((x): x is "text" | "image" => x === "text" || x === "image");
+    if (typeof enabled === "boolean") model.enabled = enabled;
+    out.push(model);
+  }
+  return out;
+}
 export function parseAdminConfig(raw: string | null): AdminConfig {
   if (!raw) return { ...DEFAULT_ADMIN_CONFIG };
   try {
@@ -278,11 +307,32 @@ export function parseAdminConfig(raw: string | null): AdminConfig {
       disabledResources,
       disabledGatekeepers: strings(p.disabledGatekeepers).map(v => v.toLowerCase()),
       ambientGatekeeperModes,
+      suggestedModels: parseSuggestedModels(p.suggestedModels),
       formats: parseFormats(p.formats),
     };
   } catch {
     return { ...DEFAULT_ADMIN_CONFIG };
   }
+}
+
+// Merge built-in SUGGESTED_MODELS with the admin-managed overrides. Admin entries
+// shadow built-ins by provider + modelId; an admin entry with enabled: false removes the model
+// from the user-facing catalog entirely.
+export function mergeSuggestedModels(admin: AdminConfig): SuggestedModelInfo[] {
+  const map = new Map<string, SuggestedModelInfo>();
+  for (const provider of Object.keys(SUGGESTED_MODELS) as (keyof typeof SUGGESTED_MODELS)[]) {
+    for (const [modelId, m] of Object.entries(SUGGESTED_MODELS[provider])) {
+      map.set(`${provider}:${modelId}`, {provider, modelId, name: m.name, contextWindow: m.contextWindow, outputLimit: m.outputLimit});
+    }
+  }
+  for (const entry of admin.suggestedModels ?? []) {
+    if (entry.enabled === false) {
+      map.delete(`${entry.provider}:${entry.modelId}`);
+    } else {
+      map.set(`${entry.provider}:${entry.modelId}`, entry);
+    }
+  }
+  return [...map.values()];
 }
 
 export function serializeAdminConfig(config: AdminConfig): string {
