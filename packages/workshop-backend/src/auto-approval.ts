@@ -18,7 +18,8 @@ export interface AutoApprovalStorage {
 // Match a branch reference against a list of glob patterns. Patterns are evaluated in order;
 // a leading "!" negates the pattern and denies a match. "*" matches any sequence of characters.
 function branchMatchesPatterns(branchRef: string, patterns: string[]): boolean {
-  let included = false;
+  // If the first pattern is a negation, implicitly start by including everything.
+  let included = patterns.length > 0 && patterns[0].startsWith("!");
   for (const pattern of patterns) {
     let negated = pattern.startsWith("!");
     let glob = negated ? pattern.slice(1) : pattern;
@@ -109,7 +110,7 @@ export class AutoApprovalDrainer {
         break;
       }
       if (record.description.actionKind?.branchScoped !== false &&
-          rule.branchPatterns && rule.branchPatterns.length > 0 &&
+          rule.branchPatterns &&
           (record.description.branchRef === undefined ||
            !branchMatchesPatterns(record.description.branchRef, rule.branchPatterns))) {
         // A branch-pattern gate. The action targets a branch this rule does not cover.

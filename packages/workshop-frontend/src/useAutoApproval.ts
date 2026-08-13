@@ -142,7 +142,7 @@ export function useAutoApproval(overseer: RpcStub<Overseer> | null) {
     }
   }, [overseer, refresh, toasts])
 
-  const setBranchPatterns = useCallback(async (entry: AutoApprovalEntry, branchPatterns: string[]) => {
+  const setBranchPatterns = useCallback(async (entry: AutoApprovalEntry, branchPatterns: string[] | undefined) => {
     if (!overseer) return
     const key = autoApprovalKey(entry)
     setPending(previous => new Set(previous).add(key))

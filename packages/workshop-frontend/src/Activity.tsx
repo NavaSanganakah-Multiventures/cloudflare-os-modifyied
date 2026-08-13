@@ -375,7 +375,8 @@ function AutoApprovalPanel({
   async function saveBranchPatterns(entry: AutoApprovalEntry, value: string) {
     try {
       const patterns = parseBranchPatterns(value)
-      await setBranchPatterns(entry, patterns)
+      // Pass undefined if cleared, so the backend falls back to the default patterns
+      await setBranchPatterns(entry, patterns.length === 0 ? undefined : patterns)
       setBranchInput(prev => { const next = { ...prev }; delete next[autoApprovalKey(entry)]; return next })
       setExpandedKey(null)
     } catch (error) {
