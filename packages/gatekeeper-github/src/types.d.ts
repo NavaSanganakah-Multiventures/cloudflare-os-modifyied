@@ -110,6 +110,9 @@ export interface GitHubRepo {
    *
    * The AI agent chooses a meaningful branch name. All side effects (branch creation, file
    * write, and pull request creation) pass through the approval queue.
+   *
+   * INSTRUCTION FOR AI AGENT: After calling this method, you should call `dispatchWorkflow`
+   * on the newly created branch to run the CI tests.
    */
   proposeFileChange(options: GitHubProposeFileChangeOptions): Promise<GitHubProposedChangeResult>;
 
@@ -121,6 +124,10 @@ export interface GitHubRepo {
 
   /**
    * Dispatches a GitHub Actions workflow.
+   *
+   * INSTRUCTION FOR AI AGENT: Always call this method to trigger the CI workflow
+   * after you finish proposing or making code changes on a branch, so that the
+   * new code is tested automatically.
    *
    * @param workflowId The ID or filename of the workflow.
    * @param ref The branch or tag name to run the workflow on.
