@@ -209,15 +209,18 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     return new Uint8Array(result);
   }
 
-  getAiConfig(): Promise<AiGatewayInfo> {
+  async getAiConfig(): Promise<AiGatewayInfo> {
+    const adminConfig = await readAdminConfig(this.env);
+    const suggestedModels = mergeSuggestedModels(adminConfig);
     let gwConfig = getAiGatewayConfig(this.env);
     if (gwConfig) {
-      return Promise.resolve({
+      return {
         enabled: true,
         enabledProviders: [...gwConfig.providers] as AiModelProvider[],
-      });
+        suggestedModels,
+      };
     } else {
-      return Promise.resolve({ enabled: false });
+      return { enabled: false, suggestedModels };
     }
   }
 
