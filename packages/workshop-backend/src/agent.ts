@@ -21,7 +21,7 @@ import { AgentTurnError, completeText, httpStatusFromError, zeroUsage } from "./
 import type { ModelHandle } from "./ai-models";
 import {
   buildCompactionState, buildSummaryPrompt, COMPACTION_SYSTEM_PROMPT, estimateProjectionTokens,
-  findCompactionBoundary, findProtectedFromSequence, getModelTokenLimits, isCompactionTurn,
+  findCompactionBoundary, findProtectedFromSequence, getModelTokenLimits, getModelTokenLimitsAsync, isCompactionTurn,
   protectRetainedReverts, shouldCompactChat,
   type CompactionProjectionMessage,
 } from "./agent-compaction";
@@ -143,6 +143,10 @@ export type CompactionContext = {
 
   // The total tokens reported for the last measured model step, or zero if none are available.
   measuredTokens: number;
+
+  // Precomputed token budget from the merged admin + built-in catalog.
+  inputBudget: number;
+  maxOutputTokens?: number;
 };
 
 // Summary of one of the workspace's gadgets, as needed by the agent: identity, the name of the
