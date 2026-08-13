@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Dialog, Button, Input, Select, SensitiveInput, Collapsible, useKumoToastManager } from '@cloudflare/kumo'
-import { AiChatAuthorInfo, AiModelConfig, AiModelProvider, AiGatewayInfo, SUGGESTED_MODELS } from '@gadgets/workshop-shared/api'
+import { AiChatAuthorInfo, AiModelConfig, AiModelProvider, AiGatewayInfo, SUGGESTED_MODELS, SuggestedModelInfo } from '@gadgets/workshop-shared/api'
 import { RpcStub } from 'capnweb'
 import { AuthenticatedApi } from '@gadgets/workshop-shared/api'
 
@@ -36,11 +36,25 @@ const API_TOKEN_PLACEHOLDERS: Record<AiModelProvider, string> = {
 // Example used in the custom-model placeholders for providers that have no suggested models
 // (currently Ollama, which serves whatever the user has pulled locally).
 const FALLBACK_EXAMPLE_MODEL = { modelId: 'gemma4:31b', name: 'Gemma 4 31B' }
+const PROVIDER_ORDER: AiModelProvider[] = ['openai', 'anthropic', 'google', 'cloudflare', 'ollama']
+
+function flattenSuggestedModels(dynamic?: SuggestedModelInfo[]): SuggestedModelInfo[] {
+  if (dynamic && dynamic.length > 0) return dynamic
+  return PROVIDER_ORDER.flatMap(provider =>
+    Object.entries(SUGGESTED_MODELS[provider]).map(([modelId, m]) => ({
+      provider,
+      modelId,
+      name: m.name,
+      contextWindow: m.contextWindow,
+      outputLimit: m.outputLimit,
+    }))
+  )
+}
 
 // Pick an example model to show in the custom-model placeholders for the given provider.
-function exampleModel(provider: AiModelProvider): { modelId: string, name: string } {
-  const first = Object.entries(SUGGESTED_MODELS[provider])[0]
-  return first ? { modelId: first[0], name: first[1].name } : FALLBACK_EXAMPLE_MODEL
+function exampleModel(provider: AiModelProvider, models: SuggestedModelInfo[]): { modelId: string, name: string } {
+  const first = models.find(m => m.provider === provider)
+  return first ? { modelId: first.modelId, name: first.name } : FALLBACK_EXAMPLE_MODEL
 }
 
 // Encode a selection into a string value for the Select component.
@@ -49,19 +63,19 @@ function encodeSelection(provider: AiModelProvider, modelId?: string): string {
 }
 
 // Decode a Select value back into a SelectionType.
-function decodeSelection(value: string): SelectionType {
+function decodeSelection(value: string, models: SuggestedModelInfo[]): SelectionType {
   if (value.startsWith('other-')) {
     return { type: 'custom', provider: value.substring(6) as AiModelProvider }
   }
   const colonIndex = value.indexOf(':')
   const provider = value.substring(0, colonIndex) as AiModelProvider
   const modelId = value.substring(colonIndex + 1)
-  const displayName = SUGGESTED_MODELS[provider][modelId].name
+  const displayName = models.find(m => m.provider === provider && m.modelId === modelId)?.name ?? modelId
   return { type: 'suggested', provider, modelId, displayName }
 }
 
 // Build the flat list of options for the Select dropdown.
-function buildOptions(gatewayMode: boolean, enabledProviders: Set<string> | null) {
+function buildOptions(gatewayMode: boolean, enabledProviders: Set<string> | null, models: SuggestedModelInfo[]) {
   const options: { value: string; label: string; provider: string }[] = []
   const providerOrder = Object.keys(SUGGESTED_MODELS) as AiModelProvider[]
 
@@ -70,9 +84,9 @@ function buildOptions(gatewayMode: boolean, enabledProviders: Set<string> | null
 
     // In gateway mode, suggested models are already built-in, so don't list them.
     if (!gatewayMode) {
-      for (const [modelId, model] of Object.entries(SUGGESTED_MODELS[provider])) {
+      for (const model of models.filter(m => m.provider === provider)) {
         options.push({
-          value: encodeSelection(provider, modelId),
+          value: encodeSelection(provider, model.modelId),
           label: model.name,
           provider,
         })
@@ -132,7 +146,7 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
   const handleModelSelect = (value: string) => {
     setSelectValue(value)
     setErrors({})
-    const sel = decodeSelection(value)
+    const sel = decodeSelection(value, suggestedModels)
     setSelection(sel)
 
     if (sel.type === 'custom') {
@@ -213,9 +227,10 @@ export default function AddModelModal({ visible, onCancel, onSuccess, authentica
     }
   }
 
-  const options = buildOptions(gatewayMode, enabledProviders)
+  const suggestedModels = flattenSuggestedModels(aiConfig?.suggestedModels)
+  const options = buildOptions(gatewayMode, enabledProviders, suggestedModels)
   const showCustomFields = selection?.type === 'custom'
-  const example = selection ? exampleModel(selection.provider) : null
+  const example = selection ? exampleModel(selection.provider, suggestedModels) : null
   const isOllama = selection?.provider === 'ollama'
   const isCloudflare = selection?.provider === 'cloudflare'
   const showCredentials = !gatewayMode
