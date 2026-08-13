@@ -971,6 +971,7 @@ export type ObservationDescription = {
 export type ActionKind = {
   tag: string;
   label: string;
+  branchScoped?: boolean;
 };
 
 // Describes an action submitted to the action approval queue. This contains all the information

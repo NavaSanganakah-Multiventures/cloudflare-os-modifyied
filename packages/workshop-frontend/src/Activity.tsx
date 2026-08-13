@@ -489,7 +489,7 @@ function AutoApprovalPanel({
                       {entry.orphaned
                         ? 'This connection no longer offers this action; the rule still applies.'
                         : entry.enabled
-                          ? `Applied without asking on ${formatBranchPatterns(entry.branchPatterns)}`
+                          ? (entry.actionKind.branchScoped !== false ? `Applied without asking on ${formatBranchPatterns(entry.branchPatterns)}` : 'Applied without asking')
                           : 'Waits for your approval'}
                     </span>
                   </span>

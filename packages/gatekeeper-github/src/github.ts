@@ -368,75 +368,90 @@ function defaultBranchFromMetadata(metadata: GitHubRepoMetadata): string {
 const WRITE_REPO_FILE_ACTION: ActionKind = {
   tag: "githubRepoWriteFile",
   label: "Write repository files",
+  branchScoped: true,
 };
 const DELETE_REPO_FILE_ACTION: ActionKind = {
   tag: "githubRepoDeleteFile",
   label: "Delete repository files",
+  branchScoped: true,
 };
 
 const CREATE_BRANCH_ACTION: ActionKind = {
   tag: "githubCreateBranch",
   label: "Create branches",
+  branchScoped: true,
 };
 
 const CREATE_PULL_REQUEST_ACTION: ActionKind = {
   tag: "githubCreatePullRequest",
   label: "Create pull requests",
+  branchScoped: true,
 };
 
 const POST_COMMENT_ACTION: ActionKind = {
   tag: "githubPostComment",
   label: "Post comments",
+  branchScoped: false,
 };
 
 const CREATE_ISSUE_ACTION: ActionKind = {
   tag: "githubCreateIssue",
   label: "Create issues",
+  branchScoped: false,
 };
 
 const SET_TITLE_ACTION: ActionKind = {
   tag: "githubSetTitle",
   label: "Change title",
+  branchScoped: false,
 };
 
 const SET_BODY_ACTION: ActionKind = {
   tag: "githubSetBody",
   label: "Change body",
+  branchScoped: false,
 };
 
 const ADD_LABELS_ACTION: ActionKind = {
   tag: "githubAddLabels",
   label: "Add labels",
+  branchScoped: false,
 };
 
 const REMOVE_LABELS_ACTION: ActionKind = {
   tag: "githubRemoveLabels",
   label: "Remove labels",
+  branchScoped: false,
 };
 
 const CHANGE_STATE_ACTION: ActionKind = {
   tag: "githubChangeState",
   label: "Change state (open/close)",
+  branchScoped: false,
 };
 
 const POST_REVIEW_ACTION: ActionKind = {
   tag: "githubPostReview",
   label: "Post reviews",
+  branchScoped: false,
 };
 
 const REPLY_DIFF_COMMENT_ACTION: ActionKind = {
   tag: "githubReplyDiffComment",
   label: "Reply to diff comments",
+  branchScoped: false,
 };
 
 const MERGE_PULL_REQUEST_ACTION: ActionKind = {
   tag: "githubMergePullRequest",
   label: "Merge pull requests",
+  branchScoped: true,
 };
 
 const DISPATCH_WORKFLOW_ACTION: ActionKind = {
   tag: "githubDispatchWorkflow",
   label: "Dispatch workflow",
+  branchScoped: true,
 };
 
 const REPO_RESOURCE: SupportedResource = {
@@ -4699,6 +4714,7 @@ class GitHubPullRequestImpl extends GitHubIssueImpl implements GitHubPullRequest
   }
 
   async merge(options?: GitHubPullRequestMergeOptions): Promise<void> {
+    const details = await this.gatekeeper.openPullRequest(this.logicalId);
     const action = await this.gatekeeper.prepareMergePullRequest(this.logicalId, options);
     await this.gatekeeper.submitActionForApproval(this.approvalQueue, action, {
       title: `Merge pull request #${this.logicalId}`,
@@ -4706,6 +4722,7 @@ class GitHubPullRequestImpl extends GitHubIssueImpl implements GitHubPullRequest
       implementsRevert: false,
       actionKind: MERGE_PULL_REQUEST_ACTION,
       autoApprovable: true,
+      branchRef: details.base.ref,
     });
   }
 }

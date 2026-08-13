@@ -108,7 +108,8 @@ export class AutoApprovalDrainer {
         // A manual gate. Stop rather than skipping ahead to any later auto-eligible action.
         break;
       }
-      if (rule.branchPatterns && rule.branchPatterns.length > 0 &&
+      if (record.description.actionKind?.branchScoped !== false &&
+          rule.branchPatterns && rule.branchPatterns.length > 0 &&
           (record.description.branchRef === undefined ||
            !branchMatchesPatterns(record.description.branchRef, rule.branchPatterns))) {
         // A branch-pattern gate. The action targets a branch this rule does not cover.
