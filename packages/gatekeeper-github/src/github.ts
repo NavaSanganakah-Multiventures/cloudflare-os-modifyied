@@ -3678,6 +3678,19 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         return;
       }
       case "writeFile": {
+        let sha = action.sha;
+        if (sha === undefined) {
+          try {
+            const existing = await this.#withApi(api => api.getContent(action.owner, action.repo, action.path, action.branch));
+            sha = existing.sha;
+          } catch (error) {
+            if (error instanceof GitHubApiError && error.status === 404) {
+              // File does not exist on this branch yet; omit the sha so GitHub creates it.
+            } else {
+              throw error;
+            }
+          }
+        }
         const response = await this.#withApi(api => api.createOrUpdateFile(
           action.owner,
           action.repo,
@@ -3685,7 +3698,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           action.message,
           action.content,
           action.branch,
-          action.sha,
+          sha,
         ));
         this.#markActionApproved(action, {
           commitResult: commitResultFromResponse(response.commit),
