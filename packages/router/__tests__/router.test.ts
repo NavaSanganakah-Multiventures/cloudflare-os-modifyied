@@ -128,7 +128,7 @@ describe('wrangler.jsonc contract', () => {
   it('binds the workshop backend', () => {
     expect(config.services).toContainEqual({
       binding: 'WORKSHOP_BACKEND',
-      service: 'workshop-backend',
+      service: 'cloudflareos-backend',
     });
   });
 });
