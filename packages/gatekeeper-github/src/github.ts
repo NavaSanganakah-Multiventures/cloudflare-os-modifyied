@@ -277,6 +277,13 @@ type DeleteFileAction = BaseAction & {
   branch?: string;
 };
 
+type DispatchWorkflowAction = BaseAction & {
+  type: "dispatchWorkflow";
+  workflowId: string | number;
+  ref: string;
+  inputs?: Record<string, string>;
+};
+
 type GitHubAction =
   | CreateIssueAction
   | CreatePullRequestAction
@@ -291,7 +298,8 @@ type GitHubAction =
   | MergePullRequestAction
   | CreateBranchAction
   | WriteFileAction
-  | DeleteFileAction;
+  | DeleteFileAction
+  | DispatchWorkflowAction;
 
 type StoredActionRecord = {
   action: GitHubAction;
@@ -373,6 +381,61 @@ const CREATE_BRANCH_ACTION: ActionKind = {
 const CREATE_PULL_REQUEST_ACTION: ActionKind = {
   tag: "githubCreatePullRequest",
   label: "Create pull requests",
+};
+
+const POST_COMMENT_ACTION: ActionKind = {
+  tag: "githubPostComment",
+  label: "Post comments",
+};
+
+const CREATE_ISSUE_ACTION: ActionKind = {
+  tag: "githubCreateIssue",
+  label: "Create issues",
+};
+
+const SET_TITLE_ACTION: ActionKind = {
+  tag: "githubSetTitle",
+  label: "Change title",
+};
+
+const SET_BODY_ACTION: ActionKind = {
+  tag: "githubSetBody",
+  label: "Change body",
+};
+
+const ADD_LABELS_ACTION: ActionKind = {
+  tag: "githubAddLabels",
+  label: "Add labels",
+};
+
+const REMOVE_LABELS_ACTION: ActionKind = {
+  tag: "githubRemoveLabels",
+  label: "Remove labels",
+};
+
+const CHANGE_STATE_ACTION: ActionKind = {
+  tag: "githubChangeState",
+  label: "Change state (open/close)",
+};
+
+const POST_REVIEW_ACTION: ActionKind = {
+  tag: "githubPostReview",
+  label: "Post reviews",
+};
+
+const REPLY_DIFF_COMMENT_ACTION: ActionKind = {
+  tag: "githubReplyDiffComment",
+  label: "Reply to diff comments",
+};
+
+const MERGE_PULL_REQUEST_ACTION: ActionKind = {
+  tag: "githubMergePullRequest",
+  label: "Merge pull requests",
+};
+
+const DISPATCH_WORKFLOW_ACTION: ActionKind = {
+  tag: "githubDispatchWorkflow",
+  label: "Dispatch workflow",
 };
 
 const REPO_RESOURCE: SupportedResource = {
@@ -2098,6 +2161,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       case "createBranch":
       case "writeFile":
       case "deleteFile":
+      case "dispatchWorkflow":
         // These actions affect the repo, not a specific issue/PR entity, so no pending action
         // depends on a provisional issue/PR resource.
         return false;
@@ -2168,7 +2232,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         return this.#entityIdMatches(action.pullId, logicalId);
       }
 
-      if (action.type === "createBranch" || action.type === "writeFile" || action.type === "deleteFile") {
+      if (action.type === "createBranch" || action.type === "writeFile" || action.type === "deleteFile" || action.type === "dispatchWorkflow") {
         // Repo-level actions are never attached to an issue/PR entity.
         return false;
       }
@@ -3617,6 +3681,18 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         this.#clearCaches();
         return;
       }
+      case "dispatchWorkflow": {
+        await this.#withApi(api => api.dispatchWorkflow(
+          action.owner,
+          action.repo,
+          action.workflowId,
+          action.ref,
+          action.inputs,
+        ));
+        this.#markActionApproved(action);
+        this.#clearCaches();
+        return;
+      }
     }
   }
 
@@ -4064,6 +4140,23 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     };
   }
 
+  async prepareDispatchWorkflow(
+    workflowId: string | number,
+    ref: string,
+    inputs?: Record<string, string>,
+  ): Promise<DispatchWorkflowAction> {
+    return {
+      type: "dispatchWorkflow",
+      approvalId: this.#nextActionId(),
+      submittedAt: Date.now(),
+      owner: this.ctx.props.owner,
+      repo: this.ctx.props.repo,
+      workflowId,
+      ref,
+      inputs,
+    };
+  }
+
   // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ repo,
   // issue, or pull request ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ is scoped to one repository, and issues/PRs inherit the repo's
   // permissions, so the repository is the atomic ACL unit. To admit an observer we simply confirm
@@ -4084,6 +4177,14 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
   }
 
   async removeObserver(_id: string): Promise<void> {}
+
+  async listWorkflowRuns(workflowId?: string | number, ref?: string): Promise<{ total_count: number; workflow_runs: import("./types").GitHubWorkflowRun[] }> {
+    return this.#withApi(api => api.listWorkflowRuns(this.ctx.props.owner, this.ctx.props.repo, workflowId, ref));
+  }
+
+  async getWorkflowRun(runId: number): Promise<import("./types").GitHubWorkflowRun> {
+    return this.#withApi(api => api.getWorkflowRun(this.ctx.props.owner, this.ctx.props.repo, runId));
+  }
 }
 
 @validateRpc()
@@ -4116,6 +4217,8 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       title: `Create issue ${options.title}`,
       description: `Create a new issue in ${action.owner}/${action.repo} titled "${options.title}".`,
       implementsRevert: false,
+      actionKind: CREATE_ISSUE_ACTION,
+      autoApprovable: true,
     });
     return new GitHubIssueImpl(this.#gatekeeper, this.#approvalQueue.dup(), action.provisionalId, "issue");
   }
@@ -4343,6 +4446,35 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
 
     return { branch, commitHandle, pullRequest };
   }
+
+  async dispatchWorkflow(workflowId: string | number, ref: string, inputs?: Record<string, string>): Promise<void> {
+    const action = await this.#gatekeeper.prepareDispatchWorkflow(workflowId, ref, inputs);
+    await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
+      title: `Dispatch workflow ${workflowId}`,
+      description: `Dispatch GitHub Actions workflow ${workflowId} on branch ${ref}.`,
+      implementsRevert: false,
+      awaitDecision: true,
+      actionKind: DISPATCH_WORKFLOW_ACTION,
+      autoApprovable: true,
+      branchRef: ref,
+    });
+  }
+
+  async listWorkflowRuns(workflowId?: string | number, ref?: string): Promise<{ total_count: number; workflow_runs: import("./types").GitHubWorkflowRun[] }> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `List workflow runs`,
+      description: `List GitHub Actions workflow runs.`,
+    });
+    return this.#gatekeeper.listWorkflowRuns(workflowId, ref);
+  }
+
+  async getWorkflowRun(runId: number): Promise<import("./types").GitHubWorkflowRun> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `Read workflow run ${runId}`,
+      description: `Read details of GitHub Actions workflow run ${runId}.`,
+    });
+    return this.#gatekeeper.getWorkflowRun(runId);
+  }
 }
 
 @validateRpc()
@@ -4408,6 +4540,8 @@ class GitHubIssueImpl extends RpcTarget implements GitHubIssue {
       title: `Rename #${this.logicalId}`,
       description: `Change the title from "${action.previousTitle}" to "${title}".`,
       implementsRevert: true,
+      actionKind: SET_TITLE_ACTION,
+      autoApprovable: true,
     });
   }
 
@@ -4418,6 +4552,8 @@ class GitHubIssueImpl extends RpcTarget implements GitHubIssue {
       title: `Edit body of #${this.logicalId}`,
       description: `Replace the Markdown body of #${this.logicalId}.`,
       implementsRevert: true,
+      actionKind: SET_BODY_ACTION,
+      autoApprovable: true,
     });
   }
 
@@ -4428,6 +4564,8 @@ class GitHubIssueImpl extends RpcTarget implements GitHubIssue {
       title: `Add labels to #${this.logicalId}`,
       description: `Add labels ${labels.join(", ")} to #${this.logicalId}.`,
       implementsRevert: true,
+      actionKind: ADD_LABELS_ACTION,
+      autoApprovable: true,
     });
   }
 
@@ -4438,6 +4576,8 @@ class GitHubIssueImpl extends RpcTarget implements GitHubIssue {
       title: `Remove labels from #${this.logicalId}`,
       description: `Remove labels ${labels.join(", ")} from #${this.logicalId}.`,
       implementsRevert: true,
+      actionKind: REMOVE_LABELS_ACTION,
+      autoApprovable: true,
     });
   }
 
@@ -4448,6 +4588,8 @@ class GitHubIssueImpl extends RpcTarget implements GitHubIssue {
       title: `Close #${this.logicalId}`,
       description: `Close #${this.logicalId}${reason ? ` with reason ${reason}` : ""}.`,
       implementsRevert: true,
+      actionKind: CHANGE_STATE_ACTION,
+      autoApprovable: true,
     });
   }
 
@@ -4458,6 +4600,8 @@ class GitHubIssueImpl extends RpcTarget implements GitHubIssue {
       title: `Reopen #${this.logicalId}`,
       description: `Reopen #${this.logicalId}.`,
       implementsRevert: true,
+      actionKind: CHANGE_STATE_ACTION,
+      autoApprovable: true,
     });
   }
 
@@ -4475,6 +4619,8 @@ class GitHubIssueImpl extends RpcTarget implements GitHubIssue {
       title: `Comment on #${this.logicalId}`,
       description: `Post a new Markdown comment on #${this.logicalId}.`,
       implementsRevert: true,
+      actionKind: POST_COMMENT_ACTION,
+      autoApprovable: true,
     });
   }
 }
@@ -4516,6 +4662,8 @@ class GitHubPullRequestImpl extends GitHubIssueImpl implements GitHubPullRequest
       title: `Submit review for #${this.logicalId}`,
       description: `Submit a ${review.decision} review for pull request #${this.logicalId}.`,
       implementsRevert: false,
+      actionKind: POST_REVIEW_ACTION,
+      autoApprovable: true,
     });
   }
 
@@ -4530,6 +4678,8 @@ class GitHubPullRequestImpl extends GitHubIssueImpl implements GitHubPullRequest
       title: `Reply to diff thread on #${this.logicalId}`,
       description: `Reply to a diff discussion thread on pull request #${this.logicalId}.`,
       implementsRevert: true,
+      actionKind: REPLY_DIFF_COMMENT_ACTION,
+      autoApprovable: true,
     });
   }
 
@@ -4539,6 +4689,8 @@ class GitHubPullRequestImpl extends GitHubIssueImpl implements GitHubPullRequest
       title: `Merge pull request #${this.logicalId}`,
       description: `Merge pull request #${this.logicalId}${options?.method ? ` using ${options.method}` : ""}.`,
       implementsRevert: false,
+      actionKind: MERGE_PULL_REQUEST_ACTION,
+      autoApprovable: true,
     });
   }
 }

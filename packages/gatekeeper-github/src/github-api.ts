@@ -183,6 +183,21 @@ export type GitHubRefResponse = {
   };
 };
 
+export type GitHubWorkflowRunResponse = {
+  id: number;
+  name?: string;
+  head_branch: string;
+  head_sha: string;
+  run_number: number;
+  event: string;
+  status: "queued" | "in_progress" | "completed" | "waiting" | "requested" | "pending";
+  conclusion: "success" | "failure" | "neutral" | "cancelled" | "skipped" | "timed_out" | "action_required" | null;
+  workflow_id: number;
+  html_url: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export class GitHubApiError extends Error {
   status: number;
   details?: unknown;
@@ -1290,6 +1305,53 @@ export class GitHubApi {
           branch,
         },
       },
+    )).data;
+  }
+
+  async dispatchWorkflow(
+    owner: string,
+    repo: string,
+    workflowId: string | number,
+    ref: string,
+    inputs?: Record<string, string>,
+  ): Promise<void> {
+    await this.#request<void>(
+      "POST",
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/${encodeURIComponent(workflowId)}/dispatches`,
+      {
+        body: { ref, inputs },
+      },
+    );
+  }
+
+  async listWorkflowRuns(
+    owner: string,
+    repo: string,
+    workflowId?: string | number,
+    ref?: string,
+  ): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRunResponse[] }> {
+    let url = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs`;
+    if (workflowId !== undefined) {
+      url = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/${encodeURIComponent(workflowId)}/runs`;
+    }
+    
+    return (await this.#request<{ total_count: number; workflow_runs: GitHubWorkflowRunResponse[] }>(
+      "GET",
+      url,
+      {
+        query: ref ? { branch: ref } : undefined,
+      },
+    )).data;
+  }
+
+  async getWorkflowRun(
+    owner: string,
+    repo: string,
+    runId: number,
+  ): Promise<GitHubWorkflowRunResponse> {
+    return (await this.#request<GitHubWorkflowRunResponse>(
+      "GET",
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${encodeURIComponent(runId)}`,
     )).data;
   }
 }

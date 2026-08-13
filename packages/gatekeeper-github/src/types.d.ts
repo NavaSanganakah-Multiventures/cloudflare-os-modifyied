@@ -118,6 +118,41 @@ export interface GitHubRepo {
    * and opening a pull request back to the default branch.
    */
   proposeFileDeletion(options: GitHubProposeFileDeletionOptions): Promise<GitHubProposedChangeResult>;
+
+  /**
+   * Dispatches a GitHub Actions workflow.
+   *
+   * @param workflowId The ID or filename of the workflow.
+   * @param ref The branch or tag name to run the workflow on.
+   * @param inputs Optional input parameters for the workflow.
+   */
+  dispatchWorkflow(workflowId: string | number, ref: string, inputs?: Record<string, string>): Promise<void>;
+
+  /**
+   * Lists workflow runs for the repository, optionally filtered by workflow ID or branch ref.
+   */
+  listWorkflowRuns(workflowId?: string | number, ref?: string): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }>;
+
+  /**
+   * Gets a specific workflow run by ID.
+   */
+  getWorkflowRun(runId: number): Promise<GitHubWorkflowRun>;
+}
+
+/** A GitHub workflow run. */
+export interface GitHubWorkflowRun {
+  id: number;
+  name?: string;
+  head_branch: string;
+  head_sha: string;
+  run_number: number;
+  event: string;
+  status: "queued" | "in_progress" | "completed" | "waiting" | "requested" | "pending";
+  conclusion: "success" | "failure" | "neutral" | "cancelled" | "skipped" | "timed_out" | "action_required" | null;
+  workflow_id: number;
+  html_url: string;
+  created_at: string;
+  updated_at: string;
 }
 
 /** A single GitHub issue. */
