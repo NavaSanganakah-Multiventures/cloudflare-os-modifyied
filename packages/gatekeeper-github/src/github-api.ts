@@ -184,9 +184,6 @@ export type GitHubRefResponse = {
     url: string;
   };
 };
-
-
-
 export class GitHubApiError extends Error {
   status: number;
   details?: unknown;
