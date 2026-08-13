@@ -133,7 +133,7 @@ export interface GitHubRepo {
    * @param ref The branch or tag name to run the workflow on.
    * @param inputs Optional input parameters for the workflow.
    */
-  dispatchWorkflow(workflowId: string | number, ref: string, inputs?: Record<string, string>): Promise<void>;
+  dispatchWorkflow(workflowId: string | number, ref: string, inputs?: Record<string, any>): Promise<void>;
 
   /**
    * Lists workflow runs for the repository, optionally filtered by workflow ID or branch ref.
@@ -154,7 +154,7 @@ export interface GitHubWorkflowRun {
   head_sha: string;
   run_number: number;
   event: string;
-  status: "queued" | "in_progress" | "completed" | "waiting" | "requested" | "pending";
+  status: "queued" | "in_progress" | "completed" | "waiting" | "requested";
   conclusion: "success" | "failure" | "neutral" | "cancelled" | "skipped" | "timed_out" | "action_required" | null;
   workflow_id: number;
   html_url: string;

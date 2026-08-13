@@ -1299,7 +1299,7 @@ export class GitHubApi {
     repo: string,
     workflowId: string | number,
     ref: string,
-    inputs?: Record<string, string>,
+    inputs?: Record<string, any>,
   ): Promise<void> {
     await this.#request<void>(
       "POST",

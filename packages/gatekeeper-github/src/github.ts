@@ -282,7 +282,7 @@ type DispatchWorkflowAction = BaseAction & {
   type: "dispatchWorkflow";
   workflowId: string | number;
   ref: string;
-  inputs?: Record<string, string>;
+  inputs?: Record<string, any>;
 };
 
 type GitHubAction =
@@ -4169,7 +4169,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
   async prepareDispatchWorkflow(
     workflowId: string | number,
     ref: string,
-    inputs?: Record<string, string>,
+    inputs?: Record<string, any>,
   ): Promise<DispatchWorkflowAction> {
     return {
       type: "dispatchWorkflow",
@@ -4473,7 +4473,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     return { branch, commitHandle, pullRequest };
   }
 
-  async dispatchWorkflow(workflowId: string | number, ref: string, inputs?: Record<string, string>): Promise<void> {
+  async dispatchWorkflow(workflowId: string | number, ref: string, inputs?: Record<string, any>): Promise<void> {
     const action = await this.#gatekeeper.prepareDispatchWorkflow(workflowId, ref, inputs);
     let description = `Dispatch GitHub Actions workflow ${workflowId} on branch ${ref}.`;
     if (inputs && Object.keys(inputs).length > 0) {
