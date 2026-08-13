@@ -121,7 +121,7 @@ export function useAutoApproval(overseer: RpcStub<Overseer> | null) {
     setCatalog(previous => previous.map(action =>
       autoApprovalKey(action) === key ? { ...action, alreadyEnabled: enabled } : action))
     setRules(previous => enabled
-      ? [...previous, { gatekeeperId: entry.gatekeeperId, actionKind: entry.actionKind }]
+      ? [...previous, { gatekeeperId: entry.gatekeeperId, actionKind: entry.actionKind, branchPatterns: entry.branchPatterns }]
       : previous.filter(rule => autoApprovalKey(rule) !== key))
     try {
       if (enabled) await overseer.setAutoApprovedActionKind(entry.gatekeeperId, entry.actionKind, entry.branchPatterns)
