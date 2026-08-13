@@ -849,6 +849,16 @@ export interface AdminApi {
 
   // Reorder the menu. `blueprintIds` must be a permutation of the currently promoted ids.
   setFormatOrder(blueprintIds: string[]): Promise<void>;
+
+  // --- System suggested models ---
+
+  // Add or override a suggested system model. An entry with the same provider + modelId replaces
+  // any existing admin-managed entry (and shadows the built-in default, if any).
+  addSuggestedModel(model: SuggestedModelInfo): Promise<void>;
+
+  // Remove an admin-managed suggested model. Built-in models cannot be removed this way; hide
+  // them by adding an override with `enabled: false`.
+  removeSuggestedModel(provider: AiModelProvider, modelId: string): Promise<void>;
 }
 
 // A partial edit to one promoted format. Absent fields are left alone.
@@ -946,12 +956,28 @@ export type CloudflareAccountOption = {
 // Supported AI providers.
 export type AiModelProvider = "openai" | "anthropic" | "google" | "cloudflare" | "ollama";
 
+// Admin-managed suggested system model entry.
+export type SuggestedModelInfo = {
+  provider: AiModelProvider;
+  modelId: string;
+  name: string;
+  contextWindow: number;
+  outputLimit?: number;
+  reasoning?: boolean;
+  input?: ("text" | "image")[];
+  // False hides the entry from the user-facing suggested-model picker while keeping it in the
+  // admin list. Defaults to true.
+  enabled?: boolean;
+};
+
 // Information about the AI gateway configuration. Returned by `AuthenticatedApi.getAiConfig()`.
 export type AiGatewayInfo = {
   enabled: true;
   enabledProviders: AiModelProvider[];
+  suggestedModels: SuggestedModelInfo[];
 } | {
   enabled: false;
+  suggestedModels: SuggestedModelInfo[];
 };
 
 // Configuration specifying how to connect to an AI model provider.
