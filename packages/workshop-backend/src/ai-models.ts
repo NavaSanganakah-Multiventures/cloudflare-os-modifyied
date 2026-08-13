@@ -115,6 +115,24 @@ const API_STREAMS: Record<string, StreamFunction<Api, SimpleStreamOptions>> = {
 
 const ZERO_COST: ModelCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
+// The pi-ai 0.83.0 catalog does not yet include this model, so override its metadata until the
+// provider package is bumped. Reasoning is enabled; token limits match Cloudflare's published
+// specs (80k context, 32k response cap).
+const CLOUDFLARE_WORKERS_AI_OVERRIDES: Record<string, Model<Api>> = {
+  "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": {
+    id: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
+    name: "DeepSeek R1 Distill Qwen 32B (Workers AI)",
+    api: "openai-completions",
+    provider: "cloudflare-workers-ai",
+    baseUrl: "https://api.cloudflare.com/client/v4/ai/v1",
+    reasoning: true,
+    input: ["text"],
+    cost: ZERO_COST,
+    contextWindow: 80_000,
+    maxTokens: WORKERS_AI_OUTPUT_LIMIT,
+  } as Model<Api>,
+};
+
 // Consult pi's builtin catalog for cost/compat metadata of a known model id. Unknown models are
 // fine (synthesized with zero cost). Import per-provider, not providers/all.
 function catalogModel(provider: AiModelConfig["provider"], modelId: string): Model<Api> | undefined {
@@ -122,7 +140,8 @@ function catalogModel(provider: AiModelConfig["provider"], modelId: string): Mod
     case "anthropic": return (ANTHROPIC_MODELS as Record<string, Model<Api>>)[modelId];
     case "openai": return (OPENAI_MODELS as Record<string, Model<Api>>)[modelId];
     case "google": return (GOOGLE_MODELS as Record<string, Model<Api>>)[modelId];
-    case "cloudflare": return (CLOUDFLARE_WORKERS_AI_MODELS as Record<string, Model<Api>>)[modelId];
+    case "cloudflare": return CLOUDFLARE_WORKERS_AI_OVERRIDES[modelId] ??
+        (CLOUDFLARE_WORKERS_AI_MODELS as Record<string, Model<Api>>)[modelId];
     case "ollama": return undefined;
     default: return undefined;
   }
