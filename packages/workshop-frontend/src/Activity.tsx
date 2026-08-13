@@ -184,7 +184,7 @@ export default function Activity({
   if (!isReady) {
     return (
       <div className="flex h-full items-center justify-center text-[13px] text-kumo-subtle">
-        Loading activityÃ¢ÂÂ¦
+        Loading activityÃÂ¢ÃÂÃÂ¦
       </div>
     )
   }
@@ -360,9 +360,24 @@ function AutoApprovalPanel({
   overseer: RpcStub<Overseer>
   reloadTrigger?: number
 }) {
-  const { entries, isLoading, loadError, pending, refresh, setEnabled, defaultPatterns } = useAutoApproval(overseer)
+  const { entries, isLoading, loadError, pending, refresh, setEnabled, setBranchPatterns, defaultPatterns } = useAutoApproval(overseer)
   const { authenticatedApi } = useAuthenticatedApi()
   const vendorBranding = useVendorBranding(authenticatedApi)
+  const [expandedKey, setExpandedKey] = useState<string | null>(null)
+  const [branchInput, setBranchInput] = useState<Record<string, string>>({})
+
+  // Parse a comma-separated list of glob branch patterns (trim, drop empties).
+  function parseBranchPatterns(value: string): string[] {
+    return value.split(',').map(p => p.trim()).filter(Boolean)
+  }
+
+  // Save the edited branch patterns for an action and collapse the editor.
+  async function saveBranchPatterns(entry: AutoApprovalEntry, value: string) {
+    const patterns = parseBranchPatterns(value)
+    await setBranchPatterns(entry, patterns)
+    setBranchInput(prev => { const next = { ...prev }; delete next[autoApprovalKey(entry)]; return next })
+    setExpandedKey(null)
+  }
 
   const previousReloadTrigger = useRef(reloadTrigger)
   useEffect(() => {
@@ -399,7 +414,7 @@ function AutoApprovalPanel({
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-[13px] text-kumo-subtle">
-        Loading auto-approvalÃ¢ÂÂ¦
+        Loading auto-approvalÃÂ¢ÃÂÃÂ¦
       </div>
     )
   }
@@ -449,8 +464,9 @@ function AutoApprovalPanel({
               Auto-approval preset for GitHub repos
             </p>
             <p className="mt-1 text-[12px] leading-[16px] tracking-[-0.2px] text-kumo-subtle">
-              When you connect a GitHub repo, these actions will be auto-approved on non-default branches:
-              write file, delete file, create branch, create pull request.
+              When you connect a GitHub repo, branch-scoped actions auto-approve on non-default branches, and
+              non-branch actions (e.g. issues, comments) auto-approve on any branch. Merge auto-approves except
+              into the default branch. Use the chevron beside each entry to choose which branches to exclude.
             </p>
             <p className="mt-1.5 text-[12px] leading-[16px] tracking-[-0.2px] text-kumo-inactive">
               Branches: <span className="font-mono text-kumo-subtle">
@@ -476,30 +492,66 @@ function AutoApprovalPanel({
             {group.entries.map(entry => {
               const key = autoApprovalKey(entry)
               const busy = pending.has(key)
+              const branchScoped = entry.actionKind.branchScoped !== false
+              const expanded = expandedKey === key
+              const inputValue = branchInput[key] ?? (entry.branchPatterns ?? defaultPatterns ?? ['*', '!main']).join(', ')
               return (
-                <div
-                  key={key}
-                  className="flex w-full items-center gap-3 border-b border-kumo-line/60 px-5 py-2.5 text-left"
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] leading-[18px] font-medium tracking-[-0.25px] text-kumo-default">
-                      {entry.actionKind.label}
+                <div key={key}>
+                  <div className="flex w-full items-center gap-3 border-b border-kumo-line/60 px-5 py-2.5 text-left">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] leading-[18px] font-medium tracking-[-0.25px] text-kumo-default">
+                        {entry.actionKind.label}
+                      </span>
+                      <span className="mt-0.5 block text-[12px] leading-4 tracking-[-0.2px] text-kumo-inactive">
+                        {entry.orphaned
+                          ? 'This connection no longer offers this action; the rule still applies.'
+                          : entry.enabled
+                            ? (branchScoped ? `Applied without asking on ${formatBranchPatterns(entry.branchPatterns)}` : 'Applied without asking')
+                            : 'Waits for your approval'}
+                      </span>
                     </span>
-                    <span className="mt-0.5 block text-[12px] leading-4 tracking-[-0.2px] text-kumo-inactive">
-                      {entry.orphaned
-                        ? 'This connection no longer offers this action; the rule still applies.'
-                        : entry.enabled
-                          ? (entry.actionKind.branchScoped !== false ? `Applied without asking on ${formatBranchPatterns(entry.branchPatterns)}` : 'Applied without asking')
-                          : 'Waits for your approval'}
-                    </span>
-                  </span>
-                  <Switch
-                    size="sm"
-                    checked={entry.enabled}
-                    disabled={busy}
-                    aria-label={`${entry.enabled ? 'Disable' : 'Enable'} auto-approval for ${entry.actionKind.label}`}
-                    onCheckedChange={enabled => void setEnabled(entry, enabled)}
-                  />
+                    {branchScoped && entry.enabled && !entry.orphaned && (
+                      <button
+                        type="button"
+                        aria-label={`${expanded ? 'Hide' : 'Edit'} branch patterns for ${entry.actionKind.label}`}
+                        className="cursor-pointer text-[12px] text-kumo-inactive hover:text-kumo-default"
+                        onClick={() => setExpandedKey(expanded ? null : key)}
+                      >
+                        <CaretRight weight="bold" className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
+                      </button>
+                    )}
+                    <Switch
+                      size="sm"
+                      checked={entry.enabled}
+                      disabled={busy}
+                      aria-label={`${entry.enabled ? 'Disable' : 'Enable'} auto-approval for ${entry.actionKind.label}`}
+                      onCheckedChange={enabled => void setEnabled(entry, enabled)}
+                    />
+                  </div>
+                  {branchScoped && entry.enabled && !entry.orphaned && expanded && (
+                    <div className="border-b border-kumo-line/60 bg-kumo-elevated/30 px-5 py-2.5">
+                      <p className="m-0 mb-1.5 text-[11.5px] leading-4 tracking-[-0.2px] text-kumo-inactive">
+                        Auto-approve this action on these branches. Use <code className="font-mono">!</code> to exclude (e.g. <code className="font-mono">!main</code>). For merge, this is the branch the pull request merges <em>into</em>.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          className="min-w-0 flex-1 rounded-md border border-kumo-line bg-kumo-base px-2 py-1 font-mono text-[12px] text-kumo-default outline-none focus:border-kumo-default"
+                          value={inputValue}
+                          placeholder="*, !main"
+                          onChange={e => setBranchInput(prev => ({ ...prev, [key]: e.target.value }))}
+                        />
+                        <button
+                          type="button"
+                          disabled={busy}
+                          className="shrink-0 cursor-pointer text-[12px] font-medium text-kumo-default hover:text-kumo-default-hover disabled:opacity-50"
+                          onClick={() => void saveBranchPatterns(entry, inputValue)}
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -557,7 +609,7 @@ function ReviewRequest({
                 {record.resourceTitle}
               </a>
             ) : record.resourceTitle}
-            <span className="px-1">ÃÂ·</span>
+            <span className="px-1">ÃÂÃÂ·</span>
             {formatRelativeTime(record.createdAt)}
           </p>
         </div>
