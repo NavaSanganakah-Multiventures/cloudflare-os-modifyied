@@ -165,6 +165,21 @@ export interface GitHubRepo {
    * Gets a specific workflow run by ID. Reading is an observation.
    */
   getWorkflowRun(runId: number): Promise<GitHubWorkflowRun>;
+
+  /**
+   * Lists the jobs (and their steps) for a workflow run. Reading is an observation.
+   *
+   * INSTRUCTION FOR AI AGENT: When a run fails, call this to find which job/step failed
+   * (check each step's `conclusion`), then call `getWorkflowJobLogs` with that job's `id`
+   * to read the actual log output and diagnose the failure.
+   */
+  listWorkflowJobs(runId: number): Promise<{ total_count: number; jobs: GitHubWorkflowJob[] }>;
+
+  /**
+   * Fetches the plain-text log for a single workflow job (the `id` from `listWorkflowJobs`).
+   * Reading is an observation. Returns the raw log text.
+   */
+  getWorkflowJobLogs(jobId: number): Promise<string>;
 }
 
 /** A GitHub Actions workflow definition. */
@@ -205,6 +220,29 @@ export interface GitHubWorkflowRun {
   html_url: string;
   created_at: string;
   updated_at: string;
+}
+
+/** A single step within a workflow job. */
+export interface GitHubWorkflowStep {
+  name: string;
+  status: "queued" | "in_progress" | "completed" | "waiting" | "pending";
+  conclusion: string | null;
+  number: number;
+  started_at?: string;
+  completed_at?: string;
+}
+
+/** A job (runner execution) within a workflow run. */
+export interface GitHubWorkflowJob {
+  id: number;
+  run_id: number;
+  name: string;
+  status: "queued" | "in_progress" | "completed" | "waiting" | "pending";
+  conclusion: string | null;
+  started_at?: string;
+  completed_at?: string;
+  html_url?: string;
+  steps?: GitHubWorkflowStep[];
 }
 
 /** A single GitHub issue. */

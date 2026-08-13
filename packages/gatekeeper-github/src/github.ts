@@ -77,6 +77,7 @@ import type {
   GitHubProposeFileDeletionOptions,
   GitHubProposedChangeResult,
   GitHubWorkflow,
+  GitHubWorkflowJob,
   GitHubWorkflowRun,
   GitHubWorkflowRunsQuery,
 } from "./types";
@@ -4240,6 +4241,14 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
   async getWorkflowRun(runId: number): Promise<GitHubWorkflowRun> {
     return this.#withApi(api => api.getWorkflowRun(this.ctx.props.owner, this.ctx.props.repo, runId));
   }
+
+  async listWorkflowJobs(runId: number): Promise<{ total_count: number; jobs: GitHubWorkflowJob[] }> {
+    return this.#withApi(api => api.listWorkflowJobs(this.ctx.props.owner, this.ctx.props.repo, runId));
+  }
+
+  async getWorkflowJobLogs(jobId: number): Promise<string> {
+    return this.#withApi(api => api.getWorkflowJobLogs(this.ctx.props.owner, this.ctx.props.repo, jobId));
+  }
 }
 
 @validateRpc()
@@ -4552,6 +4561,22 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Read details of GitHub Actions workflow run ${runId}.`,
     });
     return this.#gatekeeper.getWorkflowRun(runId);
+  }
+
+  async listWorkflowJobs(runId: number): Promise<{ total_count: number; jobs: GitHubWorkflowJob[] }> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `List workflow jobs`,
+      description: `List the jobs and steps of GitHub Actions workflow run ${runId}.`,
+    });
+    return this.#gatekeeper.listWorkflowJobs(runId);
+  }
+
+  async getWorkflowJobLogs(jobId: number): Promise<string> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `Read workflow job logs`,
+      description: `Read the log output of GitHub Actions job ${jobId}.`,
+    });
+    return this.#gatekeeper.getWorkflowJobLogs(jobId);
   }
 }
 

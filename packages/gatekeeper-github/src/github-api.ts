@@ -1,4 +1,4 @@
-import type { GitHubWorkflow, GitHubWorkflowRun } from "./types";
+import type { GitHubWorkflow, GitHubWorkflowJob, GitHubWorkflowRun } from "./types";
 
 export type GitHubOAuthGrant = {
   accessToken: string;
@@ -1360,5 +1360,72 @@ export class GitHubApi {
       "GET",
       `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${encodeURIComponent(runId)}`,
     )).data;
+  }
+
+  async listWorkflowJobs(
+    owner: string,
+    repo: string,
+    runId: number,
+  ): Promise<{ total_count: number; jobs: GitHubWorkflowJob[] }> {
+    return (await this.#request<{ total_count: number; jobs: GitHubWorkflowJob[] }>(
+      "GET",
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${encodeURIComponent(runId)}/jobs`,
+    )).data;
+  }
+
+  // GitHub's job-logs endpoint returns a 302 redirect to a signed blob URL that serves the
+  // raw log as plain text. The signed URL is self-authenticating, so we follow the redirect
+  // manually and fetch the target without our Authorization header.
+  async getWorkflowJobLogs(
+    owner: string,
+    repo: string,
+    jobId: number,
+  ): Promise<string> {
+    const url = new URL(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/jobs/${encodeURIComponent(jobId)}/logs`,
+      API_BASE_URL,
+    ).toString();
+    const headers = new Headers({
+      Accept: DEFAULT_ACCEPT,
+      "User-Agent": USER_AGENT,
+      "X-GitHub-Api-Version": API_VERSION,
+      Authorization: `Bearer ${await this.#getToken()}`,
+    });
+
+    let response = await fetch(url, {
+      method: "GET",
+      headers,
+      redirect: "manual",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+
+    // Follow the redirect to the signed log URL without auth headers.
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location) {
+        throw new GitHubApiError(response.status, "workflow job logs redirect is missing a location");
+      }
+      response = await fetch(location, {
+        method: "GET",
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    }
+
+    if (!response.ok) {
+      const parsed = await parseBody(response);
+      let message = `${response.status} ${response.statusText}`;
+      if (typeof parsed === "string" && parsed.length > 0) {
+        message = parsed;
+      } else if (parsed && typeof parsed === "object") {
+        const errorMessage = (parsed as { message?: string; error?: string }).message
+          ?? (parsed as { message?: string; error?: string }).error;
+        if (errorMessage) {
+          message = errorMessage;
+        }
+      }
+      throw new GitHubApiError(response.status, message, parsed);
+    }
+
+    return await response.text();
   }
 }
