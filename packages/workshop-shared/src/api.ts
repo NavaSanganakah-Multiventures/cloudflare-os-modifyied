@@ -991,6 +991,10 @@ export const SUGGESTED_MODELS: Record<
       name: "Kimi K2.7 Code (Workers AI)", contextWindow: 262144,
       outputLimit: WORKERS_AI_OUTPUT_LIMIT,
     },
+    "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": {
+      name: "DeepSeek R1 Distill Qwen 32B (Workers AI)", contextWindow: 80_000,
+      outputLimit: WORKERS_AI_OUTPUT_LIMIT,
+    },
     "@cf/zai-org/glm-5.2": {
       name: "GLM 5.2 (Workers AI)", contextWindow: 262144, outputLimit: WORKERS_AI_OUTPUT_LIMIT,
     },
