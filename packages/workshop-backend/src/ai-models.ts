@@ -3,6 +3,7 @@ import { validateRpc } from "capnweb-validate";
 import type {
   AnthropicMessagesCompat, Api, AssistantMessageEventStream, Context, Model, ModelCost,
   OpenAICompletionsCompat, ProviderHeaders, SimpleStreamOptions, StreamFunction,
+  InputModality,
 } from "@earendil-works/pi-ai";
 import { stream as anthropicMessagesStream } from "@earendil-works/pi-ai/api/anthropic-messages";
 import { stream as googleGenerativeAiStream } from "@earendil-works/pi-ai/api/google-generative-ai";
@@ -15,9 +16,10 @@ import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models";
 import { ApprovalQueue, Gatekeeper, ResourceDescription, stripTrailingSlashes } from '@gadgets/workshop-shared/gatekeeper';
 import { LanguageModelBinding } from "./ai-model-binding";
 import AI_MODEL_BINDING_TYPES from "./ai-model-binding.txt";
-import { AiChatAuthorInfo, AiModelConfig, SUGGESTED_MODELS, WORKERS_AI_OUTPUT_LIMIT }
+import { AiChatAuthorInfo, AiModelConfig, SUGGESTED_MODELS, SuggestedModelInfo, WORKERS_AI_OUTPUT_LIMIT }
   from "@gadgets/workshop-shared/api";
 import { AiGatewayConfig, getAiGatewayConfig, type AiGatewayLogRoute } from "./ai-gateway.js";
+import { mergeSuggestedModels, readAdminConfig } from "./admin-config.js";
 import { completeText } from "./ai-invoke.js";
 import { bridgePdfAttachments } from "./chat-attachment-pdf.js";
 
@@ -146,13 +148,36 @@ function catalogModel(provider: AiModelConfig["provider"], modelId: string): Mod
     default: return undefined;
   }
 }
+async function resolveSuggestedModels(env: Cloudflare.Env)
+    : Promise<Record<AiModelProvider, Record<string, SuggestedModelInfo>>> {
+  const adminConfig = await readAdminConfig(env);
+  const list = mergeSuggestedModels(adminConfig);
+  const map: Record<string, Record<string, SuggestedModelInfo>> = {};
+  for (const m of list) {
+    (map[m.provider] ??= {})[m.modelId] = m;
+  }
+  return map as Record<AiModelProvider, Record<string, SuggestedModelInfo>>;
+}
 
-// Token limits for a synthesized model. SUGGESTED_MODELS remains authoritative (compaction
-// budgets in agent-compaction.ts are computed from it and must not change); pi's catalog fills
-// gaps for models we don't list, and unknown models get conservative defaults.
-function modelTokenWindow(config: AiModelConfig, catalog: Model<Api> | undefined)
-    : { contextWindow: number, maxTokens: number } {
-  const suggested = SUGGESTED_MODELS[config.provider]?.[config.model];
+function defaultReasoning(provider: AiModelProvider): boolean {
+  return provider !== "cloudflare";
+}
+
+function defaultInput(provider: AiModelProvider): InputModality[] {
+  return provider === "cloudflare" ? ["text"] : ["text", "image"];
+}
+
+function asInputModality(value: unknown): InputModality[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const arr = value.filter((x): x is "text" | "image" => x === "text" || x === "image");
+  return arr.length > 0 ? arr : undefined;
+}
+
+// Token limits for a synthesized model. The merged admin + built-in catalog is authoritative
+// (compaction budgets are derived from the same source); pi's catalog fills gaps for models we
+// don't list, and unknown models get conservative defaults.
+function modelTokenWindow(config: AiModelConfig, catalog: Model<Api> | undefined,
+    suggested?: SuggestedModelInfo): { contextWindow: number, maxTokens: number } {
   return {
     contextWindow: suggested?.contextWindow ?? catalog?.contextWindow ?? 128_000,
     maxTokens: suggested?.outputLimit ??
@@ -182,19 +207,21 @@ function workersAiCompat(catalog: Model<Api> | undefined): OpenAICompletionsComp
 // thinking, Anthropic cache_control prompt caching, the OpenAI Responses API). Billing --
 // including unified billing on a user's own gateway -- is orthogonal to which API a request
 // speaks. Returns undefined for providers AI Gateway cannot serve (ollama).
-function gatewayNativeModel(config: AiModelConfig, gatewayUrl: string): Model<Api> | undefined {
+function gatewayNativeModel(config: AiModelConfig, gatewayUrl: string,
+    suggestedMap?: Record<AiModelProvider, Record<string, SuggestedModelInfo>>): Model<Api> | undefined {
   const catalog = catalogModel(config.provider, config.model);
-  const window = modelTokenWindow(config, catalog);
+  const fallback = suggestedMap?.[config.provider]?.[config.model];
+  const window = modelTokenWindow(config, catalog, fallback);
   switch (config.provider) {
     case "anthropic":
       return {
         id: config.model,
-        name: catalog?.name ?? config.model,
+        name: catalog?.name ?? fallback?.name ?? config.model,
         api: "anthropic-messages",
         provider: "anthropic",
         baseUrl: `${gatewayUrl}/anthropic`,
-        reasoning: true,
-        input: catalog?.input ?? ["text", "image"],
+        reasoning: fallback?.reasoning ?? true,
+        input: asInputModality(fallback?.input) ?? catalog?.input ?? defaultInput("anthropic"),
         cost: catalog?.cost ?? ZERO_COST,
         ...window,
         thinkingLevelMap: catalog?.thinkingLevelMap,
@@ -207,12 +234,12 @@ function gatewayNativeModel(config: AiModelConfig, gatewayUrl: string): Model<Ap
     case "openai":
       return {
         id: config.model,
-        name: catalog?.name ?? config.model,
+        name: catalog?.name ?? fallback?.name ?? config.model,
         api: "openai-responses",
         provider: "openai",
         baseUrl: `${gatewayUrl}/openai`,
-        reasoning: catalog?.reasoning ?? true,
-        input: catalog?.input ?? ["text", "image"],
+        reasoning: fallback?.reasoning ?? catalog?.reasoning ?? true,
+        input: asInputModality(fallback?.input) ?? catalog?.input ?? defaultInput("openai"),
         cost: catalog?.cost ?? ZERO_COST,
         ...window,
         thinkingLevelMap: catalog?.thinkingLevelMap,
@@ -224,12 +251,12 @@ function gatewayNativeModel(config: AiModelConfig, gatewayUrl: string): Model<Ap
       // treats baseUrl as already including the version path.
       return {
         id: config.model,
-        name: catalog?.name ?? config.model,
+        name: catalog?.name ?? fallback?.name ?? config.model,
         api: "google-generative-ai",
         provider: "google",
         baseUrl: `${gatewayUrl}/google-ai-studio/v1beta`,
-        reasoning: catalog?.reasoning ?? true,
-        input: catalog?.input ?? ["text", "image"],
+        reasoning: fallback?.reasoning ?? catalog?.reasoning ?? true,
+        input: asInputModality(fallback?.input) ?? catalog?.input ?? defaultInput("google"),
         cost: catalog?.cost ?? ZERO_COST,
         ...window,
         thinkingLevelMap: catalog?.thinkingLevelMap,
@@ -358,26 +385,28 @@ function makeHandle(args: HandleArgs): ModelHandle {
  * access with the config's own credentials. The handle carries the matching AI Gateway log route
  * for cost accounting, when there is one.
  */
-export function getModel(env: Cloudflare.Env, config: AiModelConfig,
+export async function getModel(env: Cloudflare.Env, config: AiModelConfig,
                          initiator: AiChatAuthorInfo,
-                         options: ModelRoutingOptions = {}): ModelHandle {
+                         options: ModelRoutingOptions = {}): Promise<ModelHandle> {
+  const suggestedMap = await resolveSuggestedModels(env);
+
   // BYOK: a connected user's own Cloudflare account pays for everything (all providers, including
   // Workers AI), routed through the user's own AI Gateway with unified billing. Honored regardless
   // of whether a platform AI Gateway is configured, so connected users are always billed correctly.
   if (options.userGateway) {
     return getModelViaUserGateway(
         config, buildMetadata(initiator, options.metadata), options.userGateway,
-        options.sessionAffinity);
+        options.sessionAffinity, suggestedMap);
   }
 
   // Otherwise: when a platform AI Gateway is configured, route through it (platform-funded free
   // tier). The config's apiToken/apiUrl are ignored in that mode.
   let gwConfig = getAiGatewayConfig(env);
   if (gwConfig) {
-    return getModelViaGateway(gwConfig, config, initiator, options);
+    return getModelViaGateway(gwConfig, config, initiator, options, suggestedMap);
   }
 
-  return getModelDirect(config, options.sessionAffinity);
+  return getModelDirect(config, options.sessionAffinity, suggestedMap);
 }
 
 // Route inference through the user's own account (unified billing) via their account's default AI
@@ -385,6 +414,7 @@ export function getModel(env: Cloudflare.Env, config: AiModelConfig,
 // user's Cloudflare credits; no provider API key required.
 function getModelViaUserGateway(
   config: AiModelConfig,
+  suggestedMap: Record<AiModelProvider, Record<string, SuggestedModelInfo>>,
   metadata: GatewayMetadata,
   userGateway: UserGatewayRouting,
   sessionAffinity?: string,
@@ -395,7 +425,7 @@ function getModelViaUserGateway(
   // account-level `/ai/v1` REST endpoint rejects that token. We always use the account's
   // auto-created "default" gateway.
   const model = gatewayNativeModel(
-      config, `https://gateway.ai.cloudflare.com/v1/${userGateway.accountId}/default`);
+      config, `https://gateway.ai.cloudflare.com/v1/${userGateway.accountId}/default`, suggestedMap);
   if (!model) {
     throw new Error(`Provider "${config.provider}" is not supported via unified billing.`);
   }
@@ -427,6 +457,7 @@ function getModelViaGateway(
   config: AiModelConfig,
   initiator: AiChatAuthorInfo,
   options: ModelRoutingOptions,
+  suggestedMap: Record<AiModelProvider, Record<string, SuggestedModelInfo>>,
 ): ModelHandle {
   const metadata = buildMetadata(initiator, options.metadata);
   const gatewayAuthHeaders: ProviderHeaders = {
@@ -447,16 +478,17 @@ function getModelViaGateway(
     // no gateway metadata (mirroring the old direct-binding path, which had no
     // aiGatewayLogRoute). Reuses the CF_AI_GATEWAY_* account/token pair.
     const catalog = catalogModel(config.provider, config.model);
+    const fallback = suggestedMap[config.provider]?.[config.model];
     const model: Model<Api> = {
       id: config.model,
-      name: catalog?.name ?? config.model,
+      name: catalog?.name ?? fallback?.name ?? config.model,
       api: "openai-completions",
       provider: "cloudflare-workers-ai",
       baseUrl: `https://api.cloudflare.com/client/v4/accounts/${gwConfig.accountId}/ai/v1`,
-      reasoning: catalog?.reasoning ?? false,
-      input: catalog?.input ?? ["text"],
+      reasoning: fallback?.reasoning ?? catalog?.reasoning ?? false,
+      input: asInputModality(fallback?.input) ?? catalog?.input ?? defaultInput("cloudflare"),
       cost: catalog?.cost ?? ZERO_COST,
-      ...modelTokenWindow(config, catalog),
+      ...modelTokenWindow(config, catalog, fallback),
       compat: workersAiCompat(catalog),
     };
     return makeHandle({
@@ -470,7 +502,7 @@ function getModelViaGateway(
   // (CF_AI_GATEWAY_WAI); either way, gateway log route and attribution metadata apply.
   const gateway = config.provider === "cloudflare"
       ? gwConfig.workersAiGateway! : gwConfig.gateway;
-  const model = gatewayNativeModel(config, `${gatewayBase}/${gateway}`);
+  const model = gatewayNativeModel(config, `${gatewayBase}/${gateway}`, suggestedMap);
   if (!model) {
     throw new Error(
       `Provider "${config.provider}" is not supported through AI Gateway. ` +
@@ -495,9 +527,11 @@ function getModelViaGateway(
 }
 
 // Direct provider access using the credentials in the model config itself (no AI Gateway).
-function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelHandle {
+function getModelDirect(config: AiModelConfig, sessionAffinity?: string,
+    suggestedMap?: Record<AiModelProvider, Record<string, SuggestedModelInfo>>): ModelHandle {
   const catalog = catalogModel(config.provider, config.model);
-  const window = modelTokenWindow(config, catalog);
+  const fallback = suggestedMap?.[config.provider]?.[config.model];
+  const window = modelTokenWindow(config, catalog, fallback);
   switch (config.provider) {
     case "anthropic":
       return makeHandle({
@@ -507,8 +541,8 @@ function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelH
           api: "anthropic-messages",
           provider: "anthropic",
           baseUrl: config.apiUrl ?? "https://api.anthropic.com",
-          reasoning: true,
-          input: catalog?.input ?? ["text", "image"],
+          reasoning: fallback?.reasoning ?? true,
+          input: asInputModality(fallback?.input) ?? catalog?.input ?? defaultInput("anthropic"),
           cost: catalog?.cost ?? ZERO_COST,
           ...window,
           thinkingLevelMap: catalog?.thinkingLevelMap,
@@ -530,12 +564,12 @@ function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelH
       return makeHandle({
         model: {
           id: config.model,
-          name: catalog?.name ?? config.model,
+          name: catalog?.name ?? fallback?.name ?? config.model,
           api: "openai-completions",
           provider: "cloudflare-workers-ai",
           baseUrl: `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/ai/v1`,
-          reasoning: catalog?.reasoning ?? false,
-          input: catalog?.input ?? ["text"],
+          reasoning: fallback?.reasoning ?? catalog?.reasoning ?? false,
+          input: asInputModality(fallback?.input) ?? catalog?.input ?? defaultInput("cloudflare"),
           cost: catalog?.cost ?? ZERO_COST,
           ...window,
           compat: workersAiCompat(catalog),
@@ -548,12 +582,12 @@ function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelH
       return makeHandle({
         model: {
           id: config.model,
-          name: catalog?.name ?? config.model,
+          name: catalog?.name ?? fallback?.name ?? config.model,
           api: "google-generative-ai",
           provider: "google",
           baseUrl: config.apiUrl ?? "https://generativelanguage.googleapis.com/v1beta",
-          reasoning: catalog?.reasoning ?? true,
-          input: catalog?.input ?? ["text", "image"],
+          reasoning: fallback?.reasoning ?? catalog?.reasoning ?? true,
+          input: asInputModality(fallback?.input) ?? catalog?.input ?? defaultInput("google"),
           cost: catalog?.cost ?? ZERO_COST,
           ...window,
           thinkingLevelMap: catalog?.thinkingLevelMap,
@@ -592,12 +626,12 @@ function getModelDirect(config: AiModelConfig, sessionAffinity?: string): ModelH
       return makeHandle({
         model: {
           id: config.model,
-          name: catalog?.name ?? config.model,
+          name: catalog?.name ?? fallback?.name ?? config.model,
           api: "openai-responses",
           provider: "openai",
           baseUrl: config.apiUrl ?? "https://api.openai.com/v1",
-          reasoning: catalog?.reasoning ?? true,
-          input: catalog?.input ?? ["text", "image"],
+          reasoning: fallback?.reasoning ?? catalog?.reasoning ?? true,
+          input: asInputModality(fallback?.input) ?? catalog?.input ?? defaultInput("openai"),
           cost: catalog?.cost ?? ZERO_COST,
           ...window,
           thinkingLevelMap: catalog?.thinkingLevelMap,
@@ -651,7 +685,7 @@ export class LanguageModelGatekeeper
 
   async startSession(approvalQueue: RpcStub<ApprovalQueue>)
       : Promise<LanguageModelBinding> {
-    let model = getModel(this.env, this.ctx.props.config, this.ctx.props.initiator, {
+    let model = await getModel(this.env, this.ctx.props.config, this.ctx.props.initiator, {
       metadata: this.ctx.props.metadata,
     });
     return new LanguageModelBindingImpl(model);
