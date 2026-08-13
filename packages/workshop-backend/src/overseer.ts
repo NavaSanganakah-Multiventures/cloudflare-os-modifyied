@@ -35,7 +35,7 @@ import { checkUsageAndBalance } from "./ai-gateway-billing/limits/usage-checker"
 import { completeAgentCatalogSnapshot, normalizeAgentCatalog } from "./agent-catalog";
 import { refreshCachedBalance } from "./ai-gateway-billing/cloudflare/connection-service";
 import { SharingManager, SharingCaller, CollaboratorRecord, ShareKeyRecord } from "./sharing";
-import { AutoApprovalDrainer } from "./auto-approval";
+import { AutoApprovalDrainer, autoApprovalGate } from "./auto-approval";
 import { collectSlashCommands, invokeSlashCommand } from "./slash-commands";
 import { createWorkshopLogger, obsContext, traced } from "./observability";
 import type { ChatGatewayRpcTarget, SubmitExternalMessageResult } from "@gadgets/workshop-shared/external-message-gateway";
@@ -340,43 +340,6 @@ function connectionTypeFromCreationSpec(
     case "ambient": return undefined;   // auto-provided, not a user-initiated connection
     case undefined: return undefined;
   }
-}
-
-// Match a branch reference against a list of glob patterns. Patterns are evaluated in order;
-// a leading "!" negates the pattern and denies a match. "*" matches any sequence of characters.
-function branchMatchesPatterns(branchRef: string, patterns: string[]): boolean {
-  let included = false;
-  for (const pattern of patterns) {
-    let negated = pattern.startsWith("!");
-    let glob = negated ? pattern.slice(1) : pattern;
-    let match = matchesGlob(branchRef, glob);
-    if (match) {
-      included = !negated;
-    }
-  }
-  return included;
-}
-
-// Simple glob matcher supporting only "*" (any sequence).
-function matchesGlob(str: string, pattern: string): boolean {
-  if (pattern === "*") return true;
-  // No wildcard means exact match.
-  if (!pattern.includes("*")) return str === pattern;
-  let parts = pattern.split("*");
-  // Leading literal must match the start of the string.
-  if (parts[0] !== "" && !str.startsWith(parts[0])) return false;
-  // Trailing literal must match the end of the string.
-  if (parts[parts.length - 1] !== "" && !str.endsWith(parts[parts.length - 1])) return false;
-  let pos = parts[0].length;
-  let end = str.length - parts[parts.length - 1].length;
-  for (let i = 1; i < parts.length - 1; i++) {
-    let part = parts[i];
-    if (part === "") continue;
-    let idx = str.indexOf(part, pos);
-    if (idx === -1 || idx + part.length > end) return false;
-    pos = idx + part.length;
-  }
-  return pos <= end;
 }
 
 // Blueprint record stored in the Overseer DO's `blueprints` collection.
@@ -2977,14 +2940,15 @@ class OverseerImpl implements AgentHooks {
     this.storage.actions.put(record);
     this.#associateAction(caller, actionId);
 
-    // Same auto-approval gate as before, named because awaitDecision uses it too. The drain is
-    // deferred because applying calls back into the gatekeeper facet still awaiting submitAction.
+    // The same eligibility predicate the drain uses (`autoApprovalGate`), so the submit-time
+    // "will this auto-approve?" verdict and the drain-time "apply this" verdict can never diverge
+    // (e.g. non-branch actions -- `branchScoped === false` -- auto-approve on any branch, and a
+    // branch-pattern gate skips instead of stalling the drain). The drain is deferred because
+    // applying calls back into the gatekeeper facet still awaiting submitAction.
     let rule = description.actionKind
         ? this.storage.autoApproveTags.get(`${gatekeeperId}:${description.actionKind.tag}`)
         : undefined;
-    let branchMatches = rule === undefined || !rule.branchPatterns || rule.branchPatterns.length === 0 ||
-        (description.branchRef !== undefined && branchMatchesPatterns(description.branchRef, rule.branchPatterns));
-    let willAutoApprove = !!(description.autoApprovable && description.actionKind && rule !== undefined && branchMatches);
+    let willAutoApprove = autoApprovalGate(description, rule) === "eligible";
 
     // Only agent turns suspend on awaitDecision, and only when a manual decision is pending.
     // Auto-approved actions keep the seamless behavior the user opted into.

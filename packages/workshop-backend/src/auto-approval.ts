@@ -5,6 +5,7 @@
 
 import type { Collection } from "@gadgets/typed-storage";
 import type { AiChatAuthorInfo } from "@gadgets/workshop-shared/api";
+import type { ActionDescription } from "@gadgets/workshop-shared/gatekeeper";
 import { createWorkshopLogger } from "./observability";
 import type { ActionRecord, AutoApproveTagRecord } from "./overseer.js";
 
@@ -13,6 +14,37 @@ const logger = createWorkshopLogger("workshop.auto.approval");
 export interface AutoApprovalStorage {
   actions: Collection<ActionRecord, number>;
   autoApproveTags: Collection<AutoApproveTagRecord>;
+}
+
+// The verdict shared by both auto-approval paths so they can never diverge:
+//   - "eligible": apply automatically (the action is auto-approvable AND a user-enabled rule
+//     covers it, on a matching branch for branch-scoped kinds).
+//   - "manual":   the author did not mark the action `autoApprovable`, or no rule is enabled for
+//     its action kind. The drain stops here so nothing is silently applied past a human gate.
+//   - "branch":   the action is auto-approvable and a rule exists, but it targets a branch the
+//     rule's patterns do not cover. The drain leaves it pending and continues, so a
+//     blocked-branch action never stalls later actions on other branches.
+export type AutoApprovalGate = "eligible" | "manual" | "branch";
+
+// Single source of truth for auto-approval eligibility, used both at submit time (to decide
+// whether to trigger the drain and whether the agent should await a decision) and during the
+// drain (to decide apply / stop / skip). Branch patterns only restrict branch-scoped actions;
+// non-branch actions (`branchScoped === false`) auto-approve on any branch. An empty/absent
+// pattern list matches every branch.
+export function autoApprovalGate(
+    description: ActionDescription,
+    rule: AutoApproveTagRecord | undefined): AutoApprovalGate {
+  if (description.autoApprovable !== true || description.actionKind === undefined
+      || rule === undefined) {
+    return "manual";
+  }
+  if (description.actionKind.branchScoped !== false &&
+      rule.branchPatterns && rule.branchPatterns.length > 0 &&
+      (description.branchRef === undefined ||
+       !branchMatchesPatterns(description.branchRef, rule.branchPatterns))) {
+    return "branch";
+  }
+  return "eligible";
 }
 
 // Match a branch reference against a list of glob patterns. Patterns are evaluated in order;
@@ -86,13 +118,18 @@ export class AutoApprovalDrainer {
     }
   }
 
-  // Apply all currently-eligible pending actions of the gatekeeper, in ascending id order. Stops at
-  // the first pending action that is NOT auto-eligible (a manual gate) or that throws while applying
-  // -- it is never skipped ahead of. This preserves in-order application and the invariant that
-  // nothing is silently applied past a human gate.
+  // Apply all currently-eligible pending actions of the gatekeeper, in ascending id order. A
+  // true manual gate (no rule, or the action is not marked auto-approvable) stops the drain so
+  // nothing is silently applied past a human gate -- the human controls the order of the rest.
+  // A branch-pattern gate (the action targets a branch the rule does not cover) is instead
+  // skipped and left pending for review, so a blocked-branch action never stalls auto-approval
+  // of later actions on other branches. An apply that throws also stops the drain (never skip
+  // ahead). This preserves in-order application and the invariant that nothing is silently
+  // applied past a human gate.
   //
-  // Eligibility requires BOTH signals: the author's `autoApprovable` verdict on the action AND a
-  // user-enabled rule for the action's type on this gatekeeper.
+  // Eligibility uses the shared `autoApprovalGate` predicate, the same one the submit path uses,
+  // so the "will this auto-approve?" verdict at submit time and the "apply this" verdict during
+  // the drain can never diverge.
   async #drainOnce(gatekeeperId: number): Promise<void> {
     // Materialize a snapshot first: list() is a lazy generator over storage, and we mutate the
     // actions collection (via applyPendingAction) as we go.
@@ -105,16 +142,16 @@ export class AutoApprovalDrainer {
       let rule = tag !== undefined
           ? this.storage.autoApproveTags.get(`${gatekeeperId}:${tag}`)
           : undefined;
-      if (record.description.autoApprovable !== true || rule === undefined) {
-        // A manual gate. Stop rather than skipping ahead to any later auto-eligible action.
+      let gate = autoApprovalGate(record.description, rule);
+      if (gate === "manual") {
+        // A true manual gate. Stop rather than skipping ahead to any later auto-eligible action;
+        // the human controls the order of the remaining actions.
         break;
       }
-      if (record.description.actionKind?.branchScoped !== false &&
-          rule.branchPatterns &&
-          (record.description.branchRef === undefined ||
-           !branchMatchesPatterns(record.description.branchRef, rule.branchPatterns))) {
-        // A branch-pattern gate. The action targets a branch this rule does not cover.
-        break;
+      if (gate === "branch") {
+        // A branch-pattern gate: the action targets a branch this rule does not cover. Leave it
+        // pending for review and continue, so it never stalls later actions on other branches.
+        continue;
       }
 
       // Re-check immediately before applying, to guard against a concurrent drain having already
@@ -126,8 +163,9 @@ export class AutoApprovalDrainer {
 
       try {
         // Attribute the auto-approval to the user who enabled the rule -- it runs under their
-        // authority.
-        await this.applyPendingAction(fresh, rule.enabledBy, true);
+        // authority. "eligible" implies a rule exists (autoApprovalGate returns "manual" when
+        // rule is undefined), so the non-null assertion is safe.
+        await this.applyPendingAction(fresh, rule!.enabledBy, true);
       } catch (err) {
         // Leave the action pending for manual handling and stop the drain (never skip ahead).
         logger.error("auto-approval failed", {

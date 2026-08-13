@@ -4722,6 +4722,9 @@ class GitHubPullRequestImpl extends GitHubIssueImpl implements GitHubPullRequest
       implementsRevert: false,
       actionKind: MERGE_PULL_REQUEST_ACTION,
       autoApprovable: true,
+      // The branch the pull request merges into, so branch patterns gate it (e.g. `!main`
+      // keeps auto-merge off the default branch) instead of leaving it un-scoped.
+      branchRef: details.base.ref,
     });
   }
 }

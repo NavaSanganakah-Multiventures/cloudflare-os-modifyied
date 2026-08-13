@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createTypedStorage, collection } from "@gadgets/typed-storage";
-import { AutoApprovalDrainer, AutoApprovalStorage, ApplyPendingActionFn } from "../src/auto-approval.js";
+import { AutoApprovalDrainer, AutoApprovalStorage, ApplyPendingActionFn, autoApprovalGate } from "../src/auto-approval.js";
 import type { ActionRecord, AutoApproveTagRecord } from "../src/overseer.js";
+import type { ActionDescription } from "@gadgets/workshop-shared/gatekeeper";
 import type { AiChatAuthorInfo } from "@gadgets/workshop-shared/api";
 import { makeMockStorage } from "./mock-storage.js";
 
@@ -28,7 +29,7 @@ function enableRule(storage: AutoApprovalStorage, actionTag = "edit", gatekeeper
 function putAction(
     storage: AutoApprovalStorage, id: number,
     opts: { gatekeeperId?: number; actionTag?: string; autoApprovable?: boolean;
-            state?: ActionRecord["state"]; branchRef?: string } = {}) {
+            state?: ActionRecord["state"]; branchRef?: string; branchScoped?: boolean } = {}) {
   storage.actions.put({
     id,
     gatekeeperId: opts.gatekeeperId ?? GK,
@@ -41,7 +42,11 @@ function putAction(
       title: `Action ${id}`,
       description: `Action ${id} description`,
       implementsRevert: true,
-      actionKind: { tag: opts.actionTag ?? "edit", label: "Edits" },
+      actionKind: {
+        tag: opts.actionTag ?? "edit",
+        label: "Edits",
+        ...(opts.branchScoped !== undefined ? { branchScoped: opts.branchScoped } : {}),
+      },
       autoApprovable: opts.autoApprovable ?? true,
       branchRef: opts.branchRef,
     },
@@ -242,5 +247,111 @@ describe("AutoApprovalDrainer.drain", () => {
     await new AutoApprovalDrainer(storage, applyFn).drain(GK);
 
     expect(calls).toEqual([1, 2]);
+  });
+
+  // A branch-pattern gate (an action on a branch the rule does not cover) must be skipped and
+  // left pending -- it must NOT stall the drain, so later actions on other branches still apply.
+  it("skips a branch-mismatched action and continues to later eligible ones", async () => {
+    let storage = makeStorage();
+    enableRule(storage, "edit", GK, ["feature/*", "*", "!main"]);
+
+    putAction(storage, 1, { branchRef: "feature/x" });
+    putAction(storage, 2, { branchRef: "main" });        // branch gate -> skip
+    putAction(storage, 3, { branchRef: "other" });       // still applies
+    putAction(storage, 4, { branchRef: "main" });        // branch gate -> skip
+
+    let { applyFn, calls } = makeImmediateApply(storage);
+    await new AutoApprovalDrainer(storage, applyFn).drain(GK);
+
+    expect(calls).toEqual([1, 3]);
+    expect(getAction(storage, 1).state).toBe("approved");
+    expect(getAction(storage, 2).state).toBe("pending");
+    expect(getAction(storage, 3).state).toBe("approved");
+    expect(getAction(storage, 4).state).toBe("pending");
+  });
+
+  // Non-branch actions (branchScoped === false), such as posting a comment or creating an issue,
+  // have no branchRef. They must auto-approve regardless of the rule's branch patterns -- both at
+  // submit time (the drain is triggered) and during the drain.
+  it("auto-approves non-branch actions even with branch patterns and no branchRef", async () => {
+    let storage = makeStorage();
+    enableRule(storage, "comment", GK, ["feature/*", "*", "!main"]);
+
+    putAction(storage, 1, { actionTag: "comment", branchScoped: false });
+    putAction(storage, 2, { actionTag: "comment", branchScoped: false });
+
+    let { applyFn, calls } = makeImmediateApply(storage);
+    await new AutoApprovalDrainer(storage, applyFn).drain(GK);
+
+    expect(calls).toEqual([1, 2]);
+    expect(getAction(storage, 1).state).toBe("approved");
+    expect(getAction(storage, 2).state).toBe("approved");
+  });
+
+  // A true manual gate (action not marked auto-approvable, or no rule) still stops the drain so
+  // nothing is silently applied past a human gate, even when a branch gate is interleaved.
+  it("still stops at a true manual gate, not a branch gate", async () => {
+    let storage = makeStorage();
+    enableRule(storage, "edit", GK, ["feature/*", "*", "!main"]);
+
+    putAction(storage, 1, { branchRef: "feature/x" });
+    putAction(storage, 2, { branchRef: "main", autoApprovable: false });  // manual gate -> stop
+    putAction(storage, 3, { branchRef: "other" });
+
+    let { applyFn, calls } = makeImmediateApply(storage);
+    await new AutoApprovalDrainer(storage, applyFn).drain(GK);
+
+    expect(calls).toEqual([1]);
+    expect(getAction(storage, 2).state).toBe("pending");
+    expect(getAction(storage, 3).state).toBe("pending");
+  });
+});
+
+// The shared eligibility predicate is the contract both the submit path and the drain rely on,
+// so lock its behavior directly.
+describe("autoApprovalGate", () => {
+  const rule = (branchPatterns?: string[]): AutoApproveTagRecord => ({
+    gatekeeperId: GK, actionKind: { tag: "edit", label: "Edits" }, enabledBy: ENABLER, branchPatterns,
+  });
+  const desc = (opts: Partial<Pick<ActionDescription,
+      "autoApprovable" | "actionKind" | "branchRef">> = {}): ActionDescription => ({
+    title: "t", description: "d", implementsRevert: true,
+    autoApprovable: opts.autoApprovable ?? true,
+    actionKind: opts.actionKind ?? { tag: "edit", label: "Edits" },
+    ...(opts.branchRef !== undefined ? { branchRef: opts.branchRef } : {}),
+  });
+
+  it("is manual when the action is not auto-approvable", () => {
+    expect(autoApprovalGate(desc({ autoApprovable: false }), rule())).toBe("manual");
+  });
+
+  it("is manual when no rule is enabled", () => {
+    expect(autoApprovalGate(desc(), undefined)).toBe("manual");
+  });
+
+  it("is eligible for a branch-scoped action on a covered branch", () => {
+    expect(autoApprovalGate(desc({ branchRef: "feature/x" }), rule(["feature/*", "*", "!main"]))).toBe("eligible");
+  });
+
+  it("is branch for a branch-scoped action on an uncovered branch", () => {
+    expect(autoApprovalGate(desc({ branchRef: "main" }), rule(["feature/*", "*", "!main"]))).toBe("branch");
+  });
+
+  it("is branch for a branch-scoped action with no branchRef and non-empty patterns", () => {
+    expect(autoApprovalGate(desc(), rule(["feature/*", "*", "!main"]))).toBe("branch");
+  });
+
+  it("is eligible for a non-branch action (branchScoped: false) with no branchRef", () => {
+    expect(autoApprovalGate(
+        desc({ actionKind: { tag: "comment", label: "Comments", branchScoped: false } }),
+        rule(["feature/*", "*", "!main"]))).toBe("eligible");
+  });
+
+  it("is eligible when patterns are empty (match any branch)", () => {
+    expect(autoApprovalGate(desc({ branchRef: "main" }), rule([]))).toBe("eligible");
+  });
+
+  it("is eligible when patterns are absent (match any branch)", () => {
+    expect(autoApprovalGate(desc({ branchRef: "main" }), rule(undefined))).toBe("eligible");
   });
 });
