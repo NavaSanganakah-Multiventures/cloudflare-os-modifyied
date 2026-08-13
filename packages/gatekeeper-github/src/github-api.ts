@@ -1,4 +1,4 @@
-import type { GitHubWorkflowRun } from "./types";
+import type { GitHubWorkflow, GitHubWorkflowRun } from "./types";
 
 export type GitHubOAuthGrant = {
   accessToken: string;
@@ -1310,19 +1310,44 @@ export class GitHubApi {
     );
   }
 
+  async listWorkflows(
+    owner: string,
+    repo: string,
+  ): Promise<{ total_count: number; workflows: GitHubWorkflow[] }> {
+    return (await this.#request<{ total_count: number; workflows: GitHubWorkflow[] }>(
+      "GET",
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows`,
+    )).data;
+  }
+
+  async getWorkflow(
+    owner: string,
+    repo: string,
+    workflowId: string | number,
+  ): Promise<GitHubWorkflow> {
+    return (await this.#request<GitHubWorkflow>(
+      "GET",
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/${encodeURIComponent(workflowId)}`,
+    )).data;
+  }
+
   async listWorkflowRuns(
     owner: string,
     repo: string,
     workflowId?: string | number,
-    branch?: string,
+    query?: { branch?: string; status?: string; event?: string; perPage?: number; page?: number },
   ): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }> {
-    const query: Record<string, string> = {};
-    if (branch) query.branch = branch;
+    const params: Record<string, string> = {};
+    if (query?.branch) params.branch = query.branch;
+    if (query?.status) params.status = query.status;
+    if (query?.event) params.event = query.event;
+    if (query?.perPage) params.per_page = String(query.perPage);
+    if (query?.page) params.page = String(query.page);
 
     return (await this.#request<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }>(
       "GET",
       `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/${workflowId ? `workflows/${encodeURIComponent(workflowId)}/` : ""}runs`,
-      { query },
+      { query: params },
     )).data;
   }
 

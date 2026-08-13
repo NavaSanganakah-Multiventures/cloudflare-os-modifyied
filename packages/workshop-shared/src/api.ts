@@ -2323,14 +2323,6 @@ export type SlashCommandChoice = {
 // these events. Instead, it should display them temporarily and discard them as soon as the
 // corresponding durable `message()` and/or `changes` message arrives, or when the agent stops
 // running (`activeAgent` becomes unset in the chat metadata).
-/** Result of a container build/test command executed by the agent. */
-export type ContainerRunResult = {
-  runId: string;
-  exitCode: number;
-  output: string;
-  timestamp: number;
-};
-
 export type AiChatStreamEvent = {
   // The turn is summarizing older context before it can continue, or before `/compact` ends.
   type: "compacting";

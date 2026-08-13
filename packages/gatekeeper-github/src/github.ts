@@ -76,7 +76,9 @@ import type {
   GitHubProposeFileChangeOptions,
   GitHubProposeFileDeletionOptions,
   GitHubProposedChangeResult,
+  GitHubWorkflow,
   GitHubWorkflowRun,
+  GitHubWorkflowRunsQuery,
 } from "./types";
 import TYPES_CODE from "./types.txt";
 import {
@@ -354,6 +356,7 @@ function validateBranchName(name: string): void {
   ) {
     throw new Error(`Invalid GitHub branch name: ${name}`);
   }
+  // oxlint-disable-next-line no-control-regex -- intentionally rejecting control chars in branch names
   if (/[\x00-\x20\x7F]/.test(name)) {
     throw new Error(`Branch name contains control characters: ${name}`);
   }
@@ -3729,6 +3732,8 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           action.ref,
           action.inputs,
         ));
+        // No #clearCaches(): workflow dispatches don't mutate cached entities
+        // (issues/PRs/branches/files), and workflow runs are read uncached.
         this.#markActionApproved(action);
         return;
       }
@@ -4217,8 +4222,19 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
 
   async removeObserver(_id: string): Promise<void> {}
 
-  async listWorkflowRuns(workflowId?: string | number, branch?: string): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }> {
-    return this.#withApi(api => api.listWorkflowRuns(this.ctx.props.owner, this.ctx.props.repo, workflowId, branch));
+  async listWorkflows(): Promise<{ total_count: number; workflows: GitHubWorkflow[] }> {
+    return this.#withApi(api => api.listWorkflows(this.ctx.props.owner, this.ctx.props.repo));
+  }
+
+  async getWorkflow(workflowId: string | number): Promise<GitHubWorkflow> {
+    return this.#withApi(api => api.getWorkflow(this.ctx.props.owner, this.ctx.props.repo, workflowId));
+  }
+
+  async listWorkflowRuns(
+    workflowId?: string | number,
+    query?: GitHubWorkflowRunsQuery,
+  ): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }> {
+    return this.#withApi(api => api.listWorkflowRuns(this.ctx.props.owner, this.ctx.props.repo, workflowId, query));
   }
 
   async getWorkflowRun(runId: number): Promise<GitHubWorkflowRun> {
@@ -4503,12 +4519,31 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     });
   }
 
-  async listWorkflowRuns(workflowId?: string | number, branch?: string): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }> {
+  async listWorkflows(): Promise<{ total_count: number; workflows: GitHubWorkflow[] }> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `List workflows`,
+      description: `List GitHub Actions workflows defined in this repository.`,
+    });
+    return this.#gatekeeper.listWorkflows();
+  }
+
+  async getWorkflow(workflowId: string | number): Promise<GitHubWorkflow> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `Read workflow ${workflowId}`,
+      description: `Read GitHub Actions workflow ${workflowId}.`,
+    });
+    return this.#gatekeeper.getWorkflow(workflowId);
+  }
+
+  async listWorkflowRuns(
+    workflowId?: string | number,
+    query?: GitHubWorkflowRunsQuery,
+  ): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }> {
     await this.#approvalQueue.authorizeObservation({
       title: `List workflow runs`,
       description: `List GitHub Actions workflow runs.`,
     });
-    return this.#gatekeeper.listWorkflowRuns(workflowId, branch);
+    return this.#gatekeeper.listWorkflowRuns(workflowId, query);
   }
 
   async getWorkflowRun(runId: number): Promise<GitHubWorkflowRun> {

@@ -127,7 +127,8 @@ export interface GitHubRepo {
    *
    * INSTRUCTION FOR AI AGENT: Always call this method to trigger the CI workflow
    * after you finish proposing or making code changes on a branch, so that the
-   * new code is tested automatically.
+   * new code is tested automatically. Use `listWorkflows` to discover a workflow's
+   * filename or ID if you don't already know it.
    *
    * @param workflowId The ID or filename of the workflow.
    * @param ref The branch or tag name to run the workflow on.
@@ -136,14 +137,58 @@ export interface GitHubRepo {
   dispatchWorkflow(workflowId: string | number, ref: string, inputs?: Record<string, any>): Promise<void>;
 
   /**
-   * Lists workflow runs for the repository, optionally filtered by workflow ID or branch ref.
+   * Lists the GitHub Actions workflows defined in this repository.
+   *
+   * Use this to discover a workflow's filename (e.g. `"ci.yml"`) or numeric ID before
+   * calling `dispatchWorkflow`. Reading the catalog is an observation.
    */
-  listWorkflowRuns(workflowId?: string | number, branch?: string): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }>;
+  listWorkflows(): Promise<{ total_count: number; workflows: GitHubWorkflow[] }>;
+
+  /** Gets a single GitHub Actions workflow by its filename or numeric ID. Reading is an observation. */
+  getWorkflow(workflowId: string | number): Promise<GitHubWorkflow>;
 
   /**
-   * Gets a specific workflow run by ID.
+   * Lists workflow runs for the repository, optionally filtered by workflow ID and a query.
+   * Results are returned one page at a time (GitHub returns at most `perPage` runs, default 30,
+   * max 100); pass `page` to fetch successive pages. Reading is an observation.
+   *
+   * INSTRUCTION FOR AI AGENT: After dispatching a workflow, poll this method (passing the
+   * branch you dispatched on and `status: "completed"`) until the matching run appears, then
+   * use `getWorkflowRun` to read its `conclusion`.
+   */
+  listWorkflowRuns(
+    workflowId?: string | number,
+    query?: GitHubWorkflowRunsQuery,
+  ): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }>;
+
+  /**
+   * Gets a specific workflow run by ID. Reading is an observation.
    */
   getWorkflowRun(runId: number): Promise<GitHubWorkflowRun>;
+}
+
+/** A GitHub Actions workflow definition. */
+export interface GitHubWorkflow {
+  id: number;
+  name: string;
+  path: string;
+  state: "active" | "disabled_manually" | "disabled_inactivity" | "deleted";
+  created_at: string;
+  updated_at: string;
+}
+
+/** Optional filters for `listWorkflowRuns`. */
+export interface GitHubWorkflowRunsQuery {
+  /** Filter runs by the head branch name. */
+  branch?: string;
+  /** Filter by run status: `queued`, `in_progress`, `completed`, `waiting`, or `requested`. */
+  status?: GitHubWorkflowRun["status"];
+  /** Filter by the event that triggered the run (e.g. `push`, `pull_request`, `workflow_dispatch`). */
+  event?: string;
+  /** Page size. GitHub caps this at 100; default 30. */
+  perPage?: number;
+  /** 1-based page number; omit for the first page. */
+  page?: number;
 }
 
 /** A GitHub workflow run. */
