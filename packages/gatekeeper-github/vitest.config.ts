@@ -1,16 +1,18 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig, type PluginOption } from "vitest/config";
 
-// Stand-in for the `cloudflare:workers` module (only exists inside workerd) and for the generated
-// configurator UI / logo / type-text modules that github.ts imports at module top level, so the
-// gatekeeper-github unit tests can load github.ts under plain vitest (node environment) without
-// workerd or the `build:configurator` build step.
+// Stand-ins so the gatekeeper-github unit tests can load github.ts under plain vitest (node
+// environment) without workerd, the build:configurator build step, or the capnweb-validate
+// build-time transform. See the individual stubs for details.
 
 const cloudflareWorkersStub = fileURLToPath(
   new URL("./__tests__/stubs/cloudflare-workers.ts", import.meta.url),
 );
 const emptyStringStub = fileURLToPath(
   new URL("./__tests__/stubs/empty-string.ts", import.meta.url),
+);
+const capnwebValidateStub = fileURLToPath(
+  new URL("./__tests__/stubs/capnweb-validate.ts", import.meta.url),
 );
 
 // github.ts imports the generated `*-configurator-ui.txt` bundles (built by `build:configurator`
@@ -42,9 +44,13 @@ export default defineConfig({
     environment: "node",
     alias: {
       // Provides DurableObject / RpcTarget / WorkerEntrypoint / RpcStub so modules that declare a
-      // Durable Object or RpcTarget can be imported at all under plain vitest. Anything that
-      // actually needs the runtime belongs in a Workers-pool test, not here.
+      // Durable Object or RpcTarget can be imported at all. Anything that actually needs the
+      // runtime belongs in a Workers-pool test, not here.
       "cloudflare:workers": cloudflareWorkersStub,
+      // capnweb-validate's decorators are a build-time transform; the untransformed runtime
+      // exports throw when applied. Replace them with no-op decorators so @validateRpc() /
+      // @skipRpcValidation() classes load.
+      "capnweb-validate": capnwebValidateStub,
     },
   },
 });
