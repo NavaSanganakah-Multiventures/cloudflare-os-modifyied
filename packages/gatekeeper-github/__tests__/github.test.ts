@@ -4,13 +4,7 @@ import { ActionKind } from "@gadgets/workshop-shared/api";
 
 describe("GitHubGatekeeperImpl", () => {
   it("includes all auto-approvable actions in getAutoApprovableActions", async () => {
-    // Assuming GitHubGatekeeperImpl can be instantiated or we can just check the returned actions
-    // Wait, the constructor requires DurableObject state and env. 
-    // We can just verify the list of action kinds returned.
-    
-    // Instead of instantiating the full DO which might be tricky in a unit test, 
-    // we can create a mock or partial instance if needed.
-    // However, getAutoApprovableActions doesn't use instance state.
+    // getAutoApprovableActions doesn't use instance state, so a fake environment is sufficient
     const fakeState = {} as any;
     const fakeEnv = {} as any;
     const gk = new GitHubGatekeeperImpl(fakeState, fakeEnv);
