@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, type ChangeEvent } from 'react'
 import { RpcStub } from 'capnweb'
-import { Switch, Textarea, Input, Button, Tabs, useKumoToastManager } from '@cloudflare/kumo'
-import { Hexagon, ShieldWarning, UserPlus } from '@phosphor-icons/react'
+import { Switch, Textarea, Input, Button, Tabs, Select, useKumoToastManager } from '@cloudflare/kumo'
+import { Hexagon, ShieldWarning, Trash, UserPlus } from '@phosphor-icons/react'
 import { useAuthenticatedApi } from './AuthContext'
-import { AdminApi, AdminFormat, AdminResourceVendor, AmbientGatekeeperMode, MAX_INSTANCE_INSTRUCTIONS_LENGTH, MAX_ANNOUNCEMENT_LENGTH, MAX_SITE_NAME_LENGTH, DEFAULT_SITE_NAME, BannerColor, BANNER_COLORS, DEFAULT_BANNER_COLOR } from '@gadgets/workshop-shared/api'
+import { AdminApi, AdminFormat, AdminResourceVendor, AiModelProvider, AmbientGatekeeperMode, MAX_INSTANCE_INSTRUCTIONS_LENGTH, MAX_ANNOUNCEMENT_LENGTH, MAX_SITE_NAME_LENGTH, DEFAULT_SITE_NAME, BannerColor, BANNER_COLORS, DEFAULT_BANNER_COLOR, SuggestedModelInfo } from '@gadgets/workshop-shared/api'
 import { applyAccentColor, DEFAULT_ACCENT_COLOR } from './theme'
 import { cacheBustSiteLogoUrl, prepareSiteLogo } from './siteLogoUtils'
 import SiteLogo from './components/SiteLogo'
@@ -28,6 +28,191 @@ const BANNER_SWATCH: Record<BannerColor, string> = {
   warning: 'var(--color-kumo-warning)',
   danger: 'var(--color-kumo-danger)',
   brand: 'var(--color-accent-100)',
+}
+
+
+// --- Admin suggested models panel ---
+
+type ModelsPanelProps = {
+  models: SuggestedModelInfo[]
+  admin: RpcStub<AdminApi>
+  onChanged: () => void
+}
+
+function ModelsPanel({ models, admin, onChanged }: ModelsPanelProps) {
+  const toasts = useKumoToastManager()
+  const [busy, setBusy] = useState(false)
+  const [provider, setProvider] = useState<AiModelProvider>('openai')
+  const [modelId, setModelId] = useState('')
+  const [name, setName] = useState('')
+  const [contextWindow, setContextWindow] = useState('')
+  const [outputLimit, setOutputLimit] = useState('')
+  const [reasoning, setReasoning] = useState(false)
+  const [supportsImages, setSupportsImages] = useState(false)
+
+  const resetForm = () => {
+    setModelId('')
+    setName('')
+    setContextWindow('')
+    setOutputLimit('')
+    setReasoning(false)
+    setSupportsImages(false)
+  }
+
+  const handleAdd = async () => {
+    const cw = parseInt(contextWindow, 10)
+    if (!provider || !modelId.trim() || !name.trim() || !Number.isFinite(cw) || cw <= 0) {
+      toasts.add({ title: 'Please fill in all required fields', variant: 'error' })
+      return
+    }
+    const ol = outputLimit.trim() ? parseInt(outputLimit, 10) : undefined
+    if (outputLimit.trim() && (!Number.isFinite(ol!) || ol! <= 0)) {
+      toasts.add({ title: 'Output limit must be a positive number', variant: 'error' })
+      return
+    }
+    setBusy(true)
+    try {
+      const entry: SuggestedModelInfo = {
+        provider,
+        modelId: modelId.trim(),
+        name: name.trim(),
+        contextWindow: cw,
+        ...(ol !== undefined ? { outputLimit: ol } : {}),
+        reasoning,
+        input: supportsImages ? ['text', 'image'] : ['text'],
+      }
+      await admin.addSuggestedModel(entry)
+      toasts.add({ title: 'Model added', variant: 'success' })
+      resetForm()
+      onChanged()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to add model'
+      toasts.add({ title: message, variant: 'error' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleRemove = async (m: SuggestedModelInfo) => {
+    setBusy(true)
+    try {
+      await admin.removeSuggestedModel(m.provider, m.modelId)
+      toasts.add({ title: 'Model removed', variant: 'success' })
+      onChanged()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to remove model'
+      toasts.add({ title: message, variant: 'error' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="bg-kumo-elevated border border-kumo-line rounded-xl p-6 space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold text-kumo-strong mb-1">Suggested models</h2>
+        <p className="text-sm text-kumo-subtle">
+          Manage the system model catalog every user sees in the model picker. Built-in models
+          cannot be deleted here, but you can override or hide them by adding an entry with the
+          same provider + model ID.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        {models.length === 0 ? (
+          <p className="text-sm text-kumo-subtle">No admin-managed models yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {models.map(m => (
+              <div
+                key={`${m.provider}:${m.modelId}`}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg bg-kumo-tint/50"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-kumo-default truncate">{m.name}</p>
+                  <p className="text-xs text-kumo-subtle truncate">
+                    {m.provider} / {m.modelId} &middot; {m.contextWindow.toLocaleString()} context
+                    {m.outputLimit ? ` / ${m.outputLimit.toLocaleString()} output` : ''}
+                    {m.reasoning ? ' &middot; reasoning' : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => handleRemove(m)}
+                  className="cursor-pointer rounded-md p-1.5 text-kumo-subtle hover:text-kumo-danger hover:bg-kumo-tint transition-colors disabled:opacity-50"
+                >
+                  <Trash size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-kumo-line pt-5 space-y-4">
+        <h3 className="text-sm font-semibold text-kumo-default">Add a model</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Select
+            label="Provider"
+            value={provider}
+            onValueChange={(v) => setProvider(v as AiModelProvider)}
+          >
+            <Select.Option value="openai">OpenAI</Select.Option>
+            <Select.Option value="anthropic">Anthropic</Select.Option>
+            <Select.Option value="google">Google</Select.Option>
+            <Select.Option value="cloudflare">Cloudflare Workers AI</Select.Option>
+            <Select.Option value="ollama">Ollama</Select.Option>
+          </Select>
+          <Input
+            label="Model ID"
+            placeholder="e.g., gpt-5.6-sol"
+            value={modelId}
+            onChange={(e) => setModelId(e.target.value)}
+          />
+        </div>
+        <Input
+          label="Display name"
+          placeholder="e.g., GPT 5.6 Sol"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Input
+            label="Context window"
+            type="number"
+            min={1}
+            placeholder="e.g., 128000"
+            value={contextWindow}
+            onChange={(e) => setContextWindow(e.target.value)}
+          />
+          <Input
+            label="Output limit (optional)"
+            type="number"
+            min={1}
+            placeholder="Defaults to provider-specific cap"
+            value={outputLimit}
+            onChange={(e) => setOutputLimit(e.target.value)}
+          />
+        </div>
+        <div className="flex items-center gap-6">
+          <label className="flex items-center gap-2 text-sm text-kumo-default cursor-pointer">
+            <Switch checked={reasoning} onCheckedChange={setReasoning} />
+            Reasoning
+          </label>
+          <label className="flex items-center gap-2 text-sm text-kumo-default cursor-pointer">
+            <Switch checked={supportsImages} onCheckedChange={setSupportsImages} />
+            Image input
+          </label>
+        </div>
+        <div className="flex justify-end">
+          <Button variant="primary" size="sm" onClick={handleAdd} loading={busy} disabled={busy}>
+            Add model
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function AdminPage() {
@@ -85,6 +270,9 @@ export default function AdminPage() {
   // Promoted output formats, in menu order (see AdminFormatsPanel).
   const [formats, setFormats] = useState<AdminFormat[]>([])
 
+  // Admin-managed system suggested models.
+  const [suggestedModels, setSuggestedModels] = useState<SuggestedModelInfo[]>([])
+
   const resourceKey = (vendorId: string, urlPattern: string) => `${vendorId}\u0000${urlPattern}`
 
   // Populate all editor state from a freshly-fetched settings view.
@@ -104,6 +292,7 @@ export default function AdminPage() {
     setSavedAccent(view.accentColor)
     setAccentDraft(view.accentColor)
     setFormats(view.formats)
+    setSuggestedModels(view.suggestedModels)
   }
 
   // Mint the admin capability once (the access check happens server-side) and load settings.
@@ -403,6 +592,7 @@ export default function AdminPage() {
           { value: 'general', label: 'General' },
           { value: 'gatekeepers', label: 'Gatekeepers' },
           { value: 'formats', label: 'Formats' },
+          { value: 'models', label: 'Models' },
           { value: 'access', label: 'Access' },
         ]}
       />
@@ -413,6 +603,15 @@ export default function AdminPage() {
           admin={admin.api}
           formats={formats}
           onChanged={async () => { setFormats((await admin.api.getSettings()).formats) }}
+        />
+      )}
+
+      {/* Suggested models */}
+      {activeTab === 'models' && admin && (
+        <ModelsPanel
+          models={suggestedModels}
+          admin={admin.api}
+          onChanged={async () => { setSuggestedModels((await admin.api.getSettings()).suggestedModels) }}
         />
       )}
 
