@@ -76,6 +76,7 @@ import type {
   GitHubProposeFileChangeOptions,
   GitHubProposeFileDeletionOptions,
   GitHubProposedChangeResult,
+  GitHubWorkflowRun,
 } from "./types";
 import TYPES_CODE from "./types.txt";
 import {
@@ -3425,6 +3426,17 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       DELETE_REPO_FILE_ACTION,
       CREATE_BRANCH_ACTION,
       CREATE_PULL_REQUEST_ACTION,
+      CREATE_ISSUE_ACTION,
+      SET_TITLE_ACTION,
+      SET_BODY_ACTION,
+      ADD_LABELS_ACTION,
+      REMOVE_LABELS_ACTION,
+      CHANGE_STATE_ACTION,
+      POST_COMMENT_ACTION,
+      POST_REVIEW_ACTION,
+      REPLY_DIFF_COMMENT_ACTION,
+      MERGE_PULL_REQUEST_ACTION,
+      DISPATCH_WORKFLOW_ACTION,
     ];
   }
 
@@ -3690,7 +3702,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           action.inputs,
         ));
         this.#markActionApproved(action);
-        this.#clearCaches();
         return;
       }
     }
@@ -4178,11 +4189,11 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
 
   async removeObserver(_id: string): Promise<void> {}
 
-  async listWorkflowRuns(workflowId?: string | number, ref?: string): Promise<{ total_count: number; workflow_runs: import("./types").GitHubWorkflowRun[] }> {
-    return this.#withApi(api => api.listWorkflowRuns(this.ctx.props.owner, this.ctx.props.repo, workflowId, ref));
+  async listWorkflowRuns(workflowId?: string | number, branch?: string): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }> {
+    return this.#withApi(api => api.listWorkflowRuns(this.ctx.props.owner, this.ctx.props.repo, workflowId, branch));
   }
 
-  async getWorkflowRun(runId: number): Promise<import("./types").GitHubWorkflowRun> {
+  async getWorkflowRun(runId: number): Promise<GitHubWorkflowRun> {
     return this.#withApi(api => api.getWorkflowRun(this.ctx.props.owner, this.ctx.props.repo, runId));
   }
 }
@@ -4449,9 +4460,13 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
 
   async dispatchWorkflow(workflowId: string | number, ref: string, inputs?: Record<string, string>): Promise<void> {
     const action = await this.#gatekeeper.prepareDispatchWorkflow(workflowId, ref, inputs);
+    let description = `Dispatch GitHub Actions workflow ${workflowId} on branch ${ref}.`;
+    if (inputs && Object.keys(inputs).length > 0) {
+      description += `\nInputs: ${JSON.stringify(inputs, null, 2)}`;
+    }
     await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
       title: `Dispatch workflow ${workflowId}`,
-      description: `Dispatch GitHub Actions workflow ${workflowId} on branch ${ref}.`,
+      description,
       implementsRevert: false,
       awaitDecision: true,
       actionKind: DISPATCH_WORKFLOW_ACTION,
@@ -4460,15 +4475,15 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     });
   }
 
-  async listWorkflowRuns(workflowId?: string | number, ref?: string): Promise<{ total_count: number; workflow_runs: import("./types").GitHubWorkflowRun[] }> {
+  async listWorkflowRuns(workflowId?: string | number, branch?: string): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }> {
     await this.#approvalQueue.authorizeObservation({
       title: `List workflow runs`,
       description: `List GitHub Actions workflow runs.`,
     });
-    return this.#gatekeeper.listWorkflowRuns(workflowId, ref);
+    return this.#gatekeeper.listWorkflowRuns(workflowId, branch);
   }
 
-  async getWorkflowRun(runId: number): Promise<import("./types").GitHubWorkflowRun> {
+  async getWorkflowRun(runId: number): Promise<GitHubWorkflowRun> {
     await this.#approvalQueue.authorizeObservation({
       title: `Read workflow run ${runId}`,
       description: `Read details of GitHub Actions workflow run ${runId}.`,

@@ -1,3 +1,5 @@
+import type { GitHubWorkflowRun } from "./types";
+
 export type GitHubOAuthGrant = {
   accessToken: string;
   scopes: string[];
@@ -183,20 +185,7 @@ export type GitHubRefResponse = {
   };
 };
 
-export type GitHubWorkflowRunResponse = {
-  id: number;
-  name?: string;
-  head_branch: string;
-  head_sha: string;
-  run_number: number;
-  event: string;
-  status: "queued" | "in_progress" | "completed" | "waiting" | "requested" | "pending";
-  conclusion: "success" | "failure" | "neutral" | "cancelled" | "skipped" | "timed_out" | "action_required" | null;
-  workflow_id: number;
-  html_url: string;
-  created_at: string;
-  updated_at: string;
-};
+
 
 export class GitHubApiError extends Error {
   status: number;
@@ -1328,19 +1317,15 @@ export class GitHubApi {
     owner: string,
     repo: string,
     workflowId?: string | number,
-    ref?: string,
-  ): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRunResponse[] }> {
-    let url = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs`;
-    if (workflowId !== undefined) {
-      url = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/${encodeURIComponent(workflowId)}/runs`;
-    }
-    
-    return (await this.#request<{ total_count: number; workflow_runs: GitHubWorkflowRunResponse[] }>(
+    branch?: string,
+  ): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }> {
+    const query: Record<string, string> = {};
+    if (branch) query.branch = branch;
+
+    return (await this.#request<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }>(
       "GET",
-      url,
-      {
-        query: ref ? { branch: ref } : undefined,
-      },
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/${workflowId ? `workflows/${encodeURIComponent(workflowId)}/` : ""}runs`,
+      { query },
     )).data;
   }
 
@@ -1348,8 +1333,8 @@ export class GitHubApi {
     owner: string,
     repo: string,
     runId: number,
-  ): Promise<GitHubWorkflowRunResponse> {
-    return (await this.#request<GitHubWorkflowRunResponse>(
+  ): Promise<GitHubWorkflowRun> {
+    return (await this.#request<GitHubWorkflowRun>(
       "GET",
       `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${encodeURIComponent(runId)}`,
     )).data;

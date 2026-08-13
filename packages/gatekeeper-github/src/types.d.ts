@@ -131,7 +131,7 @@ export interface GitHubRepo {
   /**
    * Lists workflow runs for the repository, optionally filtered by workflow ID or branch ref.
    */
-  listWorkflowRuns(workflowId?: string | number, ref?: string): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }>;
+  listWorkflowRuns(workflowId?: string | number, branch?: string): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }>;
 
   /**
    * Gets a specific workflow run by ID.
