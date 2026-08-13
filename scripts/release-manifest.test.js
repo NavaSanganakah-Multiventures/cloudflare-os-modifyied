@@ -120,7 +120,7 @@ test("worker entries carry the deploy contract", () => {
   const router = workers["router"];
   assert.deepEqual(
       router.bindings.find((b) => b.name === "WORKSHOP_BACKEND"),
-      { type: "service", name: "WORKSHOP_BACKEND", service: "$WORKER_NAME(workshop-backend)" });
+      { type: "service", name: "WORKSHOP_BACKEND", service: "$WORKER_NAME(cloudflareos-backend)" });
   assert.ok(router.bindings.some((b) => b.type === "assets" && b.name === "ASSETS"));
   assert.ok(router.assetsConfig.run_worker_first.includes("/gatekeeper/*"));
   assert.equal(router.assetsConfig.not_found_handling, "single-page-application");
