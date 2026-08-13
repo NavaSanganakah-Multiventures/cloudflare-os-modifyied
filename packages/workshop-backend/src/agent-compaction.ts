@@ -1,5 +1,6 @@
 import {SUGGESTED_MODELS, WORKERS_AI_OUTPUT_LIMIT, type AiChatMessage, type AiModelConfig}
   from "@gadgets/workshop-shared/api";
+import { mergeSuggestedModels, readAdminConfig } from "./admin-config.js";
 import type {Api, Message, Model} from "@earendil-works/pi-ai";
 import * as Y from "yjs";
 import type {ChatBindingEntry, CompactionCheckpoint} from "./agent";
@@ -26,6 +27,21 @@ const DEFAULT_CONTEXT_WINDOW = 128_000;
 export function getModelTokenLimits(config: AiModelConfig):
     {inputBudget: number, maxOutputTokens?: number} {
   let model = SUGGESTED_MODELS[config.provider][config.model];
+  let maxOutputTokens = model?.outputLimit ??
+      (config.provider === "cloudflare" ? WORKERS_AI_OUTPUT_LIMIT : undefined);
+  return {
+    inputBudget: (model?.contextWindow ?? DEFAULT_CONTEXT_WINDOW) - (maxOutputTokens ?? 0),
+    maxOutputTokens,
+  };
+}
+
+// Same budget computation using the merged admin + built-in catalog. Used at live turn start
+// from callers with access to the environment.
+export async function getModelTokenLimitsAsync(env: Cloudflare.Env, config: AiModelConfig)
+    : Promise<{inputBudget: number, maxOutputTokens?: number}> {
+  let admin = await readAdminConfig(env);
+  let list = mergeSuggestedModels(admin);
+  let model = list.find(m => m.provider === config.provider && m.modelId === config.model);
   let maxOutputTokens = model?.outputLimit ??
       (config.provider === "cloudflare" ? WORKERS_AI_OUTPUT_LIMIT : undefined);
   return {
