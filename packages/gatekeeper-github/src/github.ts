@@ -4722,7 +4722,6 @@ class GitHubPullRequestImpl extends GitHubIssueImpl implements GitHubPullRequest
       implementsRevert: false,
       actionKind: MERGE_PULL_REQUEST_ACTION,
       autoApprovable: true,
-      branchRef: details.base.ref,
     });
   }
 }

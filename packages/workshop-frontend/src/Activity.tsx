@@ -184,7 +184,7 @@ export default function Activity({
   if (!isReady) {
     return (
       <div className="flex h-full items-center justify-center text-[13px] text-kumo-subtle">
-        Loading activityÃÂ¢ÃÂÃÂ¦
+        Loading activity…
       </div>
     )
   }
@@ -373,10 +373,14 @@ function AutoApprovalPanel({
 
   // Save the edited branch patterns for an action and collapse the editor.
   async function saveBranchPatterns(entry: AutoApprovalEntry, value: string) {
-    const patterns = parseBranchPatterns(value)
-    await setBranchPatterns(entry, patterns)
-    setBranchInput(prev => { const next = { ...prev }; delete next[autoApprovalKey(entry)]; return next })
-    setExpandedKey(null)
+    try {
+      const patterns = parseBranchPatterns(value)
+      await setBranchPatterns(entry, patterns)
+      setBranchInput(prev => { const next = { ...prev }; delete next[autoApprovalKey(entry)]; return next })
+      setExpandedKey(null)
+    } catch (error) {
+      console.error("Failed to save branch patterns", error)
+    }
   }
 
   const previousReloadTrigger = useRef(reloadTrigger)
@@ -414,7 +418,7 @@ function AutoApprovalPanel({
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-[13px] text-kumo-subtle">
-        Loading auto-approvalÃÂ¢ÃÂÃÂ¦
+        Loading auto-approval…
       </div>
     )
   }
@@ -513,6 +517,7 @@ function AutoApprovalPanel({
                     {branchScoped && entry.enabled && !entry.orphaned && (
                       <button
                         type="button"
+                        aria-expanded={expanded}
                         aria-label={`${expanded ? 'Hide' : 'Edit'} branch patterns for ${entry.actionKind.label}`}
                         className="cursor-pointer text-[12px] text-kumo-inactive hover:text-kumo-default"
                         onClick={() => setExpandedKey(expanded ? null : key)}
@@ -540,6 +545,11 @@ function AutoApprovalPanel({
                           value={inputValue}
                           placeholder="*, !main"
                           onChange={e => setBranchInput(prev => ({ ...prev, [key]: e.target.value }))}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              void saveBranchPatterns(entry, inputValue)
+                            }
+                          }}
                         />
                         <button
                           type="button"
@@ -609,7 +619,7 @@ function ReviewRequest({
                 {record.resourceTitle}
               </a>
             ) : record.resourceTitle}
-            <span className="px-1">ÃÂÃÂ·</span>
+            <span className="px-1">·</span>
             {formatRelativeTime(record.createdAt)}
           </p>
         </div>
