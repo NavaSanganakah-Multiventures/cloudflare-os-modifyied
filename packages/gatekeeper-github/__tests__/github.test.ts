@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { GitHubGatekeeperImpl } from "../src/github.js";
-import { ActionKind } from "@gadgets/workshop-shared/api";
 
 describe("GitHubGatekeeperImpl", () => {
   it("includes all auto-approvable actions in getAutoApprovableActions", async () => {
@@ -24,8 +23,8 @@ describe("GitHubGatekeeperImpl", () => {
     expect(tags).toContain("githubPostComment");
     expect(tags).toContain("githubPostReview");
     expect(tags).toContain("githubReplyDiffComment");
-    expect(tags).toContain("githubWriteFile");
-    expect(tags).toContain("githubDeleteFile");
+    expect(tags).toContain("githubRepoWriteFile");
+    expect(tags).toContain("githubRepoDeleteFile");
     expect(tags).toContain("githubCreateBranch");
   });
 });

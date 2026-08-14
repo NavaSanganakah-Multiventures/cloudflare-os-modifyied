@@ -305,11 +305,6 @@ function observerBindingNeed(record: GatekeeperRecord): ObserverBindingNeed {
   };
 }
 
-// Copied from normalizeText() in agent-catalog.ts, minus its length clamp
-function oneLineReason(reason: string): string {
-  return reason.replace(/\p{Cc}/gu, " ").replace(/\s+/g, " ").trim();
-}
-
 // Storage record describing a non-owner collaborator who has configured their gatekeeper accounts
 // and passed all `addObserver` checks -- i.e. is actually set up to observe data the Gadget has
 // read. This is distinct from the sharing table (which records the owner's *intent* that a user

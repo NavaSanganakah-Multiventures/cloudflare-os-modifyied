@@ -76,7 +76,10 @@ import type {
   GitHubProposeFileChangeOptions,
   GitHubProposeFileDeletionOptions,
   GitHubProposedChangeResult,
+  GitHubWorkflow,
+  GitHubWorkflowJob,
   GitHubWorkflowRun,
+  GitHubWorkflowRunsQuery,
 } from "./types";
 import TYPES_CODE from "./types.txt";
 import {
@@ -326,7 +329,9 @@ const MAX_REPLY_TARGET_HOPS = 50;
 const GITHUB_LOGO_URL = `data:image/svg+xml,${encodeURIComponent(GITHUB_LOGO_SVG)}`;
 
 // `user:email` lets us read the account's primary verified email for sign-in (getAuthenticatedEmail).
-const OAUTH_SCOPES = ["repo", "read:user", "user:email"];
+// `workflow` is required to create/update GitHub Actions workflow files (.github/workflows/*)
+// via the contents API; without it those writes fail with 403. It is a separate scope from `repo`.
+const OAUTH_SCOPES = ["repo", "read:user", "user:email", "workflow"];
 
 // Minimal scopes for sign-in only (verify the user's email). Used when connecting in "auth" mode;
 // the resulting grant is transient.
@@ -354,6 +359,7 @@ function validateBranchName(name: string): void {
   ) {
     throw new Error(`Invalid GitHub branch name: ${name}`);
   }
+  // oxlint-disable-next-line no-control-regex -- intentionally rejecting control chars in branch names
   if (/[\x00-\x20\x7F]/.test(name)) {
     throw new Error(`Branch name contains control characters: ${name}`);
   }
@@ -595,7 +601,7 @@ function branchFromResponse(branch: GitHubBranchResponse, owner: string, repo: s
 function commitResultFromResponse(commit: GitHubCommitResponse["commit"]): GitHubCommit {
   return {
     sha: commit.sha,
-    // html_url is the web URL (https://github.com/owner/repo/commit/ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦); url is the API URL.
+    // html_url is the web URL (https://github.com/owner/repo/commit/ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦); url is the API URL.
     url: commit.html_url ?? commit.url,
   };
 }
@@ -1286,7 +1292,12 @@ export class UserAccount extends DurableObject<Env> {
       expiresAt: Date.now() + OAUTH_NONCE_LIFETIME_MS,
       stage: "oauth",
     });
-    const scopes = this.ctx.storage.kv.get<string[]>("requestedScopes") ?? OAUTH_SCOPES;
+    // Always request the CURRENT OAUTH_SCOPES / AUTH_SCOPES (selected by the ephemeral/auth-only
+    // flag) rather than a scope list stashed at the original connect time. Otherwise an account
+    // that reconnects AFTER new scopes (e.g. `workflow`) are added to OAUTH_SCOPES keeps
+    // re-requesting the stale set and never gains the new scope.
+    const ephemeral = this.ctx.storage.kv.get<boolean>("ephemeral") ?? false;
+    const scopes = ephemeral ? AUTH_SCOPES : OAUTH_SCOPES;
     return { oauthNonce, scopes };
   }
 
@@ -1568,7 +1579,7 @@ export class GitHubVerifier extends WorkerEntrypoint<Env, GitHubVerifierProps>
       return true;
     } catch (error) {
       // GitHub returns 404 for private repos the token cannot see (to avoid leaking existence), and
-      // 403 in some org-policy cases ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ either way the observer lacks read access.
+      // 403 in some org-policy cases ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ either way the observer lacks read access.
       if (error instanceof GitHubApiError && (error.status === 404 || error.status === 403)) {
         return false;
       }
@@ -3110,7 +3121,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           if (reviewBuf.length < 100) reviewsDone = true;
         }
 
-        // Both sources empty ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ done.
+        // Both sources empty ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ done.
         if (commentBuf.length === 0 && reviewBuf.length === 0) break;
 
         // Take the entry with the earlier createdAt.
@@ -3729,6 +3740,8 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           action.ref,
           action.inputs,
         ));
+        // No #clearCaches(): workflow dispatches don't mutate cached entities
+        // (issues/PRs/branches/files), and workflow runs are read uncached.
         this.#markActionApproved(action);
         return;
       }
@@ -4196,8 +4209,8 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     };
   }
 
-  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ repo,
-  // issue, or pull request ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ is scoped to one repository, and issues/PRs inherit the repo's
+  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ repo,
+  // issue, or pull request ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ is scoped to one repository, and issues/PRs inherit the repo's
   // permissions, so the repository is the atomic ACL unit. To admit an observer we simply confirm
   // they can read that repo, using their own token via the verifier (see GitHubVerifier).
   //
@@ -4217,12 +4230,31 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
 
   async removeObserver(_id: string): Promise<void> {}
 
-  async listWorkflowRuns(workflowId?: string | number, branch?: string): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }> {
-    return this.#withApi(api => api.listWorkflowRuns(this.ctx.props.owner, this.ctx.props.repo, workflowId, branch));
+  async listWorkflows(): Promise<{ total_count: number; workflows: GitHubWorkflow[] }> {
+    return this.#withApi(api => api.listWorkflows(this.ctx.props.owner, this.ctx.props.repo));
+  }
+
+  async getWorkflow(workflowId: string | number): Promise<GitHubWorkflow> {
+    return this.#withApi(api => api.getWorkflow(this.ctx.props.owner, this.ctx.props.repo, workflowId));
+  }
+
+  async listWorkflowRuns(
+    workflowId?: string | number,
+    query?: GitHubWorkflowRunsQuery,
+  ): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }> {
+    return this.#withApi(api => api.listWorkflowRuns(this.ctx.props.owner, this.ctx.props.repo, workflowId, query));
   }
 
   async getWorkflowRun(runId: number): Promise<GitHubWorkflowRun> {
     return this.#withApi(api => api.getWorkflowRun(this.ctx.props.owner, this.ctx.props.repo, runId));
+  }
+
+  async listWorkflowJobs(runId: number): Promise<{ total_count: number; jobs: GitHubWorkflowJob[] }> {
+    return this.#withApi(api => api.listWorkflowJobs(this.ctx.props.owner, this.ctx.props.repo, runId));
+  }
+
+  async getWorkflowJobLogs(jobId: number): Promise<string> {
+    return this.#withApi(api => api.getWorkflowJobLogs(this.ctx.props.owner, this.ctx.props.repo, jobId));
   }
 }
 
@@ -4390,7 +4422,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Write file ${options.path} in ${action.owner}/${action.repo}` +
         `${action.branch ? ` on branch ${action.branch}` : " on the default branch"}.` +
         (options.content !== undefined
-          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\nÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦" : ""}\n\`\`\``
+          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\nÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦" : ""}\n\`\`\``
           : " Content is provided as base64 (binary)."),
       implementsRevert: false,
       awaitDecision: true,
@@ -4503,12 +4535,31 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     });
   }
 
-  async listWorkflowRuns(workflowId?: string | number, branch?: string): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }> {
+  async listWorkflows(): Promise<{ total_count: number; workflows: GitHubWorkflow[] }> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `List workflows`,
+      description: `List GitHub Actions workflows defined in this repository.`,
+    });
+    return this.#gatekeeper.listWorkflows();
+  }
+
+  async getWorkflow(workflowId: string | number): Promise<GitHubWorkflow> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `Read workflow ${workflowId}`,
+      description: `Read GitHub Actions workflow ${workflowId}.`,
+    });
+    return this.#gatekeeper.getWorkflow(workflowId);
+  }
+
+  async listWorkflowRuns(
+    workflowId?: string | number,
+    query?: GitHubWorkflowRunsQuery,
+  ): Promise<{ total_count: number; workflow_runs: GitHubWorkflowRun[] }> {
     await this.#approvalQueue.authorizeObservation({
       title: `List workflow runs`,
       description: `List GitHub Actions workflow runs.`,
     });
-    return this.#gatekeeper.listWorkflowRuns(workflowId, branch);
+    return this.#gatekeeper.listWorkflowRuns(workflowId, query);
   }
 
   async getWorkflowRun(runId: number): Promise<GitHubWorkflowRun> {
@@ -4517,6 +4568,22 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Read details of GitHub Actions workflow run ${runId}.`,
     });
     return this.#gatekeeper.getWorkflowRun(runId);
+  }
+
+  async listWorkflowJobs(runId: number): Promise<{ total_count: number; jobs: GitHubWorkflowJob[] }> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `List workflow jobs`,
+      description: `List the jobs and steps of GitHub Actions workflow run ${runId}.`,
+    });
+    return this.#gatekeeper.listWorkflowJobs(runId);
+  }
+
+  async getWorkflowJobLogs(jobId: number): Promise<string> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `Read workflow job logs`,
+      description: `Read the log output of GitHub Actions job ${jobId}.`,
+    });
+    return this.#gatekeeper.getWorkflowJobLogs(jobId);
   }
 }
 
