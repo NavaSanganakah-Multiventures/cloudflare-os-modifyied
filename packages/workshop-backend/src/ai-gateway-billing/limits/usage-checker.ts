@@ -139,6 +139,7 @@ export async function checkUsageAndBalance(
     balance,
     hasUserToken,
   };
+}
 
 export async function getUsageInfo(
   env: Cloudflare.Env,
