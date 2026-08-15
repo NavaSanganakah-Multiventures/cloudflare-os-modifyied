@@ -1,32 +1,49 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { DropdownMenu } from '@cloudflare/kumo'
 import { useAuthenticatedApi } from '../AuthContext'
 import { MENU_CONTENT, MENU_ITEM, MENU_POSITIONER_STYLE } from './menuStyles'
-import { Brain, Wallet } from '@phosphor-icons/react'
+import { Brain, Wallet, Plus } from '@phosphor-icons/react'
+
+function loadRazorpayScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if ((window as any).Razorpay) return resolve()
+    const script = document.createElement('script')
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js'
+    script.async = true
+    script.onload = () => resolve()
+    script.onerror = () => reject(new Error('Failed to load Razorpay checkout'))
+    document.body.appendChild(script)
+  })
+}
 
 export default function WalletSubmenu() {
   const { authenticatedApi } = useAuthenticatedApi()
   const [balance, setBalance] = useState<number | null>(null)
   const [aiPref, setAiPref] = useState<'system' | 'custom'>('system')
   const [loading, setLoading] = useState(true)
+  const [rechargeAmount, setRechargeAmount] = useState('')
+  const [rechargeLoading, setRechargeLoading] = useState(false)
+  const [rechargeError, setRechargeError] = useState<string | null>(null)
+  const [rechargeSuccess, setRechargeSuccess] = useState(false)
+
+  const loadData = useCallback(async () => {
+    try {
+      const [bal, pref] = await Promise.all([
+        authenticatedApi.getWalletBalance(),
+        authenticatedApi.getAiPreference()
+      ])
+      setBalance(bal)
+      setAiPref(pref)
+    } catch (e) {
+      console.error('Failed to load wallet data', e)
+    } finally {
+      setLoading(false)
+    }
+  }, [authenticatedApi])
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        const [bal, pref] = await Promise.all([
-          authenticatedApi.getWalletBalance(),
-          authenticatedApi.getAiPreference()
-        ])
-        setBalance(bal)
-        setAiPref(pref)
-      } catch (e) {
-        console.error("Failed to load wallet data", e)
-      } finally {
-        setLoading(false)
-      }
-    }
     loadData()
-  }, [authenticatedApi])
+  }, [loadData])
 
   const handleSelect = async (pref: 'system' | 'custom') => {
     const previous = aiPref
@@ -34,8 +51,55 @@ export default function WalletSubmenu() {
     try {
       await authenticatedApi.setAiPreference(pref)
     } catch (e) {
-      console.error("Failed to set AI preference", e)
+      console.error('Failed to set AI preference', e)
       setAiPref(previous)
+    }
+  }
+
+  const handleRecharge = async () => {
+    const amount = Number(rechargeAmount)
+    if (!Number.isFinite(amount) || amount < 1) {
+      setRechargeError('Minimum recharge amount is 1 INR')
+      return
+    }
+    setRechargeLoading(true)
+    setRechargeError(null)
+    setRechargeSuccess(false)
+    try {
+      const order = await authenticatedApi.createRazorpayOrder(amount)
+      await loadRazorpayScript()
+      const rzp = new (window as any).Razorpay({
+        key: order.keyId,
+        amount: order.amount,
+        currency: order.currency,
+        order_id: order.orderId,
+        name: 'Cloudflare OS',
+        description: 'Wallet recharge',
+        handler: async (response: any) => {
+          try {
+            await authenticatedApi.verifyRazorpayPayment(
+              response.razorpay_order_id,
+              response.razorpay_payment_id,
+              response.razorpay_signature
+            )
+            await loadData()
+            setRechargeAmount('')
+            setRechargeError(null)
+            setRechargeSuccess(true)
+            setTimeout(() => setRechargeSuccess(false), 3000)
+          } catch (e) {
+            console.error('Payment verification failed', e)
+            setRechargeError('Payment verification failed. Please contact support.')
+          }
+        },
+        theme: { color: '#F6461D' }
+      })
+      rzp.open()
+    } catch (e) {
+      console.error('Recharge failed', e)
+      setRechargeError((e as Error).message || 'Recharge failed')
+    } finally {
+      setRechargeLoading(false)
     }
   }
 
@@ -77,6 +141,37 @@ export default function WalletSubmenu() {
           <span>Use My Custom AI (BYOK)</span>
           {aiPref === 'custom' && <span className="text-kumo-brand">✓</span>}
         </DropdownMenu.Item>
+
+        <div className="border-t border-kumo-line mt-1 pt-2 px-3 py-2">
+          <div className="flex items-center gap-2 mb-2">
+            <Plus size={14} className="text-kumo-brand" />
+            <span className="text-xs font-medium text-kumo-default">Recharge wallet</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={1}
+              step={1}
+              placeholder="INR"
+              value={rechargeAmount}
+              onChange={(e) => setRechargeAmount(e.target.value)}
+              className="w-20 h-7 px-2 text-sm bg-kumo-elevated border border-kumo-line rounded focus:border-kumo-brand outline-none"
+            />
+            <button
+              onClick={handleRecharge}
+              disabled={rechargeLoading}
+              className="h-7 px-2 text-xs font-medium rounded bg-kumo-brand text-white disabled:opacity-50"
+            >
+              {rechargeLoading ? '...' : 'Pay'}
+            </button>
+          </div>
+          {rechargeError && (
+            <p className="text-xs text-red-500 mt-1 max-w-[200px]">{rechargeError}</p>
+          )}
+          {rechargeSuccess && (
+            <p className="text-xs text-green-600 mt-1">Wallet recharged!</p>
+          )}
+        </div>
       </DropdownMenu.Content>
     </DropdownMenu>
   )
