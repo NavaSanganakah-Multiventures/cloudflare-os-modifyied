@@ -195,7 +195,7 @@ function makeUserStorage(storage: DurableObjectStorage) {
       preferredModel: <string | null>null,
       onboardingCompleted: false,
 
-      walletBalance: 0,
+      walletBalance: 100, // seeded starting balance for System AI
       aiPreference: <"system" | "custom">"system",
 
       // Set once the user's pre-existing workspaces have been asked to populate the outputs index
@@ -678,6 +678,9 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   async consumeWalletBalance(cost: number): Promise<boolean> {
+    if (!Number.isFinite(cost) || cost < 0) {
+      throw new TypeError("Invalid wallet cost: " + String(cost));
+    }
     let current = this.storage.walletBalance.get();
     if (current < cost) {
       return false; // Insufficient balance
@@ -687,6 +690,9 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   async addWalletBalance(amount: number): Promise<void> {
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new TypeError("Invalid wallet top-up amount: " + String(amount));
+    }
     let current = this.storage.walletBalance.get();
     this.storage.walletBalance.put(current + amount);
   }
