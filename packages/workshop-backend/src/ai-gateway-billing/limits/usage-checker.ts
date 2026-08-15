@@ -1,13 +1,11 @@
 // Usage checker: combines the daily free-tier counter with the BYOK/balance logic to decide
 // whether a user's request may proceed, and whose credentials to use.
 //
-// Billing rules (see canProceedWithRequest):
 //   - Connected + balance >= minimum -> billed to the user's own gateway, no daily cap; the daily
 //     counter is NOT consumed (the platform free tier is reserved for everyone else).
 //   - Connected + balance below minimum (incl. $0), or not connected -> platform free tier; the
 //     daily counter is consumed and, once exhausted, the request is blocked.
 
-import { canProceedWithRequest, hasMinimumBalance, LimitWindowKind } from "@gadgets/workshop-shared/limits";
 import { CloudflareUsageInfo } from "@gadgets/workshop-shared/api";
 import { isCloudflareLimitsEnabled, getMinimumCloudflareBalance } from "../config.js";
 import { getDailyLlmCallLimit } from "./config.js";
@@ -66,8 +64,6 @@ export async function checkUsageAndBalance(
   }
 
   const aiPreference = await userStub.getAiPreference();
-  const limit = getDailyLlmCallLimit(env);
-  const minimumBalance = getMinimumCloudflareBalance(env);
 
   let hasUserToken = false;
   let balance: number | null = null;
