@@ -3476,7 +3476,6 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       REPLY_DIFF_COMMENT_ACTION,
       MERGE_PULL_REQUEST_ACTION,
       DISPATCH_WORKFLOW_ACTION,
-      DISABLE_WORKFLOW_ACTION,
     ];
   }
 
@@ -3765,6 +3764,8 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           action.repo,
           action.workflowId
         ));
+        // No #clearCaches(): disabling a workflow does not mutate cached entities
+        // (issues/PRs/branches/files).
         this.#markActionApproved(action);
         return;
       }
