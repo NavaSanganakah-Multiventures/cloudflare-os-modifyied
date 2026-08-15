@@ -1310,6 +1310,17 @@ export class GitHubApi {
     );
   }
 
+  async disableWorkflow(
+    owner: string,
+    repo: string,
+    workflowId: string | number,
+  ): Promise<void> {
+    await this.#request<void>(
+      "PUT",
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/${encodeURIComponent(workflowId)}/disable`,
+    );
+  }
+
   async listWorkflows(
     owner: string,
     repo: string,
