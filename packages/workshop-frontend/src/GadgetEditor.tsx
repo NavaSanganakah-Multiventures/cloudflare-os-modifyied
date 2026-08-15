@@ -16,6 +16,7 @@ import {
 import { RpcStub, RpcTarget } from 'capnweb'
 import { useAuthenticatedApi } from './AuthContext'
 import UserMenu from './components/UserMenu'
+import WalletSubmenu from './components/WalletSubmenu'
 import SiteLogo from './components/SiteLogo'
 
 import {
@@ -58,7 +59,7 @@ import GadgetExportMenu from './GadgetExportMenu'
 
 const NO_GADGETS: ReadonlySet<WorkpieceId> = new Set()
 
-// ─── console log subscriber ───────────────────────────────────────────────────
+// âââ console log subscriber âââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 type BufferedLogEntry = ConsoleLogEvent & { source: 'server' | 'client' }
 
@@ -82,7 +83,7 @@ class ConsoleLogSubscriberImpl extends RpcTarget implements ConsoleLogSubscriber
   }
 }
 
-// ─── workpieces subscriber ────────────────────────────────────────────────────
+// âââ workpieces subscriber ââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 // Receives the workspace's workpiece list (see Overseer.subscribeToWorkpieces()). Entries
 // received before ready() are buffered so a (re)subscription replaces the list atomically instead
@@ -143,7 +144,7 @@ function formatConsoleLogs(logs: BufferedLogEntry[]): string {
   return 'Console logs:\n' + lines.join('\n')
 }
 
-// ─── right-panel tabs ─────────────────────────────────────────────────────────
+// âââ right-panel tabs âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 type RightTab = 'app' | 'code' | 'connections'
 
@@ -413,7 +414,7 @@ function NoGadgetPlaceholder({ height }: { height: string }) {
   )
 }
 
-// ─── component ────────────────────────────────────────────────────────────────
+// âââ component ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 export default function GadgetEditor() {
   const params = useParams({ strict: false }) as { id?: string }
@@ -426,10 +427,10 @@ export default function GadgetEditor() {
   const urlChatId = chatParam !== undefined ? chatParam : null
   const urlWorkpieceId = workpieceParam !== undefined ? workpieceParam : null
 
-  // ── toasts ─────────────────────────────────────────────────────────────────────
+  // ââ toasts âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   const toasts = useKumoToastManager()
 
-  // ── core state ──────────────────────────────────────────────────────────────
+  // ââ core state ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   // The workspace's workpiece list (gadget-type workpieces only in v1), kept live via
   // subscribeToWorkpieces(). `workpiecesReady` flips once the initial listing has arrived.
   const [workpieces, setWorkpieces] = useState<Map<WorkpieceId, WorkpieceSummary>>(new Map())
@@ -440,7 +441,7 @@ export default function GadgetEditor() {
   // has no (visible) gadgets.
   const [gadget, setGadget] = useState<{ id: WorkpieceId; stub: RpcStub<GadgetClient> } | null>(null)
 
-  // ── title editing ────────────────────────────────────────────────────────────
+  // ââ title editing ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const isEditingTitleRef = useRef(false)
   isEditingTitleRef.current = isEditingTitle
@@ -470,7 +471,7 @@ export default function GadgetEditor() {
   })
   const [userInfo, setUserInfo] = useState<AiChatAuthorInfo | null>(null)
 
-  // ── role gating ────────────────────────────────────────────────────────────────
+  // ââ role gating ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   // "use"-role collaborators receive a restricted overseer that only permits rendering and
   // interacting with the gadget's deployed UI. We render the minimal use-only view for them (see
   // the early return below). Editor-only RPCs are fired speculatively regardless of role: the
@@ -478,7 +479,7 @@ export default function GadgetEditor() {
   // telemetry subscriptions this component opens, so no client-side gating is needed here.
   const isUseOnly = metadata?.role === 'use'
 
-  // ── layout ───────────────────────────────────────────────────────────────────
+  // ââ layout âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   const [chatWidth, setChatWidth] = useState(getInitialChatWidth)
   const chatWidthRef = useRef(chatWidth)
   const [isResizing, setIsResizing] = useState(false)
@@ -507,7 +508,7 @@ export default function GadgetEditor() {
     }
   }, [])
 
-  // Fullscreen gadget mode — renders the gadget iframe as an overlay covering the whole page.
+  // Fullscreen gadget mode â renders the gadget iframe as an overlay covering the whole page.
   // Tied to the URL hash (#fullscreen) so the state is bookmarkable and survives reloads.
   const [isGadgetFullscreen, setIsGadgetFullscreen] = useState(
     () => typeof window !== 'undefined' && window.location.hash === '#fullscreen'
@@ -528,13 +529,13 @@ export default function GadgetEditor() {
   // Element that had focus before entering fullscreen; we restore focus to it on exit so
   // keyboard users aren't stranded.
   const focusBeforeFullscreenRef = useRef<HTMLElement | null>(null)
-  // Fullscreen overlay wrapper — we focus this on enter to move focus out of the now-occluded
+  // Fullscreen overlay wrapper â we focus this on enter to move focus out of the now-occluded
   // Enter button. From here, Tab moves into the iframe.
   const fullscreenOverlayRef = useRef<HTMLDivElement>(null)
 
   const enterGadgetFullscreen = useCallback(() => {
     if (window.location.hash !== '#fullscreen') {
-      // pushState so the browser Back button also exits fullscreen — natural for many users
+      // pushState so the browser Back button also exits fullscreen â natural for many users
       // and helpful for bookmarks: a bookmarked /workspace/foo#fullscreen can still go Back to a
       // useful (non-fullscreen) state if there's prior history.
       window.history.pushState(null, '', '#fullscreen')
@@ -583,7 +584,7 @@ export default function GadgetEditor() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [isGadgetFullscreen, exitGadgetFullscreen])
 
-  // ── code / chat state ────────────────────────────────────────────────────────
+  // ââ code / chat state ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   const [uiReloadTrigger, setUiReloadTrigger] = useState(0)
   const [autoApproveReloadTrigger, setAutoApproveReloadTrigger] = useState(0)
   const [proposedChanges, setProposedChanges] = useState<Uint8Array | undefined>(undefined)
@@ -617,7 +618,7 @@ export default function GadgetEditor() {
   // list should become possible.
   const effectiveSelectedChatId = selectedChatId ?? (pinInitialChatSelection ? 0 : null)
 
-  // ── workpiece selection ──────────────────────────────────────────────────────
+  // ââ workpiece selection ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   const allGadgets = useMemo(() => {
     return [...workpieces.values()]
       .filter(w => w.type === 'gadget')
@@ -784,7 +785,7 @@ export default function GadgetEditor() {
       ? effectiveSelectedChatId
       : undefined
 
-  // ── console log buffering ────────────────────────────────────────────────────
+  // ââ console log buffering ââââââââââââââââââââââââââââââââââââââââââââââââââââ
   const consoleLogSubscriberRef = useRef(new ConsoleLogSubscriberImpl())
   const consoleLogBufferRef = useRef<BufferedLogEntry[]>([])
   const [consoleLogCount, setConsoleLogCount] = useState(0)
@@ -918,7 +919,7 @@ export default function GadgetEditor() {
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // ── chat count / auto-switch ─────────────────────────────────────────────────
+  // ââ chat count / auto-switch âââââââââââââââââââââââââââââââââââââââââââââââââ
   const handleChatCountChange = useCallback((count: number, chatZeroExists: boolean) => {
     setChatCount(count)
     setHasChatZero(chatZeroExists)
@@ -996,7 +997,7 @@ export default function GadgetEditor() {
     setUserNavigatedToList(false)
   }, [id])
 
-  // ── navigation helper ────────────────────────────────────────────────────────
+  // ââ navigation helper ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   const navigateToChat = useCallback(
     (chatId: number | null, options?: { replace?: boolean }) => {
       setUserNavigatedToList(chatId === null)
@@ -1028,7 +1029,7 @@ export default function GadgetEditor() {
     [id, navigate, selectedGadgetSummary?.chatId, workspaceView?.mode]
   )
 
-  // ── keep single-chat routing aligned with the current mode ──────────────────
+  // ââ keep single-chat routing aligned with the current mode ââââââââââââââââââ
   // Keep the URL aligned with simple mode's implied chat-0 selection.
   useEffect(() => {
     if (!layoutModeReady) return
@@ -1050,7 +1051,7 @@ export default function GadgetEditor() {
     }
   }, [layoutModeReady, simpleMode, pinInitialChatSelection, urlChatId, navigateToChat, navigate, id])
 
-  // ── resize handle ─────────────────────────────────────────────────────────────
+  // ââ resize handle âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   //
   // Pointer capture keeps resizing reliable when dragging across the gadget iframe.
   const handleResizePointerDown = useCallback(
@@ -1094,7 +1095,7 @@ export default function GadgetEditor() {
     }
   }, [isResizing])
 
-  // ── workpiece list subscription ───────────────────────────────────────────────
+  // ââ workpiece list subscription âââââââââââââââââââââââââââââââââââââââââââââââ
   useEffect(() => {
     if (!overseer) return
     let sub: RpcStub<{}> | null = null
@@ -1120,7 +1121,7 @@ export default function GadgetEditor() {
     }
   }, [overseer])
 
-  // ── selected gadget stub ────────────────────────────────────────────────────────
+  // ââ selected gadget stub ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   // Open a GadgetClient for the selected workpiece. getGadget() pipelines on the overseer stub,
   // so the stub is usable immediately with no extra round trip.
   useEffect(() => {
@@ -1133,7 +1134,7 @@ export default function GadgetEditor() {
     return () => { stub[Symbol.dispose]() }
   }, [overseer, selectedGadgetId])
 
-  // ── follow the agent across gadgets ─────────────────────────────────────────────
+  // ââ follow the agent across gadgets âââââââââââââââââââââââââââââââââââââââââââââ
   // When the agent starts editing a gadget other than the selected one, switch the picker to it,
   // unless the user picked a workpiece themselves during this turn.
   const userPickedWorkpieceThisTurnRef = useRef(false)
@@ -1154,7 +1155,7 @@ export default function GadgetEditor() {
     })
   }, [streamingActiveFile, selectedGadgetId, visibleGadgets, navigate, id])
 
-  // ── workpiece picker handlers ───────────────────────────────────────────────────
+  // ââ workpiece picker handlers âââââââââââââââââââââââââââââââââââââââââââââââââââ
   const handleSelectWorkpiece = useCallback((workpieceId: WorkpieceId) => {
     if (isAgentActive) userPickedWorkpieceThisTurnRef.current = true
     // Picking a gadget is a deliberate move to its view, so the turn must not pull the tab back.
@@ -1186,7 +1187,7 @@ export default function GadgetEditor() {
     }
   }, [overseer, toasts])
 
-  // ── console log subscription ──────────────────────────────────────────────────
+  // ââ console log subscription ââââââââââââââââââââââââââââââââââââââââââââââââââ
   useEffect(() => {
     if (!overseer) return
     let sub: RpcStub<{}> | null = null
@@ -1201,15 +1202,15 @@ export default function GadgetEditor() {
     return () => { cancelled = true; sub?.[Symbol.dispose]() }
   }, [overseer])
 
-  // ── reload UI when preview branch/code changes ────────────────────────────────
+  // ââ reload UI when preview branch/code changes ââââââââââââââââââââââââââââââââ
   useEffect(() => { setUiReloadTrigger(t => t + 1) }, [previewChatId, proposedChanges])
 
-  // ── user info ─────────────────────────────────────────────────────────────────
+  // ââ user info âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   useEffect(() => {
     authenticatedApi.whoami().then(setUserInfo).catch(() => {})
   }, [authenticatedApi])
 
-  // ── title save/cancel ─────────────────────────────────────────────────────────
+  // ââ title save/cancel âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   const handleSaveTitle = async () => {
     if (!overseer || !titleInput.trim()) return
     try {
@@ -1223,12 +1224,12 @@ export default function GadgetEditor() {
     setIsEditingTitle(false)
   }
 
-  // ── back ──────────────────────────────────────────────────────────────────────
+  // ââ back ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   const handleGoToWorkspaces = () => {
     navigate({ to: '/workspaces' })
   }
 
-  // ── delete ────────────────────────────────────────────────────────────────────
+  // ââ delete ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
 
@@ -1245,12 +1246,12 @@ export default function GadgetEditor() {
     }
   }
 
-  // ── shared height tokens ──────────────────────────────────────────────────────
+  // ââ shared height tokens ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
   const TOPBAR_H = 56   // h-14 (matches home page Header)
   const TABBAR_H = 48   // h-12
   const RIGHT_CONTENT_H = `calc(100vh - ${TOPBAR_H}px - ${TABBAR_H}px)`
 
-  // ── error / loading states ────────────────────────────────────────────────────
+  // ââ error / loading states ââââââââââââââââââââââââââââââââââââââââââââââââââââ
   if (error?.kind === 'open') {
     return (
       <WorkspaceOpenErrorPage
@@ -1288,7 +1289,7 @@ export default function GadgetEditor() {
       <div className="min-h-screen flex items-center justify-center bg-kumo-base">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-kumo-subtle">Loading workspace…</p>
+          <p className="text-sm text-kumo-subtle">Loading workspaceâ¦</p>
         </div>
         {observerConfig && (
           <ObserverConfigModal
@@ -1302,7 +1303,7 @@ export default function GadgetEditor() {
     )
   }
 
-  // ── "use"-role collaborators get the minimal UI: top bar + gadget iframe only ──
+  // ââ "use"-role collaborators get the minimal UI: top bar + gadget iframe only ââ
   if (isUseOnly) {
     return (
       <GadgetUseView
@@ -1318,10 +1319,10 @@ export default function GadgetEditor() {
     )
   }
 
-  // ── always render the full two-pane edit layout; preview overlays on top ──────
+  // ââ always render the full two-pane edit layout; preview overlays on top ââââââ
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-kumo-base relative">
-      {/* ═══ SHARED TOP BAR (visible in both modes) ════════════════════════════ */}
+      {/* âââ SHARED TOP BAR (visible in both modes) ââââââââââââââââââââââââââââ */}
       <div
         className="relative flex items-center justify-between px-4 sm:px-6 backdrop-blur-md border-b border-kumo-line flex-shrink-0 gap-3"
         style={{ height: TOPBAR_H, backgroundColor: 'color-mix(in srgb, var(--color-kumo-base) 80%, transparent)' }}
@@ -1415,7 +1416,7 @@ export default function GadgetEditor() {
 
           {connectionLost && (
             <span className="text-xs text-kumo-warning px-2 py-0.5 rounded-full bg-kumo-warning-tint border border-kumo-warning/20">
-              Reconnecting…
+              Reconnectingâ¦
             </span>
           )}
 
@@ -1447,14 +1448,15 @@ export default function GadgetEditor() {
             </WorkshopIconButton>
           )}
 
-          {/* User menu */}
-          <div className="ml-2">
+          {/* User menu and Wallet */}
+          <div className="ml-2 flex items-center gap-1">
+            <WalletSubmenu />
             <UserMenu />
           </div>
         </div>
       </div>
 
-      {/* ═══ BODY ═════════════════════════════════════════════════════════════ */}
+      {/* âââ BODY âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */}
       <div className="flex flex-1 min-h-0 relative overflow-hidden">
 
         {isAgentActive && (
@@ -1468,7 +1470,7 @@ export default function GadgetEditor() {
           </div>
         )}
 
-        {/* ── LEFT: Chat pane ──────────────────────────────────────────────────── */}
+        {/* ââ LEFT: Chat pane ââââââââââââââââââââââââââââââââââââââââââââââââââââ */}
         <div
           className={`flex flex-col flex-shrink-0 ${workspaceTransitionClass} ${showFullEditor ? 'border-r border-kumo-line' : ''}`}
           style={{
@@ -1517,7 +1519,7 @@ export default function GadgetEditor() {
                 <div className="absolute inset-0 flex items-center justify-center bg-kumo-base">
                   <div className="flex flex-col items-center gap-3">
                     <div className="w-6 h-6 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin" />
-                    <p className="text-sm text-kumo-subtle">Loading conversation…</p>
+                    <p className="text-sm text-kumo-subtle">Loading conversationâ¦</p>
                   </div>
                 </div>
               )}
@@ -1529,7 +1531,7 @@ export default function GadgetEditor() {
           )}
         </div>
 
-        {/* ── Resize handle ───────────────────────────────────────────────────── */}
+        {/* ââ Resize handle âââââââââââââââââââââââââââââââââââââââââââââââââââââ */}
         <div
           className={`flex-shrink-0 overflow-visible bg-kumo-line cursor-col-resize relative touch-none ${workspaceTransitionClass}`}
           style={{ width: showFullEditor ? 1 : 0 }}
@@ -1541,7 +1543,7 @@ export default function GadgetEditor() {
           <div className="absolute inset-y-0 -left-2 -right-2" />
         </div>
 
-        {/* ── RIGHT: App / Code / Connections tabs ───────────────────────────── */}
+        {/* ââ RIGHT: App / Code / Connections tabs âââââââââââââââââââââââââââââ */}
         <div
           className={`flex flex-shrink-0 min-w-0 overflow-hidden bg-kumo-base ${workspaceTransitionClass}`}
           style={{
@@ -1737,7 +1739,7 @@ export default function GadgetEditor() {
         )}
       </div>
 
-      {/* ═══ PREVIEW OVERLAY ══════════════════════════════════════════════════ */}
+      {/* âââ PREVIEW OVERLAY ââââââââââââââââââââââââââââââââââââââââââââââââââ */}
       {previewMode && (
         <div className="absolute inset-x-0 bottom-0 bg-kumo-base z-10" style={{ top: TOPBAR_H }}>
           {selectedGadgetStub && (
