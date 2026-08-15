@@ -369,6 +369,15 @@ export interface AuthenticatedApi extends RpcTarget {
   // Mark the onboarding wizard as completed.
   completeOnboarding(): Promise<void>;
 
+  // Get the user's current wallet balance for AI usage.
+  getWalletBalance(): Promise<number>;
+
+  // Get the user's preference for AI mode: 'system' (uses wallet) or 'custom' (uses BYOK API keys).
+  getAiPreference(): Promise<"system" | "custom">;
+
+  // Set the user's AI mode preference.
+  setAiPreference(pref: "system" | "custom"): Promise<void>;
+
   // --- Optional Cloudflare limits / top-up flow (only meaningful when enabled server-side) ---
 
   // Get the user's current free-tier usage and connected-account balance.

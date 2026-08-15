@@ -195,6 +195,9 @@ function makeUserStorage(storage: DurableObjectStorage) {
       preferredModel: <string | null>null,
       onboardingCompleted: false,
 
+      walletBalance: 0,
+      aiPreference: <"system" | "custom">"system",
+
       // Set once the user's pre-existing workspaces have been asked to populate the outputs index
       // (see #backfillOutputs()). Workspaces created since push on their own.
       outputsBackfilled: false,
@@ -585,6 +588,18 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     this.storage.onboardingCompleted.put(true);
   }
 
+  async getWalletBalance(): Promise<number> {
+    return this.storage.walletBalance.get();
+  }
+
+  async getAiPreference(): Promise<"system" | "custom"> {
+    return this.storage.aiPreference.get();
+  }
+
+  async setAiPreference(pref: "system" | "custom"): Promise<void> {
+    this.storage.aiPreference.put(pref);
+  }
+
   // ---------------------------------------------------------------------------------------------
   // Cloudflare account connection (optional top-up flow).
   // ---------------------------------------------------------------------------------------------
@@ -660,6 +675,20 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     this.storage.dailyLlmCount.put({ day, count: newUsed });
     return { withinLimits: true, remaining: Math.max(0, limit - newUsed), limit, used: newUsed,
              resetAt: nextUtcMidnightIso() };
+  }
+
+  async consumeWalletBalance(cost: number): Promise<boolean> {
+    let current = this.storage.walletBalance.get();
+    if (current < cost) {
+      return false; // Insufficient balance
+    }
+    this.storage.walletBalance.put(current - cost);
+    return true;
+  }
+
+  async addWalletBalance(amount: number): Promise<void> {
+    let current = this.storage.walletBalance.get();
+    this.storage.walletBalance.put(current + amount);
   }
 
   // DO NOT MAKE PUBLIC -- returns API keys.
