@@ -196,6 +196,7 @@ function makeUserStorage(storage: DurableObjectStorage) {
       onboardingCompleted: false,
 
       walletBalance: 100, // seeded starting balance for System AI
+      processedRazorpayPayments: <string[]>[],
       aiPreference: <"system" | "custom">"system",
 
       // Set once the user's pre-existing workspaces have been asked to populate the outputs index
@@ -695,6 +696,66 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     }
     let current = this.storage.walletBalance.get();
     this.storage.walletBalance.put(current + amount);
+  }
+
+  async createRazorpayOrder(amountRupee: number): Promise<{ orderId: string; amount: number; currency: string; keyId: string }> {
+    if (!Number.isFinite(amountRupee) || amountRupee < 1) {
+      throw new TypeError("Recharge amount must be at least 1 INR, got: " + String(amountRupee));
+    }
+    const keyId = this.env.RAZORPAY_KEY_ID;
+    const keySecret = this.env.RAZORPAY_KEY_SECRET;
+    if (!keyId || !keySecret) {
+      throw new Error("Razorpay is not configured on this deployment.");
+    }
+    const amountPaise = Math.round(amountRupee * 100);
+    const auth = btoa(keyId + ":" + keySecret);
+    const receipt = "topup-" + Date.now();
+    const response = await fetch("https://api.razorpay.com/v1/orders", {
+      method: "POST",
+      headers: { "Authorization": "Basic " + auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: amountPaise, currency: "INR", receipt, notes: { userId: this.ctx.id.toString() } }),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error("Razorpay order creation failed: " + response.status + " " + body.slice(0, 200));
+    }
+    const order = await response.json() as { id: string; amount: number; currency: string };
+    return { orderId: order.id, amount: order.amount, currency: order.currency, keyId };
+  }
+
+  async verifyRazorpayPaymentAndTopUp(orderId: string, paymentId: string, signature: string): Promise<void> {
+    if (!orderId || !paymentId || !signature) {
+      throw new TypeError("orderId, paymentId, and signature are required");
+    }
+    const keyId = this.env.RAZORPAY_KEY_ID;
+    const keySecret = this.env.RAZORPAY_KEY_SECRET;
+    if (!keyId || !keySecret) {
+      throw new Error("Razorpay is not configured on this deployment.");
+    }
+    const processed = this.storage.processedRazorpayPayments.get();
+    if (processed.includes(paymentId)) {
+      return;
+    }
+    const valid = await verifyRazorpaySignature(keySecret, orderId, paymentId, signature);
+    if (!valid) {
+      throw new Error("Invalid Razorpay payment signature");
+    }
+    const auth = btoa(keyId + ":" + keySecret);
+    const response = await fetch("https://api.razorpay.com/v1/payments/" + paymentId, {
+      headers: { "Authorization": "Basic " + auth },
+    });
+    if (!response.ok) {
+      throw new Error("Failed to verify Razorpay payment: " + response.status);
+    }
+    const payment = await response.json() as { status: string; amount: number; order_id: string };
+    if (payment.status !== "captured") {
+      throw new Error("Razorpay payment not captured; status=" + payment.status);
+    }
+    if (payment.order_id !== orderId) {
+      throw new Error("Razorpay payment order_id mismatch");
+    }
+    await this.addWalletBalance(payment.amount / 100);
+    this.storage.processedRazorpayPayments.put([...processed, paymentId]);
   }
 
   // DO NOT MAKE PUBLIC -- returns API keys.
@@ -1756,4 +1817,13 @@ export function normalizeUsername(username: string) {
   }
 
   return username;
+}
+
+
+async function verifyRazorpaySignature(secret: string, orderId: string, paymentId: string, signature: string): Promise<boolean> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(orderId + "|" + paymentId));
+  const hex = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+  return signature.toLowerCase() === hex.toLowerCase();
 }
