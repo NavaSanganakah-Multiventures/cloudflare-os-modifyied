@@ -2,6 +2,7 @@ import { Link, useRouterState } from '@tanstack/react-router'
 import { Desktop, Moon, Plug, Sun } from '@phosphor-icons/react'
 import { Tooltip } from '@cloudflare/kumo'
 import UserMenu from '../UserMenu'
+import WalletSubmenu from '../WalletSubmenu'
 import { useTheme } from '../../ThemeContext'
 import type { ThemeMode } from '../../theme'
 
@@ -78,7 +79,7 @@ export default function SidebarUtilityStrip({ collapsed = false }: { collapsed?:
     <div
       className={[
         // shrink-0 + solid base so the strip is visually pinned above the scrolling rail body
-        // and content can't bleed through it. Flat treatment — no top shadow.
+        // and content can't bleed through it. Flat treatment â no top shadow.
         'shrink-0 flex items-center gap-1 border-t border-kumo-line bg-kumo-elevated px-3 py-2',
         collapsed ? 'flex-col justify-center gap-2 px-1.5' : '',
       ].join(' ')}
@@ -87,6 +88,7 @@ export default function SidebarUtilityStrip({ collapsed = false }: { collapsed?:
         <Plug size={15} />
       </StripLink>
       <div className={collapsed ? 'flex flex-col items-center gap-2' : 'ml-auto flex items-center gap-1'}>
+        <WalletSubmenu />
         <ThemeModeButton />
         <UserMenu />
       </div>
