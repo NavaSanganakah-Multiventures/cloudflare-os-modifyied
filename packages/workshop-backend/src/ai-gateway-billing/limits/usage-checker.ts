@@ -65,12 +65,13 @@ export async function checkUsageAndBalance(
     return unlimitedResult();
   }
 
+  const aiPreference = await userStub.getAiPreference();
   const limit = getDailyLlmCallLimit(env);
   const minimumBalance = getMinimumCloudflareBalance(env);
 
   // Resolve the connected-account status up front: it determines billing even within the free tier
   // (connected + funded users always bill their own gateway). `balance` is null when not connected
-  // or when the balance can't be read — treated as "not funded" so we fall back to the free tier
+  // or when the balance can't be read â treated as "not funded" so we fall back to the free tier
   // rather than attempting a BYOK call that would fail.
   let hasUserToken = false;
   let balance: number | null = null;
@@ -81,6 +82,23 @@ export async function checkUsageAndBalance(
   balance = conn.status.balance;
   if (conn.accessToken && conn.accountId) {
     byokRouting = { accountId: conn.accountId, apiKey: conn.accessToken };
+  }
+
+  if (aiPreference === "custom") {
+    // Custom AI (BYOK) bypasses the system wallet/limits logic.
+    // We assume the user has configured their API keys / BYOK correctly.
+    return {
+      allowed: true,
+      shouldUseByok: hasUserToken,
+      withinLimits: true,
+      remaining: Infinity,
+      limit: Infinity,
+      windowKind: "daily",
+      resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
+      balance,
+      hasUserToken,
+      byokRouting: hasUserToken ? byokRouting : undefined,
+    };
   }
 
   // Connected + funded -> bill their gateway; don't touch the daily free-tier counter.
@@ -99,7 +117,25 @@ export async function checkUsageAndBalance(
 
   // Otherwise draw on the platform free tier. consumeDailyLlmCall() only increments while within
   // the limit (it no-ops once `used >= limit`), so a blocked request never counts.
+  // NEW LOGIC: Also try to deduct from Wallet Balance (e.g. 1 unit per request).
+  const cost = 1; // 1 credit per request for now
+  const walletSuccess = await userStub.consumeWalletBalance(cost);
   const quota = await userStub.consumeDailyLlmCall(limit);
+
+  if (!walletSuccess) {
+    return {
+      allowed: false,
+      reason: "Insufficient Wallet Balance. Please recharge to use System AI, or select Custom AI.",
+      shouldUseByok: false,
+      withinLimits: false,
+      remaining: 0,
+      limit: quota.limit,
+      windowKind: "daily",
+      resetAt: quota.resetAt,
+      balance,
+      hasUserToken,
+    };
+  }
 
   const decision = canProceedWithRequest({
     withinLimits: quota.withinLimits,
@@ -140,7 +176,7 @@ export async function getUsageInfo(
   }
 
   const limit = getDailyLlmCallLimit(env);
-  // These two reads are independent — run them together to halve latency on this UI polling path.
+  // These two reads are independent â run them together to halve latency on this UI polling path.
   const [quota, status] = await Promise.all([
     userStub.checkDailyLlmCount(limit),
     getConnectionStatus(env, userStub),
