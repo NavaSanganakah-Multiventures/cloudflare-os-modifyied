@@ -112,10 +112,7 @@ export interface GitHubRepo {
    * write, and pull request creation) pass through the approval queue.
    *
    * INSTRUCTION FOR AI AGENT: After calling this method, you should call `dispatchWorkflow`
-   * on the newly created branch to run the CI tests. IMPORTANT: `dispatchWorkflow` only works
-   * if the workflow file already exists on the default branch (`main`). If you are adding a new workflow,
-   * you MUST propose it in its own isolated branch and PR, merge it into `main`, and ONLY THEN 
-   * propose your other code changes in a separate branch so they can be tested.
+   * on the newly created branch to run the CI tests.
    */
   proposeFileChange(options: GitHubProposeFileChangeOptions): Promise<GitHubProposedChangeResult>;
 
@@ -132,13 +129,6 @@ export interface GitHubRepo {
    * after you finish proposing or making code changes on a branch, so that the
    * new code is tested automatically. Use `listWorkflows` to discover a workflow's
    * filename or ID if you don't already know it.
-   * 
-   * CRITICAL: `dispatchWorkflow` will fail if the target workflow does not exist on the
-   * default branch (e.g. `main`). Even if a workflow appears "active" in `listWorkflows`,
-   * you MUST verify that its file actually exists on the default branch by calling `readFile(path, "main")`.
-   * If the file is missing (e.g. `readFile` throws an error) or you are adding a completely new workflow,
-   * you must first create a branch solely for adding that workflow, open a PR, and get it merged into `main`.
-   * Any other feature changes or bug fixes must be done in a separate branch.
    *
    * @param workflowId The ID or filename of the workflow.
    * @param ref The branch or tag name to run the workflow on.
@@ -151,13 +141,6 @@ export interface GitHubRepo {
    *
    * Use this to discover a workflow's filename (e.g. `"ci.yml"`) or numeric ID before
    * calling `dispatchWorkflow`. Reading the catalog is an observation.
-   * 
-   * INSTRUCTION FOR AI AGENT: This API may return workflows that were deleted in the past.
-   * Ignore workflows where `state === "deleted"`. For any workflow you intend to use,
-   * ALWAYS verify the file still exists on the default branch using `readFile(path, "main")`.
-   * IMPORTANT: Sometimes the API returns `state: "active"` even if the file is completely
-   * missing from `main` (because it ran in the past). NEVER trust the `state` alone.
-   * If `readFile` fails, treat it as a non-existent workflow that you must recreate from scratch.
    */
   listWorkflows(): Promise<{ total_count: number; workflows: GitHubWorkflow[] }>;
 
