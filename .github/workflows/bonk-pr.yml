@@ -37,3 +37,5 @@ jobs:
           token_permissions: NO_PUSH
           agent: bonk
           opencode_version: 1.15.13 # pin to this version as certain ones cause ProviderInitError issues
+
+# No-op refresh to re-trigger Bonk PR Review after transient setup timeout
