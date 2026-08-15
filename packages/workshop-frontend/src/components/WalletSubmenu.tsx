@@ -29,11 +29,13 @@ export default function WalletSubmenu() {
   }, [authenticatedApi])
 
   const handleSelect = async (pref: 'system' | 'custom') => {
+    const previous = aiPref
     setAiPref(pref)
     try {
       await authenticatedApi.setAiPreference(pref)
     } catch (e) {
       console.error("Failed to set AI preference", e)
+      setAiPref(previous)
     }
   }
 
@@ -58,7 +60,7 @@ export default function WalletSubmenu() {
         <div className="px-3 py-2 border-b border-kumo-line mb-1 flex items-center gap-2">
           <Wallet size={16} className="text-kumo-subtle" />
           <span className="text-sm text-kumo-subtle font-medium">
-            Balance: <span className="text-kumo-default">${balance?.toFixed(2) ?? '0.00'}</span>
+            Balance: <span className="text-kumo-default">{balance?.toFixed(2) ?? '0.00'} credits</span>
           </span>
         </div>
         <DropdownMenu.Item
