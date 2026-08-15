@@ -170,6 +170,18 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     return this.user.completeOnboarding();
   }
 
+  getWalletBalance(): Promise<number> {
+    return this.user.getWalletBalance();
+  }
+
+  getAiPreference(): Promise<"system" | "custom"> {
+    return this.user.getAiPreference();
+  }
+
+  setAiPreference(pref: "system" | "custom"): Promise<void> {
+    return this.user.setAiPreference(pref);
+  }
+
   getCloudflareUsage(): Promise<CloudflareUsageInfo> {
     return getUsageInfo(this.env, this.user);
   }
