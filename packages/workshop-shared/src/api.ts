@@ -1228,8 +1228,8 @@ export interface CodeSubscriber {
 // Specifies the state of an action in the action log:
 // * pending: Action has not been applied yet. It is waiting for approval.
 // * approved: Action was approved and applied.
-// * rejected: Action was rejected by the user.
-export type ActionState = "pending" | "approved" | "rejected";
+// * failed: Action execution failed (e.g., API error).
+export type ActionState = "pending" | "approved" | "rejected" | "failed";
 
 export type ActionLogEntry = {
   // Sequential ID number for the action. Counts up from when the workspace was created.
@@ -1246,6 +1246,9 @@ export type ActionLogEntry = {
   appliedAt?: Date;
 
   state: ActionState;
+
+  // Set if the action execution failed.
+  error?: string;
 } & ({
   type: "action";
   description: ActionDescription;
@@ -1438,6 +1441,10 @@ export interface Overseer extends RpcTarget {
   // Reject an action that is in the "pending" state. This notifies the gatekeeper that it will not
   // be approved in the future.
   rejectAction(id: number): Promise<void>;
+
+  // Fetch the real-time status and logs for a specific action (e.g., a dispatched GitHub Workflow).
+  // This is only supported for certain action types, and delegates to the Gatekeeper.
+  getWorkflowStatus(actionId: number): Promise<{ status: string, logs?: string } | null>;
 
   // List information about bound hooks (which could wake up a gadget asynchronously).
   //

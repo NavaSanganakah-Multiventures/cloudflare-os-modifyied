@@ -132,6 +132,15 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   whoami(): Promise<AiChatAuthorInfo> {
     return this.user.whoami();
   }
+  getWalletBalance(): Promise<number> {
+    return this.user.getWalletBalance();
+  }
+  getAiPreference(): Promise<"system" | "custom"> {
+    return this.user.getAiPreference() as Promise<"system" | "custom">;
+  }
+  setAiPreference(pref: "system" | "custom"): Promise<void> {
+    return this.user.setAiPreference(pref);
+  }
   setOwnDisplayName(name: string): Promise<void> {
     return this.user.setOwnDisplayName(name);
   }

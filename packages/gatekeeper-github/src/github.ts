@@ -3748,6 +3748,60 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     }
   }
 
+  async getActionStatus(actionId: number): Promise<{ status: string, logs?: string } | null> {
+    const record = this.#requireActionRecord(actionId);
+    if (!record || record.state !== "approved") return null;
+
+    const action = record.action;
+    if (action.type !== "dispatchWorkflow") return null;
+
+    try {
+      const runsResponse = await this.#withApi(api => api.listWorkflowRuns(action.owner, action.repo, action.workflowId, {
+        branch: action.ref,
+        event: "workflow_dispatch"
+      }));
+
+      if (runsResponse.total_count === 0 || !runsResponse.workflow_runs.length) {
+        return { status: "Queued (Waiting for GitHub...)" };
+      }
+
+      // Find the most recent run
+      const run = runsResponse.workflow_runs[0];
+      const status = run.status;
+      const conclusion = run.conclusion;
+
+      let displayStatus = "";
+      if (status === "completed") {
+        displayStatus = conclusion === "success" ? "Success" : (conclusion || "Completed");
+      } else {
+        displayStatus = status || "Running";
+      }
+
+      // Title case it
+      displayStatus = displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1);
+
+      let logs = "";
+      if (status === "completed" && conclusion !== "success") {
+        try {
+          const jobsResponse = await this.#withApi(api => api.listWorkflowJobs(action.owner, action.repo, run.id));
+          const failedJob = jobsResponse.jobs.find(j => j.conclusion === "failure");
+          if (failedJob) {
+            logs = await this.#withApi(api => api.getWorkflowJobLogs(action.owner, action.repo, failedJob.id));
+          }
+        } catch (e) {
+          logs = `Failed to fetch logs: ${e}`;
+        }
+      }
+
+      return {
+        status: displayStatus,
+        logs: logs || undefined
+      };
+    } catch (error: any) {
+      return { status: "Error checking status", logs: error.message };
+    }
+  }
+
   async #resolveReplyTarget(commentId: string): Promise<number> {
     const pendingReplies = new Map(
       this.#listPendingActions()
