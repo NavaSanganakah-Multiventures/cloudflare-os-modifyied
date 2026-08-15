@@ -147,6 +147,19 @@ export interface GitHubRepo {
   dispatchWorkflow(workflowId: string | number, ref: string, inputs?: Record<string, any>): Promise<void>;
 
   /**
+   * Disables a GitHub Actions workflow.
+   * 
+   * INSTRUCTION FOR AI AGENT: If you encounter a workflow in `listWorkflows` that you
+   * intend to run but it no longer exists on the default branch (a "zombie" workflow),
+   * use this method to disable it. This will send a manual approval request to the user,
+   * keeping the repository clean and preventing confusion. After disabling it, you can
+   * proceed to create a completely new workflow from scratch if needed.
+   * 
+   * @param workflowId The numeric ID or filename of the workflow.
+   */
+  disableWorkflow(workflowId: string | number): Promise<void>;
+
+  /**
    * Lists the GitHub Actions workflows defined in this repository.
    *
    * Use this to discover a workflow's filename (e.g. `"ci.yml"`) or numeric ID before

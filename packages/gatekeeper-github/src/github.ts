@@ -288,6 +288,11 @@ type DispatchWorkflowAction = BaseAction & {
   inputs?: Record<string, any>;
 };
 
+type DisableWorkflowAction = BaseAction & {
+  type: "disableWorkflow";
+  workflowId: string | number;
+};
+
 type GitHubAction =
   | CreateIssueAction
   | CreatePullRequestAction
@@ -303,7 +308,8 @@ type GitHubAction =
   | CreateBranchAction
   | WriteFileAction
   | DeleteFileAction
-  | DispatchWorkflowAction;
+  | DispatchWorkflowAction
+  | DisableWorkflowAction;
 
 type StoredActionRecord = {
   action: GitHubAction;
@@ -458,6 +464,12 @@ const DISPATCH_WORKFLOW_ACTION: ActionKind = {
   tag: "githubDispatchWorkflow",
   label: "Dispatch workflow",
   branchScoped: true,
+};
+
+const DISABLE_WORKFLOW_ACTION: ActionKind = {
+  tag: "githubDisableWorkflow",
+  label: "Disable workflow",
+  branchScoped: false,
 };
 
 const REPO_RESOURCE: SupportedResource = {
@@ -2189,6 +2201,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       case "writeFile":
       case "deleteFile":
       case "dispatchWorkflow":
+      case "disableWorkflow":
         // These actions affect the repo, not a specific issue/PR entity, so no pending action
         // depends on a provisional issue/PR resource.
         return false;
@@ -2259,7 +2272,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         return this.#entityIdMatches(action.pullId, logicalId);
       }
 
-      if (action.type === "createBranch" || action.type === "writeFile" || action.type === "deleteFile" || action.type === "dispatchWorkflow") {
+      if (action.type === "createBranch" || action.type === "writeFile" || action.type === "deleteFile" || action.type === "dispatchWorkflow" || action.type === "disableWorkflow") {
         // Repo-level actions are never attached to an issue/PR entity.
         return false;
       }
@@ -3745,6 +3758,17 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         this.#markActionApproved(action);
         return;
       }
+      case "disableWorkflow": {
+        await this.#withApi(api => api.disableWorkflow(
+          action.owner,
+          action.repo,
+          action.workflowId
+        ));
+        // No #clearCaches(): disabling a workflow does not mutate cached entities
+        // (issues/PRs/branches/files).
+        this.#markActionApproved(action);
+        return;
+      }
     }
   }
 
@@ -3871,6 +3895,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       case "createBranch":
       case "writeFile":
       case "deleteFile":
+      case "disableWorkflow":
         return {
           message: "This GitHub action cannot be automatically reverted.",
           canRetry: false,
@@ -4209,8 +4234,21 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     };
   }
 
-  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ repo,
-  // issue, or pull request ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ is scoped to one repository, and issues/PRs inherit the repo's
+  async prepareDisableWorkflow(
+    workflowId: string | number,
+  ): Promise<DisableWorkflowAction> {
+    return {
+      type: "disableWorkflow",
+      approvalId: this.#nextActionId(),
+      submittedAt: Date.now(),
+      owner: this.ctx.props.owner,
+      repo: this.ctx.props.repo,
+      workflowId,
+    };
+  }
+
+  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding — repo,
+  // issue, or pull request — is scoped to one repository, and issues/PRs inherit the repo's
   // permissions, so the repository is the atomic ACL unit. To admit an observer we simply confirm
   // they can read that repo, using their own token via the verifier (see GitHubVerifier).
   //
@@ -4422,7 +4460,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Write file ${options.path} in ${action.owner}/${action.repo}` +
         `${action.branch ? ` on branch ${action.branch}` : " on the default branch"}.` +
         (options.content !== undefined
-          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\nÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦" : ""}\n\`\`\``
+          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\n…" : ""}\n\`\`\``
           : " Content is provided as base64 (binary)."),
       implementsRevert: false,
       awaitDecision: true,
@@ -4532,6 +4570,19 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       actionKind: DISPATCH_WORKFLOW_ACTION,
       autoApprovable: true,
       branchRef: ref,
+    });
+  }
+
+  async disableWorkflow(workflowId: string | number): Promise<void> {
+    const action = await this.#gatekeeper.prepareDisableWorkflow(workflowId);
+    const description = `Disable GitHub Actions workflow ${workflowId}.`;
+    await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
+      title: `Disable workflow ${workflowId}`,
+      description,
+      implementsRevert: false,
+      awaitDecision: true,
+      actionKind: DISABLE_WORKFLOW_ACTION,
+      autoApprovable: false, // Disabling a workflow should require explicit manual approval
     });
   }
 
