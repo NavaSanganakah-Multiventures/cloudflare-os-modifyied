@@ -730,6 +730,10 @@ export interface Gatekeeper<Session> extends DurableObject {
   // `restart` has the same meaning as for `rejectAction()`.
   revertAction(action: number):
       Promise<void | {message?: string, canRetry?: boolean, restart?: boolean}>;
+
+  // Fetches real-time status and logs for a previously approved action.
+  // Useful for tracking asynchronous operations like GitHub Workflow runs.
+  getActionStatus?(action: number): Promise<{ status: string, logs?: string } | null>;
 }
 
 export interface ObservationAuthorizer extends RpcTarget {

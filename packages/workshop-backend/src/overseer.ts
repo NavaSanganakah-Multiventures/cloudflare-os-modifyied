@@ -439,6 +439,7 @@ export type ActionRecord = {
   description: ActionDescription;
   resolvedBy?: AiChatAuthorInfo;  // set when resolved (approved/rejected); absent while pending (or legacy)
   autoApproved?: boolean;         // set when applied by an auto-approval rule rather than a human
+  error?: string;                 // set when application fails
 } | {
   type: "observation";
   description: ObservationDescription;
@@ -2497,7 +2498,17 @@ class OverseerImpl implements AgentHooks {
   async applyPendingAction(record: ActionRecord & {type: "action"},
                            resolvedBy: AiChatAuthorInfo, autoApproved: boolean): Promise<void> {
     let gatekeeper = this.getGatekeeperFacet(record.gatekeeperId);
-    await gatekeeper.applyAction(record.action);
+    try {
+      await gatekeeper.applyAction(record.action);
+    } catch (e: any) {
+      record.state = "failed";
+      record.error = e.message || String(e);
+      record.appliedAt = new Date();
+      record.resolvedBy = resolvedBy;
+      this.storage.actions.put(record);
+      throw e;
+    }
+    
     record.state = "approved";
     record.appliedAt = new Date();
     record.resolvedBy = resolvedBy;
@@ -7791,6 +7802,21 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     // sibling approval from resuming this turn.
   }
 
+  async getWorkflowStatus(id: number): Promise<{ status: string, logs?: string } | null> {
+    let action = this.impl.storage.actions.get(id);
+    if (!action) {
+      throw new Error(`No such action: ${id}`);
+    }
+    if (action.type !== "action") return null;
+    let gatekeeper = this.impl.getGatekeeperFacet(action.gatekeeperId);
+    let fn = gatekeeper.getActionStatus as any;
+    if (fn) {
+      return await fn(action.action);
+    }
+    return null;
+    return null;
+  }
+
   // Enable auto-approval of actions carrying `actionKind` on the given gatekeeper. Stores the
   // opt-in rule (one of the two gates required to auto-apply -- the action's own `autoApprovable`
   // verdict is the other) with the kind's display label, and immediately drains any pending
@@ -8893,6 +8919,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
 // whether "use" callers may invoke it.
 @validateRpc()
 class UseOverseerInterface extends RpcTarget implements Overseer {
+  async getWorkflowStatus(_id: number): Promise<{ status: string, logs?: string } | null> { this.#deny(); }
   constructor(private impl: OverseerImpl,
               private owner: DurableObjectStub<UserDurableObject>,
               private clientUser: DurableObjectStub<UserDurableObject>,
