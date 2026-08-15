@@ -182,6 +182,14 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     return this.user.setAiPreference(pref);
   }
 
+  createRazorpayOrder(amountRupee: number): Promise<{ orderId: string; amount: number; currency: string; keyId: string }> {
+    return this.user.createRazorpayOrder(amountRupee);
+  }
+
+  verifyRazorpayPayment(orderId: string, paymentId: string, signature: string): Promise<void> {
+    return this.user.verifyRazorpayPaymentAndTopUp(orderId, paymentId, signature);
+  }
+
   getCloudflareUsage(): Promise<CloudflareUsageInfo> {
     return getUsageInfo(this.env, this.user);
   }
