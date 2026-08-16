@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Switch, useKumoToastManager } from '@cloudflare/kumo'
+import { Switch, useKumoToastManager, Dialog, Button, Loader } from '@cloudflare/kumo'
 import { CaretRight, Check, Eye, Lightning, ShieldCheck } from '@phosphor-icons/react'
 import { RpcStub } from 'capnweb'
 import { ActionLogEntry, Overseer } from '@gadgets/workshop-shared/api'
@@ -99,6 +99,9 @@ function activityStatus(
   if (record.state === 'rejected') {
     return { label: 'Denied', dotClass: 'bg-kumo-danger', textClass: 'text-kumo-danger' }
   }
+  if (record.state === 'failed') {
+    return { label: 'Failed', dotClass: 'bg-kumo-danger', textClass: 'text-kumo-danger' }
+  }
   return { label: 'Approved', dotClass: 'bg-kumo-success', textClass: 'text-kumo-subtle' }
 }
 
@@ -129,6 +132,27 @@ export default function Activity({
     actionLabel: string
   } | null>(null)
   const toasts = useKumoToastManager()
+
+  const [checkingStatus, setCheckingStatus] = useState<number | null>(null)
+  const [statusResult, setStatusResult] = useState<{status: string, logs?: string} | null>(null)
+
+  async function checkWorkflowStatus(actionId: number) {
+    setCheckingStatus(actionId)
+    setStatusResult(null)
+    try {
+      const result = await overseer.getWorkflowStatus(actionId)
+      if (result) {
+        setStatusResult(result)
+      } else {
+        toasts.add({ title: 'Status tracking not supported for this action', variant: 'info' })
+      }
+    } catch (e: any) {
+      toasts.add({ title: 'Failed to check status', variant: 'error' })
+      console.error(e)
+    } finally {
+      setCheckingStatus(null)
+    }
+  }
 
   const { pendingActions, historyGroups, historyTotal, historyShown } = useMemo(() => {
     const records = [...actionsById.values()]
@@ -311,17 +335,41 @@ export default function Activity({
                       key={record.id}
                       record={record}
                       expanded={expandedActionId === record.id}
-                      onToggle={() => toggleExpanded(record.id)}
+                      onToggle={() => setExpandedActionId(expandedActionId === record.id ? null : record.id)}
                       togglingHook={record.type === 'bindHook' && record.hookId !== undefined
                         ? togglingHooks.has(record.hookId)
                         : false}
                       onToggleHook={handleToggleHook}
+                      onCheckStatus={record.type === 'action' && record.description.actionKind?.tag === 'githubDispatchWorkflow' ? () => void checkWorkflowStatus(record.id) : undefined}
+                      isCheckingStatus={checkingStatus === record.id}
                     />
                   ))}
                 </section>
               ))}
             </div>
           )}
+
+          <Dialog.Root open={statusResult !== null} onOpenChange={(open) => { if (!open) setStatusResult(null) }}>
+            <Dialog className="p-6 sm:w-[600px] max-w-full" size="base">
+              <Dialog.Title className="text-lg font-semibold mb-2 text-kumo-default">
+                Workflow Status
+              </Dialog.Title>
+              <div className="mt-4">
+                <div className="text-sm text-kumo-default mb-4">
+                  <strong>Status:</strong> {statusResult?.status}
+                </div>
+                {statusResult?.logs && (
+                  <div className="text-xs text-kumo-subtle bg-kumo-elevated/50 p-3 rounded font-mono whitespace-pre-wrap max-h-[400px] overflow-y-auto">
+                    {statusResult.logs}
+                  </div>
+                )}
+              </div>
+              <div className="mt-6 flex justify-end">
+                <Button onClick={() => setStatusResult(null)}>Close</Button>
+              </div>
+            </Dialog>
+          </Dialog.Root>
+
         </>
       ) : (
         <AutoApprovalPanel overseer={overseer} reloadTrigger={autoApproveReloadTrigger} />
@@ -648,12 +696,16 @@ function HistoryRow({
   onToggle,
   togglingHook,
   onToggleHook,
+  onCheckStatus,
+  isCheckingStatus,
 }: {
   record: ActionLogEntry
   expanded: boolean
   onToggle: () => void
   togglingHook: boolean
   onToggleHook: (hookId: number, enabled: boolean) => void
+  onCheckStatus?: () => void
+  isCheckingStatus?: boolean
 }) {
   const resourceUrl = safeExternalUrl(record.resourceUrl)
   const resolvedBy = record.type === 'action' ? record.resolvedBy : undefined
@@ -698,6 +750,11 @@ function HistoryRow({
               {record.description.description}
             </p>
           )}
+          {record.type === 'action' && record.state === 'failed' && record.error && (
+            <div className="mt-2 text-xs text-kumo-danger bg-kumo-danger-subtle p-2 rounded whitespace-pre-wrap">
+              {record.error}
+            </div>
+          )}
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11.5px] text-kumo-inactive">
             <span>{formatFullDate(at)}</span>
             <span className="text-kumo-subtle">{record.resourceTitle}</span>
@@ -722,6 +779,18 @@ function HistoryRow({
                 disabled={togglingHook}
                 onToggle={enabled => onToggleHook(record.hookId!, enabled)}
               />
+            )}
+            {onCheckStatus && record.state === 'approved' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto"
+                onClick={onCheckStatus}
+                disabled={isCheckingStatus}
+              >
+                {isCheckingStatus ? <Loader size={12} className="mr-1 inline" /> : null}
+                Check Status & Logs
+              </Button>
             )}
           </div>
         </div>
