@@ -1228,6 +1228,7 @@ export interface CodeSubscriber {
 // Specifies the state of an action in the action log:
 // * pending: Action has not been applied yet. It is waiting for approval.
 // * approved: Action was approved and applied.
+// * rejected: Action was rejected by the user.
 // * failed: Action execution failed (e.g., API error).
 export type ActionState = "pending" | "approved" | "rejected" | "failed";
 

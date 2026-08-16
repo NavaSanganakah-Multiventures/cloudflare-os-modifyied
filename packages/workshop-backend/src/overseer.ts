@@ -7808,13 +7808,14 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       throw new Error(`No such action: ${id}`);
     }
     if (action.type !== "action") return null;
-    let gatekeeper = this.impl.getGatekeeperFacet(action.gatekeeperId);
-    let fn = gatekeeper.getActionStatus as any;
-    if (fn) {
-      return await fn(action.action);
+    let gatekeeper = this.impl.getGatekeeperFacet(action.gatekeeperId) as
+        Fetcher<Required<Gatekeeper<any>>>;
+    try {
+      return await gatekeeper.getActionStatus(action.action);
+    } catch {
+      // Gatekeeper does not implement getActionStatus — not supported for this action type.
+      return null;
     }
-    return null;
-    return null;
   }
 
   // Enable auto-approval of actions carrying `actionKind` on the given gatekeeper. Stores the

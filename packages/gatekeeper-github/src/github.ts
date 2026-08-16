@@ -4263,8 +4263,8 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     };
   }
 
-  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ repo,
-  // issue, or pull request ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ is scoped to one repository, and issues/PRs inherit the repo's
+  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding — repo,
+  // issue, or pull request — is scoped to one repository, and issues/PRs inherit the repo's
   // permissions, so the repository is the atomic ACL unit. To admit an observer we simply confirm
   // they can read that repo, using their own token via the verifier (see GitHubVerifier).
   //
@@ -4476,7 +4476,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Write file ${options.path} in ${action.owner}/${action.repo}` +
         `${action.branch ? ` on branch ${action.branch}` : " on the default branch"}.` +
         (options.content !== undefined
-          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\nÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦" : ""}\n\`\`\``
+          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\n…" : ""}\n\`\`\``
           : " Content is provided as base64 (binary)."),
       implementsRevert: false,
       awaitDecision: true,
