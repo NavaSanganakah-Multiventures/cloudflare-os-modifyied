@@ -241,3 +241,62 @@ export class DeveloperApiGateway extends DurableObject<Env> {
       return json({ error: "Failed to create pull request", message: e instanceof Error ? e.message : String(e) }, 502, origin);
     }
   }
+  private async handleAnalyze(request: Request, origin?: string): Promise<Response> {
+    const apiKey = request.headers.get("X-API-Key") ?? request.headers.get("Authorization")?.replace("Bearer ", "");
+    if (!(await this.validateKey(apiKey))) return json({ error: "Invalid or missing API key" }, 401, origin);
+    const body = await this.bodyJson(request);
+    const query = String(body.query ?? "");
+    if (!query) return json({ error: "Missing required field: query" }, 400, origin);
+    const cls = this.classify(query);
+    const lines: string[] = [];
+    if (cls === "bug") lines.push("Yeh input ek bug report jaisa dikh raha hai.", "Typical wajah ho sakti hai: galat file path, missing dependency, ya koi JavaScript error.");
+    else if (cls === "feature") lines.push("Yeh ek feature request ya improvement suggestion lag raha hai.");
+    else if (cls === "question") lines.push("Yeh ek question/support request hai.");
+    else lines.push("Yeh ek general feedback ya support message hai.");
+    return json({ success: true, classification: cls, possible_problems: lines, next_step: "/api/v1/query par issue banayein" }, 200, origin);
+  }
+
+  private async handleAutoFix(request: Request, origin?: string): Promise<Response> {
+    const apiKey = request.headers.get("X-API-Key") ?? request.headers.get("Authorization")?.replace("Bearer ", "");
+    if (!(await this.validateKey(apiKey))) return json({ error: "Invalid or missing API key" }, 401, origin);
+    const body = await this.bodyJson(request);
+    const query = String(body.query ?? body.message ?? body.text ?? "");
+    if (!query) return json({ error: "Missing required field: query" }, 400, origin);
+    const repo = this.getRepo(body);
+    const websiteUrl = String(body.websiteUrl ?? body.website_url ?? "");
+    const userEmail = String(body.userEmail ?? body.user_email ?? "");
+    const context = String(body.context ?? "");
+    const callbackUrl = String(body.callbackUrl ?? body.callback_url ?? "");
+    const filePaths = Array.isArray(body.file_paths) ? body.file_paths.map(String) : [];
+    const classification = this.classify(query);
+    const instructions = this.getSystemInstructions();
+    const title = `[AUTO-FIX ${classification.toUpperCase()}] ${query.slice(0, 80)}${query.length > 80 ? "..." : ""}`;
+    const issueBody = this.issueBody(query, websiteUrl, userEmail, context, classification, instructions);
+    const github = this.github();
+    let issueNumber: number;
+    let issueUrl: string;
+    try {
+      const issue = await github.createIssue(repo, title, issueBody, ["api-query", classification, "auto-fix"]);
+      issueNumber = issue.number;
+      issueUrl = issue.url;
+    } catch (e) {
+      return json({ error: "Failed to create GitHub issue", message: e instanceof Error ? e.message : String(e) }, 502, origin);
+    }
+
+    let workflowDispatched = false;
+    try {
+      const exists = await github.workflowExists(repo, `.github/workflows/${AUTO_FIX_WORKFLOW}`, "main");
+      if (exists) {
+        const safeBranch = `auto-fix/issue-${issueNumber}`.replace(/[^a-zA-Z0-9/-]/g, "-").replace(/--+/g, "-").slice(0, 128);
+        await github.dispatchWorkflow(repo, AUTO_FIX_WORKFLOW, "main", { issue_url: issueUrl, query, website_url: websiteUrl, context, file_paths: filePaths.join(","), branch_name: safeBranch });
+        workflowDispatched = true;
+      }
+    } catch (e) {
+      console.error("Auto-fix workflow dispatch failed:", e);
+    }
+
+    const reply = workflowDispatched ? "Aapki auto-fix request submit ho gayi hai. AI workflow trigger ho gaya hai." : "Aapki query ke liye GitHub issue ban gayi hai.";
+    const cb = await this.sendCallback(callbackUrl, { event: "auto_fix_received", query, classification, issue_url: issueUrl, issue_number: issueNumber, workflow_dispatched: workflowDispatched, reply, website_url: websiteUrl, user_email: userEmail });
+    this.log({ type: "auto-fix", query, websiteUrl, userEmail, context, classification, filePaths, workflowDispatched, callbackUrl }, String(issueNumber), issueUrl, null, reply, callbackUrl, cb.status);
+    return json({ success: true, classification, issue_url: issueUrl, issue_number: issueNumber, workflow_dispatched: workflowDispatched, reply, callback_dispatched: cb.success, callback_status: cb.status }, 200, origin);
+  }
