@@ -4804,6 +4804,21 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     });
     return this.#gatekeeper.resolveBuildStrategy();
   }
+
+  async executeBuild(branch: string, commands: BuildCommand[]): Promise<BuildResult> {
+    const action = await this.#gatekeeper.prepareExecuteBuild(branch, commands);
+    const commandList = commands.map(c => c.label ? `${c.label}: ${c.command}` : c.command).join("\n");
+    await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
+      title: `Execute build in Cloudflare Containers`,
+      description: `Run commands on branch ${branch}:\n${commandList}`,
+      implementsRevert: false,
+      awaitDecision: true,
+      actionKind: EXECUTE_BUILD_ACTION,
+      autoApprovable: true,
+      branchRef: branch,
+    });
+    return await this.#gatekeeper.waitForBuildResult(action.approvalId);
+  }
 }
 
 @validateRpc()
