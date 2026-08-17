@@ -584,7 +584,7 @@ export interface AuthenticatedApi extends RpcTarget {
 
   // Returns a capability for managing deployment-wide admin settings, or null when the caller is not
   // an admin. The access check happens once here, so the returned stub's methods need no per-call
-  // checks. (Authentication config ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ sign-in providers, password login ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ is intentionally not
+  // checks. (Authentication config ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ sign-in providers, password login ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ is intentionally not
   // managed here; it stays env-var driven.)
   getAdminApi(): Promise<RpcStub<AdminApi> | null>;
 
@@ -605,7 +605,7 @@ export type GatekeeperAppInfo = {
 };
 
 // ---------------------------------------------------------------------------
-// Context Library ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ pluggable separate worker (packages/gatekeeper-context)
+// Context Library ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ pluggable separate worker (packages/gatekeeper-context)
 // ---------------------------------------------------------------------------
 //
 // The Context Library lives in its own Worker, bound as the auto-provisioned gatekeeper
@@ -654,7 +654,7 @@ export type AdminResource = {
   enabled: boolean;
 };
 
-// Provisioning mode for an auto-provisioning ("ambient") gatekeeper ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ one that mints a connected
+// Provisioning mode for an auto-provisioning ("ambient") gatekeeper ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ one that mints a connected
 // account with no OAuth flow (VendorDescription.autoProvisionsAccount), e.g. the Context Library:
 //   - 'disabled': not available; no account is provisioned and any existing one is dormant.
 //   - 'optional': users opt in from the Connectors page; not forced on anyone (the default).
@@ -698,7 +698,7 @@ export const MAX_SITE_NAME_LENGTH = 40;
 
 // What this deployment calls itself when the admin has not set a custom `siteName`. Also the
 // product's own name, so it appears in prose the server and UI address to the user.
-export const DEFAULT_SITE_NAME = "Cloudflare OS";
+export const DEFAULT_SITE_NAME = "Aarya Smart";
 
 // The name to display for this deployment. Accepts an unset or not-yet-loaded `siteName` so both
 // the server (reading admin config) and the client (reading ServerConfig) resolve it identically.
@@ -718,7 +718,7 @@ export type AdminSettingsView = {
   signupsEnabled: boolean;
   // Site name shown next to the top-bar logo ("" falls back to DEFAULT_SITE_NAME).
   siteName: string;
-  /** Custom deployment logo, or undefined to use the default Cloudflare OS mark. */
+  /** Custom deployment logo, or undefined to use the default Aarya Smart mark. */
   siteLogo?: AvatarImage;
   // Agent system-prompt instructions ("" when unset).
   instanceInstructions: string;
@@ -772,7 +772,7 @@ export type AdminFormat = {
 // Capability for managing deployment-wide admin settings, obtained via
 // AuthenticatedApi.getAdminApi() (which is null for non-admins). The access check happens when the
 // capability is minted, so these methods don't re-check. Covers branding, agent instructions, and
-// which gatekeeper connectors/resources are offered ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ NOT authentication config (that's env-var
+// which gatekeeper connectors/resources are offered ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ NOT authentication config (that's env-var
 // driven). Each setter throws on invalid input.
 export interface AdminApi {
   // Read all admin-managed settings for the admin UI in one call.
@@ -786,7 +786,7 @@ export interface AdminApi {
   setSiteName(name: string): Promise<void>;
 
   /** Set the deployment logo from browser-rasterized PNG bytes and return its canonical public
-   * image, or undefined after reset. Pass null to restore the default Cloudflare OS mark. The
+   * image, or undefined after reset. Pass null to restore the default Aarya Smart mark. The
    * caller must supply decodable PNG data; the server enforces its header, size, and dimensions. */
   setSiteLogo(data: Uint8Array | null): Promise<AvatarImage | undefined>;
 
@@ -896,7 +896,7 @@ export type ServerConfig = {
   // DEFAULT_SITE_NAME.
   siteName: string;
 
-  /** Custom deployment logo, or undefined to use the default Cloudflare OS mark. */
+  /** Custom deployment logo, or undefined to use the default Aarya Smart mark. */
   siteLogo?: AvatarImage;
 
   // Deployment-wide top-bar notice (centered text in the top navigation bar). Empty when none is set.
@@ -1986,7 +1986,7 @@ export type AiChatMessageBody = {
   // vendor's SupportedResource.urlPattern values, e.g. "https://github.com/:owner/:repo" or the
   // whole-instance "https://*"). The backend guarantees every connection request resolves to a
   // concrete resource (see resolveRequestedResource), and the accept modal pre-selects exactly this
-  // resource ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ so accepting never opens a blank "create new connection" picker.
+  // resource ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ so accepting never opens a blank "create new connection" picker.
   resourceUrlPattern?: string;
 
   // Why the agent wants this connection. Shown to the user to inform their decision.
@@ -2698,8 +2698,8 @@ export type BlueprintGadgetSummary = {
   dirty?: boolean;        // true if last publish failed and needs retry
 };
 
-// Where a blueprint the user owns came from. This distinguishes the case the UI cares about ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ the
-// source workspace still exists, so it can be opened and it owns deletion of the blueprint ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ from
+// Where a blueprint the user owns came from. This distinguishes the case the UI cares about ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ the
+// source workspace still exists, so it can be opened and it owns deletion of the blueprint ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ from
 // the two cases where it does not, so no caller has to infer that from display text. `workspaceId`
 // is reachable only in the case where opening it is meaningful.
 export type BlueprintSource =

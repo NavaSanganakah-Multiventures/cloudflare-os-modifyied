@@ -1,25 +1,25 @@
-# Cloudflare OS: An AI productivity environment
+# Aarya Smart: An AI productivity environment
 
-Cloudflare OS is an "operating system" for AI productivity originally developed for use inside Cloudflare. A large portion of Cloudflare's workforce -- from engineering to sales and everything in between -- uses Cloudflare OS every day to help them do their jobs.
+Aarya Smart is an "operating system" for AI productivity originally developed for use inside Cloudflare. A large portion of Cloudflare's workforce -- from engineering to sales and everything in between -- uses Aarya Smart every day to help them do their jobs.
 
-![A Q3 planning workspace in Cloudflare OS, with an AI-generated slide deck](docs/images/q3-planning-workspace.png)
+![A Q3 planning workspace in Aarya Smart, with an AI-generated slide deck](docs/images/q3-planning-workspace.png)
 
 This is not a traditional computer operating system. We use the term "operating system" in two senses:
 
 * An operating system for *the company* to be productive with AI, in a way that is safe, so that the security team can sleep at night.
 * An operating system for AI workloads, analogous to the sense in which a traditional operating system manages compute workloads.
 
-Cloudflare OS provides three things in particular:
+Aarya Smart provides three things in particular:
 
 1. An agent chat UI where you can ask agents to do tasks, preloaded with knowledge about how your company operates.
 2. Sandboxed application development, so that you can ask agents to build "gadgets" (small personal apps) and safely share what you've built with others.
 3. A security framework, called Gatekeepers, that applies guardrails to both agents and apps such that non-technical users can safely "go nuts" and nothing bad will happen.
 
-We are making Cloudflare OS open source so that others can copy it and customize it for their own company. The idea is not that your company uses Cloudflare OS, but rather that you make it "*Your Company* OS".
+We are making Aarya Smart open source so that others can copy it and customize it for their own company. The idea is not that your company uses Aarya Smart, but rather that you make it "*Your Company* OS".
 
 ## Quick Start
 
-To quickly run Cloudflare OS locally, [install pnpm](https://pnpm.io/), then do:
+To quickly run Aarya Smart locally, [install pnpm](https://pnpm.io/), then do:
 
     pnpm run-local
 
@@ -43,20 +43,20 @@ Try prompts like:
 
 ### WARNING: Early access
 
-Cloudflare OS is in a state of heavy development. This repository is actually version 2, a complete rewrite taking what we learned from version 1 and putting it on a new foundation.
+Aarya Smart is in a state of heavy development. This repository is actually version 2, a complete rewrite taking what we learned from version 1 and putting it on a new foundation.
 
-As of the August 2026 release, Cloudflare OS v2 is very capable, but still has many rough edges. We know, and we're working on it. For now, consider this an "early access" release.
+As of the August 2026 release, Aarya Smart v2 is very capable, but still has many rough edges. We know, and we're working on it. For now, consider this an "early access" release.
 
-## Overview: What is Cloudflare OS really?
+## Overview: What is Aarya Smart really?
 
 ### Gadgets: A new way of thinking about software
 
-Cloudflare OS is more than just another chatbox with connectors. The system revolves around a new approach to software, where every user runs their own copy of the productivity apps they use.
+Aarya Smart is more than just another chatbox with connectors. The system revolves around a new approach to software, where every user runs their own copy of the productivity apps they use.
 
-When you create a slide deck in Cloudflare OS, you are not calling out to some SaaS software running in the cloud. The system creates a *private instance* of the slide deck software *just for you*. We call this a "gadget". This instance runs in a separate sandbox from everyone else's slide decks.
+When you create a slide deck in Aarya Smart, you are not calling out to some SaaS software running in the cloud. The system creates a *private instance* of the slide deck software *just for you*. We call this a "gadget". This instance runs in a separate sandbox from everyone else's slide decks.
 
 This has two profound effects:
-1. It's impossible for the slide deck app to have a security bug that leaks your slides to an attacker. The Cloudflare OS sandbox controls all access to your private instance of the app.
+1. It's impossible for the slide deck app to have a security bug that leaks your slides to an attacker. The Aarya Smart sandbox controls all access to your private instance of the app.
 2. If you want, you can freely modify the code. If the slide deck app is missing a feature you need, you can just ask your agent to add it. And because of point 1, it's totally safe to do so.
 
 This is a big departure from the last 25 years of cloud architecture and "Software as a Service", but we think AI has changed the equation. When any user is capable of prompting an agent to add the features they need, the centralized model of software stops making sense.
@@ -80,7 +80,7 @@ Logistically, each Gatekeeper is implemented as a separate Worker. In the future
 
 ### Think of an office suite
 
-The basic user experience of Cloudflare OS is something like an online office suite, like Google Docs or MS Office. But, imagine that instead of a fixed set of file types (document, spreadsheet, slide deck), each file -- or "Gadget" -- is potentially its own custom application, written by AI to serve exactly your needs.
+The basic user experience of Aarya Smart is something like an online office suite, like Google Docs or MS Office. But, imagine that instead of a fixed set of file types (document, spreadsheet, slide deck), each file -- or "Gadget" -- is potentially its own custom application, written by AI to serve exactly your needs.
 
 Just like office docs, each gadget is private by default, but can be shared -- securely -- in order to collaborate with your team or your friends.
 
@@ -92,9 +92,9 @@ Like office docs, you can create new templates (blueprints) from your own docs (
 
 ### It kind of is an Operating System
 
-The OS terminology isn't *entirely* marketing. Cloudflare OS is actually analogous to an operating system on a technical level.
+The OS terminology isn't *entirely* marketing. Aarya Smart is actually analogous to an operating system on a technical level.
 
-| Normal OS      | Cloudflare OS              |
+| Normal OS      | Aarya Smart              |
 |----------------|----------------------------|
 | kernel         | packages/workshop-backend  |
 | device drivers | packages/gatekeeper-*      |
@@ -109,33 +109,33 @@ Our "kernel" is in the workshop-backend package. The backend legitimately does a
 
 In this analogy, Gatekeepers -- which connect users and agents to external services -- are like drivers -- which connect users and programs to external devices.
 
-There is one thing that traditional OSes don't really manage today, but Cloudflare OS does: AI agents. If you think about it, this is really a missing feature in traditional OSes. We believe that AI agents cannot simply be treated as users. They must be accountable to a human user, while at the same time having their own restricted permissions. Agents do work by writing snippets of code and executing them on the fly. The ideal security model for all of this is capability-based security, not access control lists. See what I mean? Perhaps traditional OSes ought to give AI agents special treatment, too.
+There is one thing that traditional OSes don't really manage today, but Aarya Smart does: AI agents. If you think about it, this is really a missing feature in traditional OSes. We believe that AI agents cannot simply be treated as users. They must be accountable to a human user, while at the same time having their own restricted permissions. Agents do work by writing snippets of code and executing them on the fly. The ideal security model for all of this is capability-based security, not access control lists. See what I mean? Perhaps traditional OSes ought to give AI agents special treatment, too.
 
 ### Built on Workers, by the Workers team
 
-Cloudflare OS is built on [Cloudflare Workers](https://workers.cloudflare.com), making heavy use of [Durable Objects](https://developers.cloudflare.com/durable-objects/), [Dynamic Workers](https://blog.cloudflare.com/dynamic-workers/), and [Facets](https://blog.cloudflare.com/durable-object-facets-dynamic-workers/) in particular. Every workspace is its own Durable Object, every Gadget runs in a Dynamic Worker Facet, and Gatekeepers also install facets into each workspace to manage access to remote services.
+Aarya Smart is built on [Cloudflare Workers](https://workers.cloudflare.com), making heavy use of [Durable Objects](https://developers.cloudflare.com/durable-objects/), [Dynamic Workers](https://blog.cloudflare.com/dynamic-workers/), and [Facets](https://blog.cloudflare.com/durable-object-facets-dynamic-workers/) in particular. Every workspace is its own Durable Object, every Gadget runs in a Dynamic Worker Facet, and Gatekeepers also install facets into each workspace to manage access to remote services.
 
-Cloudflare OS is, in fact, built by the very people who built Workers itself. It uses cutting-edge features of the Workers Runtime -- in fact, Dynamic Workers, Facets, and several other features were added to the runtime specifically to support Cloudflare OS, with more to come. Studying the Cloudflare OS source code is a great way to understand how the Workers Runtime team thinks Workers should be used.
+Aarya Smart is, in fact, built by the very people who built Workers itself. It uses cutting-edge features of the Workers Runtime -- in fact, Dynamic Workers, Facets, and several other features were added to the runtime specifically to support Aarya Smart, with more to come. Studying the Aarya Smart source code is a great way to understand how the Workers Runtime team thinks Workers should be used.
 
-Being built on Workers does not mean that Cloudflare OS can only run on Cloudflare. In fact, [`workerd`, the Cloudflare Workers Runtime, is itself open source](https://github.com/cloudflare/workerd), and Cloudflare OS can run entirely on top of it on your own servers.
+Being built on Workers does not mean that Aarya Smart can only run on Cloudflare. In fact, [`workerd`, the Cloudflare Workers Runtime, is itself open source](https://github.com/cloudflare/workerd), and Aarya Smart can run entirely on top of it on your own servers.
 
 ## Features
 
 ### General multi-purpose agent
 
-The Cloudflare OS coding agent is actually a fully multi-purpose agent that can perform arbitrary tasks; like other popular coding agents, you don't have to code with it. You can use it to build Gadgets, but you can also skip the Gadget and just have the agent perform tasks directly. The Cloudflare OS agent is a [Code Mode](https://blog.cloudflare.com/code-mode/) agent -- it performs tasks by writing and immediately executing snippets of code. It can be connected to external resources using Gatekeepers (like MCP -- see below).
+The Aarya Smart coding agent is actually a fully multi-purpose agent that can perform arbitrary tasks; like other popular coding agents, you don't have to code with it. You can use it to build Gadgets, but you can also skip the Gadget and just have the agent perform tasks directly. The Aarya Smart agent is a [Code Mode](https://blog.cloudflare.com/code-mode/) agent -- it performs tasks by writing and immediately executing snippets of code. It can be connected to external resources using Gatekeepers (like MCP -- see below).
 
 ### Build apps with AI
 
-While you can code a Gadget by hand if you want, the expectation is that AI writes the code for you. Cloudflare OS features a built-in coding agent that will build whatever you ask it, test it for you, and debug errors.
+While you can code a Gadget by hand if you want, the expectation is that AI writes the code for you. Aarya Smart features a built-in coding agent that will build whatever you ask it, test it for you, and debug errors.
 
-You can choose your LLM. Cloudflare OS works with many major AI model providers and self-hosted models, with more providers being added all the time.
+You can choose your LLM. Aarya Smart works with many major AI model providers and self-hosted models, with more providers being added all the time.
 
-Because of the tightly-integrated and simplified nature of the platform, even when using the same underlying AI models, the Cloudflare OS coding agent often performs better and faster with fewer tokens than a general-purpose coding agent would.
+Because of the tightly-integrated and simplified nature of the platform, even when using the same underlying AI models, the Aarya Smart coding agent often performs better and faster with fewer tokens than a general-purpose coding agent would.
 
 ### Collaborate with AI
 
-Every app built with Cloudflare OS automatically has an agent-friendly API. That means, after you've asked AI to build the app, you can also ask AI to collaborate with you *inside* the app. No need to build an MCP server nor integrate a custom agent loop. It's just there by default.
+Every app built with Aarya Smart automatically has an agent-friendly API. That means, after you've asked AI to build the app, you can also ask AI to collaborate with you *inside* the app. No need to build an MCP server nor integrate a custom agent loop. It's just there by default.
 
 This works because the client and server portions of a Gadget are required to communicate via [Cap'n Web RPC](https://github.com/cloudflare/capnweb). This is a win-win:
 1. Cap'n Web is extremely low-boilerplate, which makes it easy for agents to work with. You basically just define a method on your server, then call it from your client, as if it were a local call.
@@ -183,13 +183,13 @@ https://github.com/cloudflare/cloudflare-os-starter
 
 ### Run locally
 
-To quickly run Cloudflare OS locally, [install pnpm](https://pnpm.io/), then do:
+To quickly run Aarya Smart locally, [install pnpm](https://pnpm.io/), then do:
 
     pnpm run-local
 
 Then visit: http://localhost:8787
 
-This runs Cloudflare OS using `wrangler`, the Workers developer tooling CLI. This is not the right way to run the OS on a production server, but it works fine for trying it out on your local machine.
+This runs Aarya Smart using `wrangler`, the Workers developer tooling CLI. This is not the right way to run the OS on a production server, but it works fine for trying it out on your local machine.
 
 Your data will be stored in a subdirectory named `.wrangler`.
 
@@ -197,7 +197,7 @@ Your data will be stored in a subdirectory named `.wrangler`.
 
 **COMING SOON**
 
-Cloudflare OS can run entirely on `workerd`, Cloudflare's open source runtime for Workers. In fact, the "run locally" instructions above use `workerd` under the hood. We are still working on documentation and tooling to help you smoothly deploy the OS on top of `workerd` on your own servers. If you are feeling adventurous, [read the low-level documentation for workerd config](https://github.com/cloudflare/workerd/blob/main/src/workerd/server/workerd.capnp) (or point your agent at it) and have a go.
+Aarya Smart can run entirely on `workerd`, Cloudflare's open source runtime for Workers. In fact, the "run locally" instructions above use `workerd` under the hood. We are still working on documentation and tooling to help you smoothly deploy the OS on top of `workerd` on your own servers. If you are feeling adventurous, [read the low-level documentation for workerd config](https://github.com/cloudflare/workerd/blob/main/src/workerd/server/workerd.capnp) (or point your agent at it) and have a go.
 
 #### Configuring external services
 
@@ -240,7 +240,7 @@ This policy may change in the future as the project matures. Until then, thank y
 
 ## Credits
 
-Cloudflare OS has far too many open source dependencies to list here. But, we'd like to highlight a few that do particularly heavy lifting:
+Aarya Smart has far too many open source dependencies to list here. But, we'd like to highlight a few that do particularly heavy lifting:
 
 * [Pi](https://pi.dev/) (specifically, `pi-agent-core`), which made it easy to support every LLM provider with one API.
 * [Monaco](https://microsoft.github.io/monaco-editor/) which makes it too easy to embed a beautiful text editor -- for those of us who still look at the code.
