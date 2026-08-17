@@ -36,7 +36,9 @@ import {
 import { assertIssueSearchResultsInRepo, buildIssueSearchQuery } from "./github-search";
 import GITHUB_LOGO_SVG from "./github-logo.svg";
 import type {
+  BuildCommand,
   BuildExecutorStrategy,
+  BuildResult,
   GitHubActor,
   GitHubBranch,
   GitHubCommit,
@@ -99,10 +101,15 @@ const logger = obsContext.createLogger({
   component: "gatekeeper.github", vendorId: VENDOR_ID,
 });
 
+interface BuildRunner {
+  runBuild(request: { repoUrl: string; branch: string; commands: string[] }): Promise<BuildResult>;
+}
+
 type Env = Cloudflare.Env & {
   BASE_URL?: string;
   CLIENT_ID?: string;
   CLIENT_SECRET?: string;
+  BUILD_RUNNER?: Fetcher<BuildRunner>;
 };
 
 type StoredNonce = {
@@ -294,6 +301,12 @@ type DisableWorkflowAction = BaseAction & {
   workflowId: string | number;
 };
 
+type ExecuteBuildAction = BaseAction & {
+  type: "executeBuild";
+  branch: string;
+  commands: BuildCommand[];
+};
+
 type GitHubAction =
   | CreateIssueAction
   | CreatePullRequestAction
@@ -310,7 +323,8 @@ type GitHubAction =
   | WriteFileAction
   | DeleteFileAction
   | DispatchWorkflowAction
-  | DisableWorkflowAction;
+  | DisableWorkflowAction
+  | ExecuteBuildAction;
 
 type StoredActionRecord = {
   action: GitHubAction;
@@ -3820,6 +3834,12 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         ));
         // No #clearCaches(): disabling a workflow does not mutate cached entities
         // (issues/PRs/branches/files).
+        this.#markActionApproved(action);
+        return;
+      }
+      case "executeBuild": {
+        const result = await this.#executeBuildInContainer(action.branch, action.commands);
+        record.buildResult = result;
         this.#markActionApproved(action);
         return;
       }
