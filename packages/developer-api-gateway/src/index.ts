@@ -213,3 +213,266 @@ export class DeveloperApiGateway extends DurableObject {
 
     return jsonResponse({ success: true, classification, issue_url: issue.url, issue_number: issue.number, reply }, 200, this.corsOrigin);
   }
+  private async handleFix(request: Request): Promise<Response> {
+    const keyCheck = await this.requireApiKey(request);
+    if (keyCheck instanceof Response) return keyCheck;
+
+    const body = await this.bodyJson(request);
+    const filePath: string = body.file_path;
+    const newContent: string = body.new_content;
+    if (!filePath || typeof filePath !== "string") {
+      return jsonResponse({ error: "Missing required field: file_path" }, 400, this.corsOrigin);
+    }
+    if (!newContent || typeof newContent !== "string") {
+      return jsonResponse({ error: "Missing required field: new_content" }, 400, this.corsOrigin);
+    }
+
+    let sha: string | undefined;
+    try {
+      const existing = await this.github.getFile(filePath, "main");
+      sha = existing.sha;
+    } catch {
+      // file does not exist; it will be created
+    }
+
+    const branchName: string = body.branch_name ?? `api-fix/${filePath.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 40)}-${Date.now()}`;
+    const message: string = body.message ?? `Fix via developer API: ${filePath}`;
+
+    let commitSha: string;
+    try {
+      const mainRef = await this.github.getRef("heads/main");
+      await this.github.createBranch(branchName, mainRef.sha);
+      const result = await this.github.writeFile(filePath, message, newContent, branchName, sha);
+      commitSha = result.commitSha;
+    } catch (e: any) {
+      return jsonResponse({ error: "Failed to prepare fix branch", message: e.message }, 502, this.corsOrigin);
+    }
+
+    let pr: { number: number; url: string };
+    try {
+      pr = await this.github.createPullRequest(
+        message,
+        branchName,
+        "main",
+        body.issue_url ? `Fix proposed for issue referenced in ${body.issue_url}` : "Fix proposed via developer API.",
+      );
+    } catch (e: any) {
+      return jsonResponse({ error: "Failed to create pull request", message: e.message }, 502, this.corsOrigin);
+    }
+
+    this.logQuery(
+      { type: "fix", filePath, branchName, message, issueUrl: body.issue_url },
+      null,
+      body.issue_url ?? null,
+      pr.url,
+      null,
+    );
+
+    return jsonResponse(
+      { success: true, pull_request_url: pr.url, pull_request_number: pr.number, branch: branchName, commit_sha: commitSha },
+      200,
+      this.corsOrigin,
+    );
+  }
+
+  private async handleAnalyze(request: Request): Promise<Response> {
+    const keyCheck = await this.requireApiKey(request);
+    if (keyCheck instanceof Response) return keyCheck;
+
+    const body = await this.bodyJson(request);
+    const query: string = body.query;
+    if (!query || typeof query !== "string") {
+      return jsonResponse({ error: "Missing required field: query" }, 400, this.corsOrigin);
+    }
+
+    const classification = this.classifyQuery(query);
+    const systemInstructions = await this.getSystemInstructions();
+    const lines: string[] = [];
+    if (classification === "bug") {
+      lines.push("Yeh input ek bug report jaisa dikh raha hai.");
+      lines.push("Typical wajah ho sakti hai: galat file path, missing dependency, ya koi JavaScript error.");
+    } else if (classification === "feature") {
+      lines.push("Yeh ek feature request ya improvement suggestion lag raha hai.");
+    } else if (classification === "question") {
+      lines.push("Yeh ek question/support request hai.");
+    } else {
+      lines.push("Yeh ek general feedback ya support message hai.");
+    }
+
+    return jsonResponse(
+      {
+        success: true,
+        classification,
+        possible_problems: lines,
+        next_step: "Is query ko GitHub issue banane ke liye /api/v1/query endpoint par bhejein. Agar aapke paas fix ka code hai to /api/v1/fix endpoint se PR banayein.",
+        system_instructions_preview: systemInstructions.slice(0, 200),
+      },
+      200,
+      this.corsOrigin,
+    );
+  }
+
+  private async handleAutoFix(request: Request): Promise<Response> {
+    const keyCheck = await this.requireApiKey(request);
+    if (keyCheck instanceof Response) return keyCheck;
+
+    const body = await this.bodyJson(request);
+    const actualQuery = body.query ?? body.message ?? body.text;
+    if (!actualQuery || typeof actualQuery !== "string" || actualQuery.trim().length === 0) {
+      return jsonResponse({ error: "Missing required field: query" }, 400, this.corsOrigin);
+    }
+
+    const classification = this.classifyQuery(actualQuery);
+    const websiteUrl: string = body.websiteUrl ?? body.website_url ?? "";
+    const userEmail: string = body.userEmail ?? body.user_email ?? "";
+    const context: string = body.context ?? "";
+    const filePaths: string[] = Array.isArray(body.file_paths) ? body.file_paths : [];
+    const systemInstructions = await this.getSystemInstructions();
+
+    const title = `[AUTO-FIX ${classification.toUpperCase()}] ${actualQuery.slice(0, 80)}${actualQuery.length > 80 ? "..." : ""}`;
+    const issueBody = this.buildIssueBody(actualQuery, websiteUrl, userEmail, context, classification, systemInstructions);
+
+    let issue: { number: number; url: string };
+    try {
+      issue = await this.github.createIssue(title, issueBody, ["api-query", classification, "auto-fix"]);
+    } catch (e: any) {
+      return jsonResponse({ error: "Failed to create GitHub issue", message: e.message }, 502, this.corsOrigin);
+    }
+
+    let workflowDispatched = false;
+    try {
+      if (await this.github.workflowExists(`.github/workflows/${AUTO_FIX_WORKFLOW}`, "main")) {
+        const safeBranch = `auto-fix/issue-${issue.number}`.replace(/[^a-zA-Z0-9/-]/g, "-").replace(/--+/g, "-").slice(0, 128);
+        await this.github.dispatchWorkflow(AUTO_FIX_WORKFLOW, "main", {
+          issue_url: issue.url,
+          query: actualQuery,
+          website_url: websiteUrl,
+          context,
+          file_paths: filePaths.join(","),
+          branch_name: safeBranch,
+        });
+        workflowDispatched = true;
+      }
+    } catch (e: any) {
+      console.error("Auto-fix workflow dispatch failed:", e);
+    }
+
+    const response = workflowDispatched
+      ? "Aapki auto-fix request submit ho gayi hai. AI workflow trigger ho gaya hai aur jaldi ek PR ban jayega."
+      : "Aapki query ke liye GitHub issue ban gayi hai. Auto-fix workflow abhi available nahi hai.";
+    this.logQuery(
+      { type: "auto-fix", query: actualQuery, websiteUrl, userEmail, context, classification, filePaths, workflowDispatched },
+      String(issue.number),
+      issue.url,
+      null,
+      response,
+    );
+
+    return jsonResponse(
+      {
+        success: true,
+        classification,
+        issue_url: issue.url,
+        issue_number: issue.number,
+        workflow_dispatched: workflowDispatched,
+        workflow_file: `.github/workflows/${AUTO_FIX_WORKFLOW}`,
+        workflow_setup_required: !workflowDispatched,
+        workflow_setup_guide: workflowDispatched ? undefined : this.buildAutoFixWorkflowGuide(),
+        reply: response,
+      },
+      200,
+      this.corsOrigin,
+    );
+  }
+
+  private buildAutoFixWorkflowGuide(): string {
+    return [
+      "## Auto-fix workflow setup",
+      "",
+      "1. Create .github/workflows/developer-api-auto-fix.yml on the main branch.",
+      "2. Listen for workflow_dispatch and accept inputs: issue_url, query, website_url, context, file_paths, branch_name.",
+      "3. Use an AI model with a repo secret to read the issue, inspect files, generate a fix, and open a PR referencing issue_url.",
+      "4. Once the file is on main, /api/v1/auto-fix will dispatch it automatically.",
+    ].join("\n");
+  }
+
+  private async handleSetInstructions(request: Request): Promise<Response> {
+    const body = await this.bodyJson(request);
+    if (typeof body.instructions !== "string" || body.instructions.trim().length === 0) {
+      return jsonResponse({ error: "Missing required field: instructions" }, 400, this.corsOrigin);
+    }
+    this.setConfig("systemInstructions", body.instructions.trim());
+    return jsonResponse({ success: true, message: "System instructions updated" }, 200, this.corsOrigin);
+  }
+
+  private async handleCreateApiKey(request: Request): Promise<Response> {
+    const body = await this.bodyJson(request);
+    if (!body.name || typeof body.name !== "string") {
+      return jsonResponse({ error: "Missing required field: name" }, 400, this.corsOrigin);
+    }
+    const key = generateKey();
+    const hash = await sha256Hex(key);
+    this.ctx.storage.sql.exec("INSERT INTO api_keys (key_hash, name, created_at, active) VALUES (?, ?, ?, 1)", hash, body.name, Date.now());
+    return jsonResponse({ success: true, name: body.name, key }, 200, this.corsOrigin);
+  }
+
+  private async handleListApiKeys(): Promise<Response> {
+    const rows = this.ctx.storage.sql.exec("SELECT key_hash, name, created_at, active FROM api_keys ORDER BY created_at DESC").toArray();
+    return jsonResponse({ keys: rows.map((r) => ({ hash: r.key_hash, name: r.name, created_at: r.created_at, active: r.active === 1 })) }, 200, this.corsOrigin);
+  }
+
+  private async handleRevokeApiKey(request: Request): Promise<Response> {
+    const body = await this.bodyJson(request);
+    if (!body.hash) return jsonResponse({ error: "Missing required field: hash" }, 400, this.corsOrigin);
+    this.ctx.storage.sql.exec("UPDATE api_keys SET active = 0 WHERE key_hash = ?", body.hash);
+    return jsonResponse({ success: true, message: "API key revoked" }, 200, this.corsOrigin);
+  }
+
+  private async handleListQueries(): Promise<Response> {
+    const rows = this.ctx.storage.sql.exec("SELECT id, payload, created_at, issue_id, issue_url, pr_url, response FROM queries ORDER BY created_at DESC LIMIT 100").toArray();
+    return jsonResponse(
+      {
+        queries: rows.map((r) => ({
+          id: r.id,
+          payload: JSON.parse(String(r.payload)),
+          created_at: r.created_at,
+          issue_id: r.issue_id,
+          issue_url: r.issue_url,
+          pr_url: r.pr_url,
+          response: r.response,
+        })),
+      },
+      200,
+      this.corsOrigin,
+    );
+  }
+
+  private async handleDocs(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const origin = url.origin;
+    const systemInstructions = await this.getSystemInstructions();
+    return jsonResponse(
+      {
+        endpoints: [
+          { method: "POST", path: "/api/v1/query", auth: "X-API-Key header", body: { query: "string", websiteUrl: "string?", userEmail: "string?", context: "string?" }, response: { success: true, classification: "string", issue_url: "string", reply: "string" } },
+          { method: "POST", path: "/api/v1/fix", auth: "X-API-Key header", body: { file_path: "string", new_content: "string", issue_url: "string?", message: "string?", branch_name: "string?" }, response: { success: true, pull_request_url: "string", branch: "string" } },
+          { method: "POST", path: "/api/v1/analyze", auth: "X-API-Key header", body: { query: "string", websiteUrl: "string?" }, response: { success: true, classification: "string", possible_problems: ["string"], next_step: "string" } },
+          { method: "POST", path: "/api/v1/auto-fix", auth: "X-API-Key header", body: { query: "string", websiteUrl: "string?", userEmail: "string?", context: "string?", file_paths: ["string?"] }, response: { success: true, issue_url: "string", workflow_dispatched: "boolean" } },
+          { method: "GET", path: "/api/v1/health", auth: "none", response: { status: "ok" } },
+        ],
+        integration_example: { query: `fetch("${origin}/api/v1/query", { method: "POST", headers: { "Content-Type": "application/json", "X-API-Key": "YOUR_API_KEY" }, body: JSON.stringify({ query: "My checkout page shows a 500 error", websiteUrl: "https://example.com" }) }).then(r => r.json()).then(console.log);` },
+        current_system_instructions: systemInstructions,
+      },
+      200,
+      this.corsOrigin,
+    );
+  }
+}
+
+export default {
+  async fetch(request, env, ctx) {
+    const id = env.DEVELOPER_API_GATEWAY.idFromName("default");
+    const stub = env.DEVELOPER_API_GATEWAY.get(id);
+    return stub.fetch(request);
+  },
+} satisfies ExportedHandler<Cloudflare.Env>;
