@@ -142,20 +142,6 @@ function bindingName(gk) {
 }
 
 // ---------------------------------------------------------------------------
-// Generate packages/developer-api-gateway/wrangler.dev.jsonc (dev config).
-// ---------------------------------------------------------------------------
-function generateDeveloperApiGatewayDevConfig() {
-  const srcPath = join(DEVELOPER_API_GATEWAY_DIR, "wrangler.jsonc");
-  if (!existsSync(srcPath)) return null;
-  const config = parse(readFileSync(srcPath, "utf8"));
-  config.build = { ...config.build, cwd: DEVELOPER_API_GATEWAY_DIR };
-  const outPath = join(DEVELOPER_API_GATEWAY_DIR, "wrangler.dev.jsonc");
-  writeFileSync(outPath, JSON.stringify(config, null, 2) + "\n");
-  console.log(`generated: ${outPath}`);
-  return outPath;
-}
-
-// ---------------------------------------------------------------------------
 // Generate wrangler.dev.jsonc (dev-router with gatekeeper service bindings).
 // ---------------------------------------------------------------------------
 {
@@ -167,6 +153,9 @@ function generateDeveloperApiGatewayDevConfig() {
     config.services.push({ binding: bindingName(gk), service: gk.name });
   }
 
+  if (existsSync(DEVELOPER_API_GATEWAY_DIR)) {
+    config.services.push({ binding: "DEVELOPER_API_GATEWAY", service: "developer-api-gateway" });
+  }
   const outPath = join(ROOT, "wrangler.dev.jsonc");
   writeFileSync(outPath, JSON.stringify(config, null, 2) + "\n");
   console.log(`generated: ${outPath}`);
