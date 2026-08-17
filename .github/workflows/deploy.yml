@@ -199,8 +199,15 @@ jobs:
           done
 
       - name: Deploy Developer API Gateway
+        env:
+          DEVELOPER_API_GITHUB_TOKEN: ${{ secrets.DEVELOPER_API_GITHUB_TOKEN }}
+          DEVELOPER_API_CALLBACK_SECRET: ${{ secrets.DEVELOPER_API_CALLBACK_SECRET }}
         run: |
           cd packages/developer-api-gateway
+          echo "$DEVELOPER_API_GITHUB_TOKEN" | npx wrangler secret put GITHUB_TOKEN
+          if [ -n "$DEVELOPER_API_CALLBACK_SECRET" ]; then
+            echo "$DEVELOPER_API_CALLBACK_SECRET" | npx wrangler secret put CALLBACK_SECRET
+          fi
           npx wrangler deploy
 
       - name: Deploy Backend
