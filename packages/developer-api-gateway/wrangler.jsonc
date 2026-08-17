@@ -1,0 +1,37 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "cloudflareos-developer-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-02-02",
+  "compatibility_flags": [
+    "nodejs_als"
+  ],
+  "vars": {
+    "GITHUB_OWNER": "",
+    "GITHUB_REPO": "",
+    "API_CORS_ORIGIN": "*"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DEVELOPER_API_GATEWAY",
+        "class_name": "DeveloperApiGateway"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "DeveloperApiGateway"
+      ]
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "invocation_logs": false
+    }
+  }
+}
