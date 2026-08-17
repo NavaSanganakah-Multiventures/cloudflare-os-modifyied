@@ -321,6 +321,8 @@ type StoredActionRecord = {
   // The real commit produced by an applied writeFile/deleteFile action, for resolving
   // GitHubCommitHandle.getResult().
   commitResult?: GitHubCommit;
+  // The result of an applied executeBuild action, for waitForBuildResult().
+  buildResult?: BuildResult;
 };
 
 const NONCE_BYTES = 32;
@@ -2229,6 +2231,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       case "deleteFile":
       case "dispatchWorkflow":
       case "disableWorkflow":
+      case "executeBuild":
         // These actions affect the repo, not a specific issue/PR entity, so no pending action
         // depends on a provisional issue/PR resource.
         return false;
