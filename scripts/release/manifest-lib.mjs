@@ -107,6 +107,8 @@ function workerKind(pkgName) {
   if (pkgName === "workshop-backend") return "backend";
   if (pkgName === "router") return "router";
   if (pkgName.startsWith("gatekeeper-")) return "gatekeeper";
+  // Standalone service workers exposed via the router or a separate public URL.
+  if (pkgName === "developer-api-gateway") return "service";
   throw new Error(`cannot classify deployable package: ${pkgName}`);
 }
 
@@ -204,6 +206,16 @@ export function buildWorkerEntry({ pkgName, config, mainModule, modules, deployI
     // The router routes /gatekeeper/<short>/* by scanning its own GATEKEEPER_* bindings
     // (default entrypoint — it forwards whole HTTP requests, not vendor RPC).
     gatekeeperBindingExpansion = { propsByPackage: {} };
+  } else if (kind === "service") {
+    // Standalone service worker (e.g. developer-api-gateway) deployed behind the public origin.
+    // Secrets are declared in deploy-inputs.json and surfaced as secret_text bindings.
+    inputs = deployInputs ?? [];
+    installable = true;
+    for (const input of inputs) {
+      if (input.kind === "secret") {
+        bindings.push({ type: "secret_text", name: input.name, text: `$SECRET(${input.name})` });
+      }
+    }
   } else {
     vars.BASE_URL = `$PUBLIC_BASE_URL/gatekeeper/${shortName(pkgName)}`;
     installable = !NOT_INSTALLABLE.has(pkgName);
