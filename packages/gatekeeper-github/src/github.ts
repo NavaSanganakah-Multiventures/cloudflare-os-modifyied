@@ -4355,6 +4355,58 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     };
   }
 
+  async prepareExecuteBuild(
+    branch: string,
+    commands: BuildCommand[],
+  ): Promise<ExecuteBuildAction> {
+    return {
+      type: "executeBuild",
+      approvalId: this.#nextActionId(),
+      submittedAt: Date.now(),
+      owner: this.ctx.props.owner,
+      repo: this.ctx.props.repo,
+      branch,
+      commands,
+    };
+  }
+
+  async waitForBuildResult(actionId: number): Promise<BuildResult> {
+    const key = this.#actionRecordKey(actionId);
+    for (let i = 0; i < 60; i++) {
+      const record = this.ctx.storage.kv.get<StoredActionRecord>(key);
+      if (record?.buildResult) {
+        return record.buildResult;
+      }
+      if (record?.state === "rejected") {
+        throw new Error(`Build action ${actionId} was rejected.`);
+      }
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    throw new Error(`Timed out waiting for build action ${actionId} result.`);
+  }
+
+  async #executeBuildInContainer(branch: string, commands: BuildCommand[]): Promise<BuildResult> {
+    const strategy = await this.resolveBuildStrategy();
+    if (strategy === "githubActions") {
+      throw new Error(
+        `Cannot executeBuild() when the resolved build strategy is githubActions. ` +
+        `Use dispatchWorkflow() instead.`)
+    }
+    if (!this.env.BUILD_RUNNER) {
+      throw new Error(
+        `BUILD_RUNNER service binding is not configured. ` +
+        `Deploy the cloudflareos-build-runner worker and wire it into the GitHub gatekeeper.`);
+    }
+    const metadata = await this.repoMetadata();
+    const token = this.#account().getAccessToken();
+    const repoUrl = `https://x-access-token:${token}@github.com/${metadata.owner}/${metadata.name}`;
+    return await (this.env.BUILD_RUNNER as Fetcher<BuildRunner>).runBuild({
+      repoUrl,
+      branch,
+      commands: commands.map(c => c.command),
+    });
+  }
+
   // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding — repo,
   // issue, or pull request — is scoped to one repository, and issues/PRs inherit the repo's
   // permissions, so the repository is the atomic ACL unit. To admit an observer we simply confirm
