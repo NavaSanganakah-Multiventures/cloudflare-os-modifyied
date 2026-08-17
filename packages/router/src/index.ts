@@ -14,6 +14,7 @@ type EmailEntrypoint = CloudflareWorkersModule.WorkerEntrypoint &
 
 export interface Env {
   WORKSHOP_BACKEND: Fetcher;
+  DEVELOPER_API_GATEWAY?: Fetcher;
   // Present in production (wrangler.jsonc assets stanza); absent in dev.
   ASSETS?: Fetcher;
   // Dormant until custom domains + Email Routing exist; the handler ships anyway.
@@ -32,6 +33,13 @@ export default {
       if (url.pathname === prefix || url.pathname.startsWith(prefix + "/")) {
         return (env[key] as Fetcher).fetch(req);
       }
+    }
+
+    if (url.pathname === "/developer-api" || url.pathname.startsWith("/developer-api/")) {
+      if (!env.DEVELOPER_API_GATEWAY) {
+        return new Response("Developer API Gateway is not configured", { status: 503 });
+      }
+      return env.DEVELOPER_API_GATEWAY.fetch(req);
     }
 
     if (url.pathname === "/api" || url.pathname.startsWith("/api/") ||
