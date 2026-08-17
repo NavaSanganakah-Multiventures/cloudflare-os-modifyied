@@ -300,3 +300,61 @@ export class DeveloperApiGateway extends DurableObject<Env> {
     this.log({ type: "auto-fix", query, websiteUrl, userEmail, context, classification, filePaths, workflowDispatched, callbackUrl }, String(issueNumber), issueUrl, null, reply, callbackUrl, cb.status);
     return json({ success: true, classification, issue_url: issueUrl, issue_number: issueNumber, workflow_dispatched: workflowDispatched, reply, callback_dispatched: cb.success, callback_status: cb.status }, 200, origin);
   }
+  private async handleSetInstructions(request: Request, origin?: string): Promise<Response> {
+    const body = await this.bodyJson(request);
+    const instructions = String(body.instructions ?? "");
+    if (!instructions) return json({ error: "Missing instructions" }, 400, origin);
+    this.setCfg("systemInstructions", instructions);
+    return json({ success: true, message: "System instructions updated" }, 200, origin);
+  }
+
+  private async handleCreateApiKey(request: Request, origin?: string): Promise<Response> {
+    const body = await this.bodyJson(request);
+    const name = String(body.name ?? "");
+    if (!name) return json({ error: "Missing name" }, 400, origin);
+    const key = makeKey();
+    const hash = await sha256(key);
+    this.ctx.storage.sql.exec("INSERT INTO api_keys (key_hash, name, created_at, active) VALUES (?, ?, ?, 1)", hash, name, Date.now());
+    return json({ success: true, name, key }, 200, origin);
+  }
+
+  private async handleListApiKeys(origin?: string): Promise<Response> {
+    const rows = this.ctx.storage.sql.exec("SELECT key_hash, name, created_at, active FROM api_keys ORDER BY created_at DESC").toArray();
+    return json({ keys: rows.map(r => ({ hash: r.key_hash, name: r.name, created_at: r.created_at, active: r.active === 1 })) }, 200, origin);
+  }
+
+  private async handleRevokeApiKey(request: Request, origin?: string): Promise<Response> {
+    const body = await this.bodyJson(request);
+    const hash = String(body.hash ?? "");
+    if (!hash) return json({ error: "Missing hash" }, 400, origin);
+    this.ctx.storage.sql.exec("UPDATE api_keys SET active = 0 WHERE key_hash = ?", hash);
+    return json({ success: true, message: "API key revoked" }, 200, origin);
+  }
+
+  private async handleListQueries(origin?: string): Promise<Response> {
+    const rows = this.ctx.storage.sql.exec("SELECT id, payload, created_at, issue_id, issue_url, pr_url, response, callback_url, callback_status FROM queries ORDER BY created_at DESC LIMIT 100").toArray();
+    return json({ queries: rows.map(r => ({ id: r.id, payload: JSON.parse(String(r.payload)), created_at: r.created_at, issue_id: r.issue_id, issue_url: r.issue_url, pr_url: r.pr_url, response: r.response, callback_url: r.callback_url, callback_status: r.callback_status })) }, 200, origin);
+  }
+
+  private async handleDocs(request: Request, origin?: string): Promise<Response> {
+    const url = new URL(request.url);
+    return json({
+      endpoints: [
+        { method: "POST", path: "/api/v1/query", auth: "X-API-Key", body: { query: "string", websiteUrl: "string?", userEmail: "string?", context: "string?", repoOwner: "string?", repoName: "string?", callbackUrl: "string?" }, response: { success: true, issue_url: "string", reply: "string", callback_dispatched: "boolean" } },
+        { method: "POST", path: "/api/v1/fix", auth: "X-API-Key", body: { file_path: "string", new_content: "string", repoOwner: "string?", repoName: "string?", issue_url: "string?", message: "string?", branch_name: "string?" }, response: { success: true, pull_request_url: "string", pull_request_number: "number" } },
+        { method: "POST", path: "/api/v1/analyze", auth: "X-API-Key", body: { query: "string" }, response: { success: true, classification: "string", possible_problems: ["string"] } },
+        { method: "POST", path: "/api/v1/auto-fix", auth: "X-API-Key", body: { query: "string", websiteUrl: "string?", context: "string?", file_paths: ["string?"], repoOwner: "string?", repoName: "string?", callbackUrl: "string?" }, response: { success: true, issue_url: "string", workflow_dispatched: "boolean" } },
+        { method: "GET", path: "/api/v1/health", auth: "none", response: { status: "ok" } },
+      ],
+      integration_example: `fetch("${url.origin}/api/v1/query", { method: "POST", headers: { "Content-Type": "application/json", "X-API-Key": "YOUR_KEY" }, body: JSON.stringify({ query: "...", websiteUrl: "https://example.com", callbackUrl: "https://example.com/api/callback" }) }).then(r => r.json()).then(console.log);`
+    }, 200, origin);
+  }
+}
+
+export default {
+  async fetch(request, env, ctx): Promise<Response> {
+    const id = env.DEVELOPER_API_GATEWAY.idFromName("default");
+    const stub = env.DEVELOPER_API_GATEWAY.get(id);
+    return stub.fetch(request);
+  },
+} satisfies ExportedHandler<Env>;
