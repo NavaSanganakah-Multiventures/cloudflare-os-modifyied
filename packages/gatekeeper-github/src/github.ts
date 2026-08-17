@@ -36,6 +36,7 @@ import {
 import { assertIssueSearchResultsInRepo, buildIssueSearchQuery } from "./github-search";
 import GITHUB_LOGO_SVG from "./github-logo.svg";
 import type {
+  BuildExecutorStrategy,
   GitHubActor,
   GitHubBranch,
   GitHubCommit,
@@ -331,6 +332,9 @@ const VIEWER_CACHE_TTL_MS = 5 * 60 * 1000;
 const DISCUSSION_SYNC_OVERLAP_MS = 5 * 1000;
 const DISCUSSION_SYNC_BAIL_LIMIT = 500;
 const MAX_REPLY_TARGET_HOPS = 50;
+
+// KV key prefix for per-repository build executor overrides chosen by the user in the resource configurator.
+const REPO_BUILD_EXECUTOR_PREFIX = "repoBuildExecutor:";
 
 const GITHUB_LOGO_URL = `data:image/svg+xml,${encodeURIComponent(GITHUB_LOGO_SVG)}`;
 
@@ -1388,6 +1392,23 @@ export class UserAccount extends DurableObject<Env> {
     }
   }
 
+  async getRepoBuildExecutor(repoFullName: string): Promise<BuildExecutorStrategy | null> {
+    const value = this.ctx.storage.kv.get<string>(`${REPO_BUILD_EXECUTOR_PREFIX}${repoFullName}`);
+    if (value === "githubActions" || value === "cloudflareContainers" || value === "auto") {
+      return value;
+    }
+    return null;
+  }
+
+  async setRepoBuildExecutor(repoFullName: string, strategy: BuildExecutorStrategy | null): Promise<void> {
+    const key = `${REPO_BUILD_EXECUTOR_PREFIX}${repoFullName}`;
+    if (strategy === null || strategy === "auto") {
+      this.ctx.storage.kv.delete(key);
+    } else {
+      this.ctx.storage.kv.put(key, strategy);
+    }
+  }
+
   async alarm(): Promise<void> {
     // Drop the account if the flow never completed, or if this was a transient auth-only sign-in
     // grant (used once to read the email for login).
@@ -1504,9 +1525,15 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
     };
 
     if (resourceUrlPattern === REPO_RESOURCE.urlPattern) {
+      const getAccount = () => this.ctx.exports.UserAccount.get(
+        this.ctx.exports.UserAccount.idFromString(this.ctx.props.userObjectId));
       return {
         iframeHtml: GITHUB_REPO_CONFIGURATOR_HTML,
-        ui: new RpcStub(new GitHubRepoConfiguratorUI(getToken)),
+        ui: new RpcStub(new GitHubRepoConfiguratorUI(getToken, {
+          get: (repoFullName: string) => getAccount().getRepoBuildExecutor(repoFullName),
+          set: (repoFullName: string, buildExecutor: string | null) =>
+            getAccount().setRepoBuildExecutor(repoFullName, buildExecutor as BuildExecutorStrategy | null),
+        })),
       };
     }
 
@@ -3420,6 +3447,23 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     return [...byThread.values()].toSorted((a, b) => a.comments[0].createdAt.getTime() - b.comments[0].createdAt.getTime());
   }
 
+  #account() {
+    return this.ctx.exports.UserAccount.get(
+      this.ctx.exports.UserAccount.idFromString(this.ctx.props.userObjectId));
+  }
+
+  /**
+   * Resolves the build executor strategy for this repository. Uses the user's per-repo override
+   * when set; otherwise falls back to GitHub Actions for public repos and Cloudflare Containers
+   * for private/internal repos.
+   */
+  async resolveBuildStrategy(): Promise<BuildExecutorStrategy> {
+    const metadata = await this.repoMetadata();
+    const override = await this.#account().getRepoBuildExecutor(metadata.fullName);
+    if (override) return override;
+    return metadata.visibility === "public" ? "githubActions" : "cloudflareContainers";
+  }
+
   async describe(): Promise<ResourceDescription> {
     switch (this.ctx.props.resourceKind) {
       case "repo": {
@@ -4689,6 +4733,14 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Read the log output of GitHub Actions job ${jobId}.`,
     });
     return this.#gatekeeper.getWorkflowJobLogs(jobId);
+  }
+
+  async getResolvedBuildStrategy(): Promise<BuildExecutorStrategy> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `Read resolved build strategy`,
+      description: `Read the resolved build executor strategy for this repository.`,
+    });
+    return this.#gatekeeper.resolveBuildStrategy();
   }
 }
 
