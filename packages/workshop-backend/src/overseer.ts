@@ -1,6 +1,6 @@
 import { RpcCompatible, RpcStub, RpcTarget } from "capnweb";
 import { validateRpc } from "capnweb-validate";
-import { Overseer, GadgetMetadata, UiBundle, WorkpieceId, WorkpieceSummary, WorkpiecesSubscriber, GadgetClient, GadgetBindingInfo, GatekeeperClient, ActionState, ActionLogEntry, ActionsSubscriber, CodeUpdate, CodeSubscriber, AiChatMetadata, AiChatMessage, AiChatHistoryPage, AiChatSubscriber, AiChatAuthorInfo, AiModelConfig, AiChatMessageBody, AgentSpawnerConfig, ConsoleLogSubscriber, ConsoleLogEvent, CapsuleSpecifier, CollaboratorInfo, CollaboratorRole, AffectedCollaborator, ShareLinkInfo, GatekeeperCreationSpec, ObserverConfigCallback, ObserverBindingNeed, ObserverBindingFailure, BlueprintBindingAnnotation, BlueprintBinding, BlueprintMetadata, BlueprintOutput, MessageFormatRef, isOutputIcon, SpawnerEnvTarget, BlueprintGadgetSummary, AiChatStreamEvent, BlueprintScreenshotUpload, BLUEPRINT_SCREENSHOT_R2_PREFIX, blueprintScreenshotUrl, ChatAttachmentUpload, ChatAttachmentHandle, ChatAttachmentRef, BoundHookInfo, PreApprovableAction, PresenceParticipant, PresenceSubscriber, SlashCommandChoice, SlashCommandRequest, validateBindingName, createOpenGadgetError, OPEN_GADGET_ERROR_CODES, resolveSiteName } from '@gadgets/workshop-shared/api';
+import { Overseer, GadgetMetadata, UiBundle, WorkpieceId, WorkpieceSummary, WorkpiecesSubscriber, GadgetClient, GadgetBindingInfo, GatekeeperClient, ActionState, ActionLogEntry, ActionsSubscriber, CodeUpdate, CodeSubscriber, AiChatMetadata, AiChatMessage, AiChatHistoryPage, AiChatSubscriber, AiChatAuthorInfo, AiModelConfig, AiChatMessageBody, AgentSpawnerConfig, ConsoleLogSubscriber, ConsoleLogEvent, CapsuleSpecifier, CollaboratorInfo, CollaboratorRole, AffectedCollaborator, ShareLinkInfo, GatekeeperCreationSpec, ObserverConfigCallback, ObserverBindingNeed, ObserverBindingFailure, BlueprintBindingAnnotation, BlueprintBinding, BlueprintMetadata, BlueprintOutput, MessageFormatRef, isOutputIcon, SpawnerEnvTarget, BlueprintGadgetSummary, AiChatStreamEvent, BlueprintScreenshotUpload, BLUEPRINT_SCREENSHOT_R2_PREFIX, blueprintScreenshotUrl, ChatAttachmentUpload, ChatAttachmentHandle, ChatAttachmentRef, BoundHookInfo, PreApprovableAction, PresenceParticipant, PresenceSubscriber, SlashCommandChoice, SlashCommandRequest, validateBindingName, createOpenWorkspaceError, OPEN_WORKSPACE_ERROR_CODES, resolveSiteName } from '@gadgets/workshop-shared/api';
 import { Gatekeeper, HookInitiator, ResourceDescription, ApprovalQueue, ActionDescription, ObservationAuthorizer, ObservationDescription, VendorDescription, SupportedResource, resolveRequestedResource, HookController, HookDescription, AGENT_CATALOG_MAX_ENTRIES, ActionKind } from "@gadgets/workshop-shared/gatekeeper";
 import {
   DurableObject, WorkerEntrypoint, RpcStub as NativeRpcStub,
@@ -3555,6 +3555,34 @@ class OverseerImpl implements AgentHooks {
     return chatId;
   }
 
+  async triggerBackgroundAnalysis(clientUser: DurableObjectStub<UserDurableObject>): Promise<void> {
+    let userMeta = await clientUser.getChatContext(null);
+    if (!userMeta.aiModel) {
+      logger.warn("Cannot run background analysis: no configured AI model", { event: "agent.background.skip" });
+      return;
+    }
+
+    // Replace the user profile name with "Jules" to indicate it's the background agent.
+    let julesMeta: UserChatContext = {
+      ...userMeta,
+      profile: {
+        ...userMeta.profile,
+        name: "Jules (Background Agent)",
+      }
+    };
+
+    let prompt = `Please review this codebase for potential bugs, security issues, and optimization opportunities. If you find something that should be changed, use your code modification tools to propose the change.
+
+ALSO, if you have a GitHub repository bound in your env, please check for Pull Request merge conflicts!
+1. Use \`executeCode\` to call \`env.YOUR_GITHUB_BINDING.listPullRequests()\` and loop through them to call \`getPullRequest(id)\`.
+2. If \`mergeable === false\`, the PR has a conflict.
+3. Determine the conflicted files, use \`readFile(path, baseBranch)\` and \`readFile(path, headBranch)\` to understand the conflict.
+4. Perform a semantic 3-way merge using your reasoning.
+5. Use \`writeFile\` on the PR's head branch to commit the resolved code.`;
+
+    await this.newChat(clientUser, julesMeta, prompt);
+  }
+
   async sendChatMessage(
     clientUser: DurableObjectStub<UserDurableObject>,
     userMeta: UserChatContext,
@@ -4344,6 +4372,10 @@ class OverseerImpl implements AgentHooks {
         cb.reject(err);
       }
     }
+  }
+
+  getEnv(): Env {
+    return this.env;
   }
 
   getChatAgentContext(chatId: number): AiChatAgentContext {
@@ -5857,7 +5889,7 @@ class OverseerImpl implements AgentHooks {
     }
 
     // Apply the deployment's overrides, so a gadget the agent builds is labelled the same as one
-    // the user makes from the New menu (see newGadgetFromBlueprint, which does the same).
+    // the user makes from the New menu (see newWorkspaceFromBlueprint, which does the same).
     let output = deploymentOutputForBlueprint(await readAdminConfig(this.env), blueprintId,
         sanitizeBlueprintOutput(kvRecord.metadata.output));
 
@@ -5922,6 +5954,24 @@ class OverseerImpl implements AgentHooks {
         sub[Symbol.dispose]();
         this.#tailSubscribers.delete(sub);
       });
+    }
+
+    // Auto-Debugging: Feed runtime errors into the chat context
+    if (chatId !== null) {
+      const errorLogs = logs.filter(log => log.level === "error");
+      if (errorLogs.length > 0) {
+        const meta = this.storage.chatMeta.get(chatId);
+        if (meta && meta.activeAgent) {
+          const errorMessage = errorLogs.map(l => l.message).join("\n");
+          const prepared = await this.#prepareChatMessage(`[Auto-Debug] The following runtime errors occurred:\n\n\`\`\`\n${errorMessage}\n\`\`\`\n\nPlease analyze and fix these errors.`, false);
+          
+          this.ctx.storage.transactionSync(() => {
+            this.#commitPreparedChatMessage(
+              chatId, new Date(), { name: "System (Auto-Debug)", type: "user" }, prepared, undefined, undefined, undefined
+            );
+          });
+        }
+      }
     }
   }
 
@@ -6402,7 +6452,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   // `notifyClosed` should be invoked when the return `Overseer` stub is disposed, which is used
-  // by AuthenticatedApiImpl.#openGadgetInternal() to detect Durable Object disconnects.
+  // by AuthenticatedApiImpl.#openWorkspaceInternal() to detect Durable Object disconnects.
   async open(userId: string, profileId: string,
              notifyClosed: NativeRpcStub<() => void>,
              shareKey?: string,
@@ -6416,7 +6466,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
         let owner = this.impl.users.get(this.impl.users.idFromString(userId));
         let meta = await owner.getGadget(this.ctx.id.toString());
         if (!meta) {
-          throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceNotFound);
+          throw createOpenWorkspaceError(OPEN_WORKSPACE_ERROR_CODES.workspaceNotFound);
         }
         if (meta.owner) {
           // The user's DO contains a record indicating that this gadget was shared to them by
@@ -6424,7 +6474,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
           // which does not proactively clean up share recipient's references. We need to treat
           // this as missing otherwise we'll inadvertently create a new gadget with this ID
           // belonging to a different user than the original.
-          throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceNotFound);
+          throw createOpenWorkspaceError(OPEN_WORKSPACE_ERROR_CODES.workspaceNotFound);
         }
 
         // Owner says we exist, so let's initialize ourselves.
@@ -6475,7 +6525,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
         // `prohibitAllSharing` can only have been set when the gadget had no shares (see
         // `authorizeObservation`), and no new shares can be created while it's set, so any
         // non-owner reaching here is necessarily unauthorized.
-        throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceAccessDenied);
+        throw createOpenWorkspaceError(OPEN_WORKSPACE_ERROR_CODES.workspaceAccessDenied);
       }
 
       let sharing = await this.impl.getSharingManager();
@@ -6498,7 +6548,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
       // their session is force-restarted lands here and sees the terminal access-denied page.
       let effectiveRole = sharing.getEffectiveRole(profileId);
       if (!effectiveRole) {
-        throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceAccessDenied);
+        throw createOpenWorkspaceError(OPEN_WORKSPACE_ERROR_CODES.workspaceAccessDenied);
       }
       role = effectiveRole;
 
@@ -6669,7 +6719,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   // Initialize this workspace's default gadget from a blueprint's code snapshot. Called by
-  // AuthenticatedApi.newGadgetFromBlueprint() after creating (and opening) the DO.
+  // AuthenticatedApi.newWorkspaceFromBlueprint() after creating (and opening) the DO.
   async initializeFromBlueprint(code: Uint8Array, title: string, output?: BlueprintOutput)
       : Promise<void> {
     // Set the title. The default gadget (created just below) inherits it.
@@ -8332,6 +8382,10 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     let userMeta = await this.clientUser.getChatContext(chosenModelId);
     return this.impl.newChat(this.clientUser, userMeta, initialMessage, capsules, attachments,
                              undefined, undefined, formats);
+  }
+
+  async triggerBackgroundAnalysis(): Promise<void> {
+    return this.impl.triggerBackgroundAnalysis(this.clientUser);
   }
 
   async sendChatMessage(
