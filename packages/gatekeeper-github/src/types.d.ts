@@ -8,6 +8,15 @@ export interface GitHubRepo {
   getMetadata(): Promise<GitHubRepoMetadata>;
 
   /**
+   * Returns the resolved build executor strategy for this repository.
+   *
+   * The default is GitHub Actions for public repositories and Cloudflare Containers for
+   * private (and internal) repositories. The user can override the default per repository from
+   * the resource connection UI.
+   */
+  getResolvedBuildStrategy(): Promise<BuildExecutorStrategy>;
+
+  /**
    * Creates a new issue in this repository.
    *
    * The issue may not be created on GitHub immediately. While creation is pending, the
@@ -770,6 +779,9 @@ export type GitHubProposedChangeResult = {
   /** The newly created pull request. */
   pullRequest: GitHubPullRequest;
 };
+
+/** Strategy controlling where builds for this repository are executed. */
+export type BuildExecutorStrategy = "auto" | "githubActions" | "cloudflareContainers";
 
 export type GitHubWriteFileOptions = {
   path: string;
