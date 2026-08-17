@@ -1,0 +1,19 @@
+{
+  "name": "@gadgets/developer-api-gateway",
+  "version": "1.0.0",
+  "description": "Public HTTP API that turns user website queries into GitHub issues and, when configured, auto-fix pull requests.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "dev": "echo 'run pnpm dev-server in the root directory instead' >&2 && exit 1",
+    "deploy": "wrangler deploy",
+    "build": "tsc",
+    "types": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260722.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.119.0"
+  }
+}
