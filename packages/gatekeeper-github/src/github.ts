@@ -478,6 +478,12 @@ const DISABLE_WORKFLOW_ACTION: ActionKind = {
   branchScoped: false,
 };
 
+const EXECUTE_BUILD_ACTION: ActionKind = {
+  tag: "githubExecuteBuild",
+  label: "Execute build in Cloudflare Containers",
+  branchScoped: true,
+};
+
 const REPO_RESOURCE: SupportedResource = {
   urlPattern: "https://github.com/:owner/:repo",
   title: "GitHub Repository",
@@ -3523,6 +3529,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       REPLY_DIFF_COMMENT_ACTION,
       MERGE_PULL_REQUEST_ACTION,
       DISPATCH_WORKFLOW_ACTION,
+      EXECUTE_BUILD_ACTION,
     ];
   }
 
