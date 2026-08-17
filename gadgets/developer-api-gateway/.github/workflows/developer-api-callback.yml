@@ -1,0 +1,27 @@
+name: Developer API Callback
+
+on:
+  workflow_dispatch:
+    inputs:
+      callback_url:
+        description: URL to POST the developer API callback to
+        required: true
+        type: string
+      payload:
+        description: JSON payload string from the developer API
+        required: true
+        type: string
+
+jobs:
+  callback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST callback
+        run: |
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "$CALLBACK_URL"
+        env:
+          CALLBACK_URL: ${{ inputs.callback_url }}
+          PAYLOAD: ${{ inputs.payload }}
