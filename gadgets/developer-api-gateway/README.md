@@ -8,6 +8,7 @@ This folder contains a reusable Gadget template for Cloudflare OS.
 - Creates GitHub issues from user queries in a bound repository.
 - Accepts fixes and turns them into pull requests.
 - Supports multiple GitHub repositories: bind each repo in Cloudflare OS and pass repoOwner/repoName in API requests.
+- Optional `callbackUrl`: dispatches a GitHub Actions workflow that POSTs the result back to your website.
 
 ## Setup
 
@@ -16,6 +17,10 @@ This folder contains a reusable Gadget template for Cloudflare OS.
 3. Bind one or more GitHub repositories to the Gadget using Cloudflare OS resource introduction.
 4. Open the Gadget UI, set system instructions, and create an API key.
 5. Send queries from your website/app using the generated API key.
+
+## Optional callback workflow
+
+If you want asynchronous callbacks to your website, copy .github/workflows/developer-api-callback.yml into your target repo and adjust the POST logic as needed.
 
 ## Environment binding
 
