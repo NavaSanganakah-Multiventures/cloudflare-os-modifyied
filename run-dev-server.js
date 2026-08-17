@@ -153,9 +153,6 @@ function bindingName(gk) {
     config.services.push({ binding: bindingName(gk), service: gk.name });
   }
 
-  if (existsSync(DEVELOPER_API_GATEWAY_DIR)) {
-    config.services.push({ binding: "DEVELOPER_API_GATEWAY", service: "developer-api-gateway" });
-  }
   const outPath = join(ROOT, "wrangler.dev.jsonc");
   writeFileSync(outPath, JSON.stringify(config, null, 2) + "\n");
   console.log(`generated: ${outPath}`);
@@ -297,10 +294,13 @@ for (const gk of gatekeepers) {
 // Build the wrangler dev command and exec it.
 // ---------------------------------------------------------------------------
 
+const developerApiGatewayConfig = generateDeveloperApiGatewayDevConfig();
+
 const configs = [
   "wrangler.dev.jsonc",
   join("packages", "workshop-backend", "wrangler.dev.jsonc"),
   ...gatekeepers.map(gk => join(gk.dir, "wrangler.dev.jsonc")),
+  ...(developerApiGatewayConfig ? [developerApiGatewayConfig] : []),
 ];
 
 const args = configs.flatMap(c => ["-c", c]);
