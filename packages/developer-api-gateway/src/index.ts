@@ -139,3 +139,105 @@ export class DeveloperApiGateway extends DurableObject<Env> {
       return { success: false, status: `network_error:${String(e.message || e).slice(0, 80)}` };
     }
   }
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const origin = request.headers.get("Origin") ?? undefined;
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, GET, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, X-API-Key, Authorization" } });
+    }
+
+    try {
+      if (url.pathname === "/api/v1/health" && request.method === "GET") return json({ status: "ok" }, 200, origin);
+      if (url.pathname === "/api/v1/query" && request.method === "POST") return this.handleQuery(request, origin);
+      if (url.pathname === "/api/v1/fix" && request.method === "POST") return this.handleFix(request, origin);
+      if (url.pathname === "/api/v1/analyze" && request.method === "POST") return this.handleAnalyze(request, origin);
+      if (url.pathname === "/api/v1/auto-fix" && request.method === "POST") return this.handleAutoFix(request, origin);
+      if (url.pathname === "/admin/system-instructions" && request.method === "GET") return json({ instructions: this.getSystemInstructions() }, 200, origin);
+      if (url.pathname === "/admin/system-instructions" && request.method === "POST") return this.handleSetInstructions(request, origin);
+      if (url.pathname === "/admin/api-keys" && request.method === "GET") return this.handleListApiKeys(origin);
+      if (url.pathname === "/admin/api-keys" && request.method === "POST") return this.handleCreateApiKey(request, origin);
+      if (url.pathname === "/admin/api-keys/revoke" && request.method === "POST") return this.handleRevokeApiKey(request, origin);
+      if (url.pathname === "/admin/queries" && request.method === "GET") return this.handleListQueries(origin);
+      if (url.pathname === "/admin/docs" && request.method === "GET") return this.handleDocs(request, origin);
+      return json({ error: "Not found" }, 404, origin);
+    } catch (e) {
+      console.error("API error:", e);
+      return json({ error: "Internal error", message: e instanceof Error ? e.message : String(e) }, 500, origin);
+    }
+  }
+
+  private async bodyJson(request: Request): Promise<Record<string, unknown>> {
+    try {
+      return (await request.json()) as Record<string, unknown>;
+    } catch {
+      throw new Error("Invalid JSON body");
+    }
+  }
+
+  private async handleQuery(request: Request, origin?: string): Promise<Response> {
+    const apiKey = request.headers.get("X-API-Key") ?? request.headers.get("Authorization")?.replace("Bearer ", "");
+    if (!(await this.validateKey(apiKey))) return json({ error: "Invalid or missing API key" }, 401, origin);
+    const body = await this.bodyJson(request);
+    const query = String(body.query ?? body.message ?? body.text ?? "");
+    if (!query) return json({ error: "Missing required field: query" }, 400, origin);
+    const repo = this.getRepo(body);
+    const websiteUrl = String(body.websiteUrl ?? body.website_url ?? "");
+    const userEmail = String(body.userEmail ?? body.user_email ?? "");
+    const context = String(body.context ?? "");
+    const callbackUrl = String(body.callbackUrl ?? body.callback_url ?? "");
+    const classification = this.classify(query);
+    const instructions = this.getSystemInstructions();
+    const title = `[${classification.toUpperCase()}] ${query.slice(0, 80)}${query.length > 80 ? "..." : ""}`;
+    const issueBody = this.issueBody(query, websiteUrl, userEmail, context, classification, instructions);
+
+    let issue;
+    try {
+      issue = await this.github().createIssue(repo, title, issueBody, ["api-query", classification]);
+    } catch (e) {
+      return json({ error: "Failed to create GitHub issue", message: e instanceof Error ? e.message : String(e) }, 502, origin);
+    }
+
+    const reply = this.reply(classification);
+    const cb = await this.sendCallback(callbackUrl, { event: "query_received", query, classification, issue_url: issue.url, issue_number: issue.number, reply, website_url: websiteUrl, user_email: userEmail });
+    this.log({ query, websiteUrl, userEmail, context, classification, callbackUrl }, String(issue.number), issue.url, null, reply, callbackUrl, cb.status);
+    return json({ success: true, classification, issue_url: issue.url, issue_number: issue.number, reply, callback_dispatched: cb.success, callback_status: cb.status }, 200, origin);
+  }
+
+  private async handleFix(request: Request, origin?: string): Promise<Response> {
+    const apiKey = request.headers.get("X-API-Key") ?? request.headers.get("Authorization")?.replace("Bearer ", "");
+    if (!(await this.validateKey(apiKey))) return json({ error: "Invalid or missing API key" }, 401, origin);
+    const body = await this.bodyJson(request);
+    const repo = this.getRepo(body);
+    const path = String(body.file_path ?? "");
+    const content = String(body.new_content ?? "");
+    if (!path || !content) return json({ error: "Missing file_path or new_content" }, 400, origin);
+    const message = String(body.message ?? `Fix via developer API: ${path}`);
+    const branchName = String(body.branch_name ?? `api-fix/${path.replace(/[^a-zA-Z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 40)}-${Date.now()}`);
+    const issueUrl = String(body.issue_url ?? "");
+    const github = this.github();
+
+    let sha: string | undefined;
+    try {
+      const existing = await github.getFile(repo, path, "main");
+      if (existing) sha = existing.sha;
+    } catch {
+      // file does not exist
+    }
+
+    try {
+      const mainSha = await github.getRef(repo, "heads/main");
+      await github.createBranch(repo, branchName, mainSha);
+      await github.writeFile(repo, path, message, content, branchName, sha);
+    } catch (e) {
+      return json({ error: "Failed to prepare fix branch", message: e instanceof Error ? e.message : String(e) }, 502, origin);
+    }
+
+    try {
+      const pr = await github.createPullRequest(repo, message, branchName, "main", issueUrl ? `Fix for ${issueUrl}` : "Fix via developer API");
+      this.log({ type: "fix", filePath: path, branchName, message, issueUrl }, null, issueUrl || null, pr.url, null);
+      return json({ success: true, pull_request_url: pr.url, pull_request_number: pr.number, branch: pr.branch }, 200, origin);
+    } catch (e) {
+      return json({ error: "Failed to create pull request", message: e instanceof Error ? e.message : String(e) }, 502, origin);
+    }
+  }
