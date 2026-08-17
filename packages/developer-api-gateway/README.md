@@ -4,17 +4,30 @@ A standalone Cloudflare Worker package that exposes an HTTP API for end-user web
 
 ## Deploy
 
+The worker is deployed automatically by the root `.github/workflows/deploy.yml` action. Required GitHub repository secrets:
+
+- `DEVELOPER_API_GITHUB_TOKEN` — GitHub PAT with repo scope
+- `DEVELOPER_API_CALLBACK_SECRET` — optional secret sent as `X-Callback-Secret` to callback URLs
+
+You can also deploy manually:
+
 ```bash
 cd packages/developer-api-gateway
-wrangler secret put GITHUB_TOKEN         # GitHub PAT with repo scope
+wrangler secret put GITHUB_TOKEN
+wrangler secret put CALLBACK_SECRET  # optional
 wrangler deploy
 ```
 
 Optional vars in `wrangler.jsonc`:
 - `GITHUB_OWNER` / `GITHUB_REPO` — default target repository
 
-Optional secret:
-- `CALLBACK_SECRET` — sent as `X-Callback-Secret` header to callback URLs so your website can verify the request
+## Router integration
+
+The worker is bound to `packages/router` and the dev router. It serves the `/developer-api/*` path prefix on the public origin:
+
+```
+https://<public-origin>/developer-api/api/v1/query
+```
 
 ## API endpoints
 
