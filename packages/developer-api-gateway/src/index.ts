@@ -43,7 +43,7 @@ function json(data: unknown, status = 200, origin?: string): Response {
 }
 
 export class DeveloperApiGateway extends DurableObject<Env> {
-  constructor(ctx: DurableObjectState, env: Env) {
+  constructor(ctx, env: Env) {
     super(ctx, env);
     this.ctx = ctx;
     this.env = env;
