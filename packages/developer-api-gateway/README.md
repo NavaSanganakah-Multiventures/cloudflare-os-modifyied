@@ -1,44 +1,45 @@
 # Developer API Gateway
 
-A standalone Cloudflare Worker that exposes a public HTTP API for end-user website/application support queries. Queries are turned into GitHub issues in the configured repository, and when a fix workflow is configured into auto-fix pull requests.
+A standalone Cloudflare Worker package that exposes an HTTP API for end-user website/app queries. Queries become GitHub issues, fixes become pull requests, and responses are sent back to caller-supplied callback URLs.
 
-## Deployment
-
-This package is part of the Cloudflare OS monorepo. To deploy it on its own:
+## Deploy
 
 ```bash
 cd packages/developer-api-gateway
-wrangler secret put GITHUB_TOKEN
+wrangler secret put GITHUB_TOKEN         # GitHub PAT with repo scope
 wrangler deploy
 ```
 
-Set GITHUB_OWNER and GITHUB_REPO in wrangler.jsonc or via wrangler vars put.
+Optional vars in `wrangler.jsonc`:
+- `GITHUB_OWNER` / `GITHUB_REPO` — default target repository
 
-## Public API
+Optional secret:
+- `CALLBACK_SECRET` — sent as `X-Callback-Secret` header to callback URLs so your website can verify the request
 
-All external endpoints require an X-API-Key header.
+## API endpoints
 
-### POST /api/v1/query
+- `POST /api/v1/query` — create a GitHub issue
+- `POST /api/v1/fix` — propose a fix PR
+- `POST /api/v1/analyze` — heuristic diagnosis
+- `POST /api/v1/auto-fix` — create issue and optionally dispatch `.github/workflows/developer-api-auto-fix.yml`
+- `GET /api/v1/health` — health check
 
-Submit a user question or problem report.
+## Multi-repo
 
-### POST /api/v1/analyze
+Pass `repoOwner` and `repoName` in the request body. If omitted, the worker falls back to `GITHUB_OWNER`/`GITHUB_REPO`. The token must have access to the requested repo.
 
-Heuristic diagnosis without creating a GitHub issue.
+## Callbacks
 
-### POST /api/v1/fix
+Pass `callbackUrl` in any request. The worker will immediately POST a JSON payload to that URL containing the issue/PR details. Your server can verify the `X-Callback-Secret` header if `CALLBACK_SECRET` is configured.
 
-Propose a code fix as a pull request.
+## Admin
 
-### POST /api/v1/auto-fix
+- `GET/POST /admin/system-instructions`
+- `GET/POST /admin/api-keys`
+- `POST /admin/api-keys/revoke`
+- `GET /admin/queries`
+- `GET /admin/docs`
 
-Create an issue and dispatch .github/workflows/developer-api-auto-fix.yml if it exists on main.
+## Note on GitHub Gatekeeper
 
-### GET /api/v1/health
-
-Health check, no auth required.
-
-## Future improvements
-
-- Integrate with the GitHub Gatekeeper instead of a raw PAT so actions flow through the approval queue.
-- Wire this worker into the main router so it serves under the instance public origin.
+This standalone worker uses a direct GitHub token so it can operate without a user OAuth session and can POST callbacks to arbitrary URLs. For UI-driven, approval-queue workflows, continue using the `gatekeeper-github` Gadget workflow.
