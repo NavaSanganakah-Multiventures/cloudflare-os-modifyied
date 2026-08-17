@@ -12,6 +12,10 @@
     {
       "binding": "WORKSHOP_BACKEND",
       "service": "cloudflareos-backend"
+    },
+    {
+      "binding": "DEVELOPER_API_GATEWAY",
+      "service": "developer-api-gateway"
     }
   ]
 }
