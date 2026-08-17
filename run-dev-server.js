@@ -20,7 +20,6 @@ import { getWranglerPortFromBackendHost } from "./scripts/dev-server-config.js";
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PACKAGES_DIR = join(ROOT, "packages");
 const WORKSHOP_BACKEND_DIR = join(PACKAGES_DIR, "workshop-backend");
-const DEVELOPER_API_GATEWAY_DIR = join(PACKAGES_DIR, "developer-api-gateway");
 
 // Load a root `.dev.vars` file (KEY=VALUE lines) into process.env for local development. Existing
 // shell environment values take precedence. This file is gitignored and may hold local secrets.
@@ -140,6 +139,20 @@ process.on("SIGTERM", () => {
 // Helper: "gatekeeper-github" -> "GATEKEEPER_GITHUB"
 function bindingName(gk) {
   return gk.name.toUpperCase().replaceAll("-", "_");
+}
+
+// ---------------------------------------------------------------------------
+// Generate packages/developer-api-gateway/wrangler.dev.jsonc (dev config).
+// ---------------------------------------------------------------------------
+function generateDeveloperApiGatewayDevConfig() {
+  const srcPath = join(DEVELOPER_API_GATEWAY_DIR, "wrangler.jsonc");
+  if (!existsSync(srcPath)) return null;
+  const config = parse(readFileSync(srcPath, "utf8"));
+  config.build = { ...config.build, cwd: DEVELOPER_API_GATEWAY_DIR };
+  const outPath = join(DEVELOPER_API_GATEWAY_DIR, "wrangler.dev.jsonc");
+  writeFileSync(outPath, JSON.stringify(config, null, 2) + "\n");
+  console.log(`generated: ${outPath}`);
+  return outPath;
 }
 
 // ---------------------------------------------------------------------------
