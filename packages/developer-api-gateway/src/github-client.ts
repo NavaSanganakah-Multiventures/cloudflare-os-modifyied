@@ -1,131 +1,131 @@
-// GitHub API client used by the developer API gateway.
-// This uses a raw GitHub PAT/App token for simplicity. In the future it can be replaced by
-// an RPC binding to packages/gatekeeper-github so all writes flow through the approval queue.
+export interface Repository {
+  owner: string;
+  name: string;
+}
 
-export interface GitHubFileResponse {
+export interface GitHubFile {
   sha: string;
-  content?: string;
-  encoding?: "base64";
+  content: string;
+}
+
+export interface IssueResult {
+  number: number;
+  url: string;
+}
+
+export interface PullRequestResult {
+  number: number;
+  url: string;
+  branch: string;
 }
 
 export class GitHubClient {
-  constructor(
-    private token: string,
-    private owner: string,
-    private repo: string,
-  ) {}
+  private token: string;
+  private baseUrl = "https://api.github.com";
 
-  private req(path: string, init?: RequestInit<RequestInitCfProperties>) {
-    const url = `https://api.github.com/repos/${this.owner}/${this.repo}${path}`;
-    return fetch(url, {
+  constructor(token: string) {
+    this.token = token;
+  }
+
+  private async request(path: string, init: RequestInit = { method: "GET" }): Promise<Response> {
+    const url = `${this.baseUrl}${path}`;
+    const response = await fetch(url, {
       ...init,
       headers: {
         Accept: "application/vnd.github+json",
         Authorization: `Bearer ${this.token}`,
         "X-GitHub-Api-Version": "2022-11-28",
-        ...(init?.headers ?? {}),
+        "User-Agent": "developer-api-gateway",
+        ...(init.body ? { "Content-Type": "application/json" } : {}),
+        ...init.headers,
       },
     });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`GitHub API ${init.method} ${path} failed: ${response.status} ${body.slice(0, 200)}`);
+    }
+    return response;
   }
 
-  async createIssue(title: string, body: string, labels: string[]): Promise<{ number: number; url: string }> {
-    const res = await this.req("/issues", {
+  private encode(text: string): string {
+    const bytes = new TextEncoder().encode(text);
+    let binary = "";
+    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  }
+
+  async createIssue(repo: Repository, title: string, body: string, labels: string[] = []): Promise<IssueResult> {
+    const response = await this.request(`/repos/${repo.owner}/${repo.name}/issues`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title, body, labels }),
     });
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`GitHub createIssue failed: ${res.status} ${txt}`);
-    }
-    const data = await res.json<any>();
-    return { number: data.number, url: data.html_url };
+    const json = (await response.json()) as { number: number; html_url: string };
+    return { number: json.number, url: json.html_url };
   }
 
-  async getFile(path: string, ref = "main"): Promise<GitHubFileResponse> {
-    const encoded = encodeURIComponent(path);
-    const res = await this.req(`/contents/${encoded}?ref=${encodeURIComponent(ref)}`);
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`GitHub getFile failed: ${res.status} ${txt}`);
+  async getFile(repo: Repository, path: string, ref = "main"): Promise<GitHubFile | null> {
+    try {
+      const response = await this.request(`/repos/${repo.owner}/${repo.name}/contents/${encodeURIComponent(path)}?ref=${ref}`);
+      const json = (await response.json()) as { sha: string; content: string };
+      const content = atob(json.content.replace(/\s/g, ""));
+      return { sha: json.sha, content };
+    } catch (e) {
+      if (String(e).includes("404")) return null;
+      throw e;
     }
-    return res.json<GitHubFileResponse>();
   }
 
-  async writeFile(path: string, message: string, content: string, branch: string, sha?: string): Promise<{ commitSha: string }> {
-    const encoded = encodeURIComponent(path);
+  async createBranch(repo: Repository, branchName: string, baseSha: string): Promise<void> {
+    await this.request(`/repos/${repo.owner}/${repo.name}/git/refs`, {
+      method: "POST",
+      body: JSON.stringify({ ref: `refs/heads/${branchName}`, sha: baseSha }),
+    });
+  }
+
+  async getRef(repo: Repository, ref: string): Promise<string> {
+    const response = await this.request(`/repos/${repo.owner}/${repo.name}/git/ref/${ref}`);
+    const json = (await response.json()) as { object: { sha: string } };
+    return json.object.sha;
+  }
+
+  async writeFile(repo: Repository, path: string, message: string, content: string, branch: string, sha?: string): Promise<{ commitSha: string }> {
     const body: Record<string, string> = {
       message,
-      content: btoa(content),
+      content: this.encode(content),
       branch,
     };
     if (sha) body.sha = sha;
-    const res = await this.req(`/contents/${encoded}`, {
+    const response = await this.request(`/repos/${repo.owner}/${repo.name}/contents/${encodeURIComponent(path)}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`GitHub writeFile failed: ${res.status} ${txt}`);
-    }
-    const data = await res.json<any>();
-    return { commitSha: data.commit?.sha ?? "" };
+    const json = (await response.json()) as { commit: { sha: string } };
+    return { commitSha: json.commit.sha };
   }
 
-  async createBranch(name: string, fromSha: string): Promise<{ name: string; sha: string }> {
-    const res = await this.req("/git/refs", {
+  async createPullRequest(repo: Repository, title: string, head: string, base: string, body: string): Promise<PullRequestResult> {
+    const response = await this.request(`/repos/${repo.owner}/${repo.name}/pulls`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ref: `refs/heads/${name}`, sha: fromSha }),
-    });
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`GitHub createBranch failed: ${res.status} ${txt}`);
-    }
-    const data = await res.json<any>();
-    return { name: data.ref.replace("refs/heads/", ""), sha: data.object.sha };
-  }
-
-  async createPullRequest(title: string, head: string, base: string, body: string): Promise<{ number: number; url: string }> {
-    const res = await this.req("/pulls", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title, head, base, body }),
     });
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`GitHub createPullRequest failed: ${res.status} ${txt}`);
+    const json = (await response.json()) as { number: number; html_url: string };
+    return { number: json.number, url: json.html_url, branch: head };
+  }
+
+  async workflowExists(repo: Repository, path: string, ref = "main"): Promise<boolean> {
+    try {
+      await this.request(`/repos/${repo.owner}/${repo.name}/contents/${encodeURIComponent(path)}?ref=${ref}`);
+      return true;
+    } catch (e) {
+      if (String(e).includes("404")) return false;
+      throw e;
     }
-    const data = await res.json<any>();
-    return { number: data.number, url: data.html_url };
   }
 
-  async getRef(ref: string): Promise<{ sha: string }> {
-    const res = await this.req(`/git/ref/${encodeURIComponent(ref)}`);
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`GitHub getRef failed: ${res.status} ${txt}`);
-    }
-    const data = await res.json<any>();
-    return { sha: data.object.sha };
-  }
-
-  async workflowExists(path: string, ref = "main"): Promise<boolean> {
-    const encoded = encodeURIComponent(path);
-    const res = await this.req(`/contents/${encoded}?ref=${encodeURIComponent(ref)}`);
-    return res.ok;
-  }
-
-  async dispatchWorkflow(workflowId: string, ref: string, inputs: Record<string, string>) {
-    const res = await this.req(`/actions/workflows/${encodeURIComponent(workflowId)}/dispatches`, {
+  async dispatchWorkflow(repo: Repository, workflowId: string, ref: string, inputs?: Record<string, string>): Promise<void> {
+    await this.request(`/repos/${repo.owner}/${repo.name}/actions/workflows/${workflowId}/dispatches`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ref, inputs }),
     });
-    if (!res.ok && res.status !== 204) {
-      const txt = await res.text();
-      throw new Error(`GitHub dispatchWorkflow failed: ${res.status} ${txt}`);
-    }
   }
 }
