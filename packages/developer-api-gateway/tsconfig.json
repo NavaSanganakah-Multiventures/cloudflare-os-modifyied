@@ -1,25 +1,20 @@
 {
-  "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ESNext",
     "lib": [
-      "ES2022"
+      "ESNext"
     ],
     "module": "ESNext",
-    "moduleResolution": "bundler",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
     "types": [
-      "@cloudflare/workers-types/experimental"
-    ],
-    "outDir": "./dist",
-    "declaration": true,
-    "sourceMap": true,
-    "noEmit": false
+      "@cloudflare/workers-types"
+    ]
   },
   "include": [
-    "src"
-  ],
-  "exclude": [
-    "dist",
-    "node_modules"
+    "src/**/*.ts",
+    "worker-configuration.d.ts"
   ]
 }
