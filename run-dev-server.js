@@ -20,6 +20,7 @@ import { getWranglerPortFromBackendHost } from "./scripts/dev-server-config.js";
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PACKAGES_DIR = join(ROOT, "packages");
 const WORKSHOP_BACKEND_DIR = join(PACKAGES_DIR, "workshop-backend");
+const DEVELOPER_API_GATEWAY_DIR = join(PACKAGES_DIR, "developer-api-gateway");
 
 // Load a root `.dev.vars` file (KEY=VALUE lines) into process.env for local development. Existing
 // shell environment values take precedence. This file is gitignored and may hold local secrets.
@@ -44,6 +45,18 @@ function loadDevVars() {
 loadDevVars();
 
 const useWorkersAi = process.argv.includes("--use-workers-ai-binding");
+
+// Generate a dev config for the developer-api-gateway service worker if present.
+function generateDeveloperApiGatewayDevConfig() {
+  const srcPath = join(DEVELOPER_API_GATEWAY_DIR, "wrangler.jsonc");
+  if (!existsSync(srcPath)) return null;
+  const config = parse(readFileSync(srcPath, "utf8"));
+  config.build = { ...config.build, cwd: DEVELOPER_API_GATEWAY_DIR };
+  const outPath = join(DEVELOPER_API_GATEWAY_DIR, "wrangler.dev.jsonc");
+  writeFileSync(outPath, JSON.stringify(config, null, 2) + "\n");
+  console.log(`generated: ${outPath}`);
+  return outPath;
+}
 
 // Generate the format blueprint module before Wrangler tries to bundle the backend. The output is
 // gitignored, so it will not exist on a clean checkout.
@@ -153,6 +166,9 @@ function bindingName(gk) {
     config.services.push({ binding: bindingName(gk), service: gk.name });
   }
 
+  if (existsSync(DEVELOPER_API_GATEWAY_DIR)) {
+    config.services.push({ binding: "DEVELOPER_API_GATEWAY", service: "developer-api-gateway" });
+  }
   const outPath = join(ROOT, "wrangler.dev.jsonc");
   writeFileSync(outPath, JSON.stringify(config, null, 2) + "\n");
   console.log(`generated: ${outPath}`);
@@ -294,10 +310,13 @@ for (const gk of gatekeepers) {
 // Build the wrangler dev command and exec it.
 // ---------------------------------------------------------------------------
 
+const developerApiGatewayConfig = generateDeveloperApiGatewayDevConfig();
+
 const configs = [
   "wrangler.dev.jsonc",
   join("packages", "workshop-backend", "wrangler.dev.jsonc"),
   ...gatekeepers.map(gk => join(gk.dir, "wrangler.dev.jsonc")),
+  ...(developerApiGatewayConfig ? [developerApiGatewayConfig] : []),
 ];
 
 const args = configs.flatMap(c => ["-c", c]);
