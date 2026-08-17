@@ -20,6 +20,7 @@ import { getWranglerPortFromBackendHost } from "./scripts/dev-server-config.js";
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PACKAGES_DIR = join(ROOT, "packages");
 const WORKSHOP_BACKEND_DIR = join(PACKAGES_DIR, "workshop-backend");
+const DEVELOPER_API_GATEWAY_DIR = join(PACKAGES_DIR, "developer-api-gateway");
 
 // Load a root `.dev.vars` file (KEY=VALUE lines) into process.env for local development. Existing
 // shell environment values take precedence. This file is gitignored and may hold local secrets.
