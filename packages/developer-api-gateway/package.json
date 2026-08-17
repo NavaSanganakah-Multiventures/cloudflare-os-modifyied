@@ -1,12 +1,15 @@
 {
-  "name": "developer-api-gateway",
+  "name": "@gadgets/developer-api-gateway",
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "main": "./src/index.ts",
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
-    "types": "tsc --noEmit",
+    "build": "tsc",
+    "types:check": "tsc --noEmit",
+    "clean": "rm -rf dist",
     "lint": "eslint src"
   },
   "devDependencies": {
