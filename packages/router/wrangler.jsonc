@@ -11,6 +11,10 @@
     {
       "binding": "WORKSHOP_BACKEND",
       "service": "cloudflareos-backend"
+    },
+    {
+      "binding": "DEVELOPER_API_GATEWAY",
+      "service": "developer-api-gateway"
     }
   ],
 
@@ -26,7 +30,9 @@
       "/api/*",
       "/blueprint-screenshot",
       "/blueprint-screenshot/*",
-      "/gatekeeper/*"
+      "/gatekeeper/*",
+      "/developer-api",
+      "/developer-api/*"
     ]
   },
 
