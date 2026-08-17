@@ -1,0 +1,12 @@
+[
+  {
+    "name": "GITHUB_TOKEN",
+    "kind": "secret",
+    "label": "GitHub personal access token with repo scope"
+  },
+  {
+    "name": "CALLBACK_SECRET",
+    "kind": "secret",
+    "label": "Optional secret used to sign callback requests to your website"
+  }
+]
