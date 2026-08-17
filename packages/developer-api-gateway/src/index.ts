@@ -136,7 +136,8 @@ export class DeveloperApiGateway extends DurableObject<Env> {
       const text = await res.text();
       return { success: ok, status: ok ? `ok:${res.status}` : `error:${res.status}:${text.slice(0, 80)}` };
     } catch (e) {
-      return { success: false, status: `network_error:${String(e.message || e).slice(0, 80)}` };
+      const msg = e instanceof Error ? e.message : String(e);
+      return { success: false, status: `network_error:${msg.slice(0, 80)}` };
     }
   }
   async fetch(request: Request): Promise<Response> {
