@@ -12,6 +12,7 @@ import { LimitWindowKind } from "@gadgets/workshop-shared/limits";
 import { getDailyLlmCallLimit } from "./config.js";
 import { getConnectionStatus, resolveConnection, ByokGatewayRouting } from "../cloudflare/connection-service.js";
 import type { UserDurableObject } from "../../user.js";
+import { readAdminConfig } from "../../admin-config.js";
 
 export interface UsageCheckResult {
   // Whether the request may proceed.
@@ -33,6 +34,8 @@ export interface UsageCheckResult {
   balance: number | null;
   // Whether the user has connected a Cloudflare account with a usable token.
   hasUserToken: boolean;
+  // If true, the user's wallet balance is low and they should be alerted.
+  isLowBalance: boolean;
   // Routing to bill the user's own account, present only when shouldUseByok is true. Resolved here
   // (reusing the connection lookup) so the caller needn't decrypt the token a second time.
   byokRouting?: ByokGatewayRouting;
@@ -48,6 +51,7 @@ function unlimitedResult(): UsageCheckResult {
     limit: Infinity,
     balance: null,
     hasUserToken: false,
+    isLowBalance: false,
   };
 }
 
@@ -89,6 +93,7 @@ export async function checkUsageAndBalance(
         resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
         balance,
         hasUserToken,
+        isLowBalance: false,
       };
     }
     return {
@@ -102,12 +107,16 @@ export async function checkUsageAndBalance(
       balance,
       hasUserToken,
       byokRouting,
+      isLowBalance: false,
     };
   }
 
   // System AI uses the wallet as the single meter. Daily free tier is no longer consumed here.
-  const cost = 1; // 1 credit per request for System AI
+  const adminConfig = await readAdminConfig(env);
+  const cost = adminConfig.systemAiCostPerRequest; // Dynamic credit per request for System AI
   const walletSuccess = await userStub.consumeWalletBalance(cost);
+  const currentBalance = await userStub.getWalletBalance();
+  const isLowBalance = currentBalance < 5;
 
   if (!walletSuccess) {
     return {
@@ -121,6 +130,7 @@ export async function checkUsageAndBalance(
       resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
       balance,
       hasUserToken,
+      isLowBalance: true,
     };
   }
 
@@ -129,12 +139,13 @@ export async function checkUsageAndBalance(
     allowed: true,
     shouldUseByok: false,
     withinLimits: true,
-    remaining: Infinity,
+    remaining: Infinity, // Or we could map wallet balance to remaining requests based on cost
     limit: Infinity,
     windowKind: "daily",
     resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
     balance,
     hasUserToken,
+    isLowBalance,
   };
 }
 

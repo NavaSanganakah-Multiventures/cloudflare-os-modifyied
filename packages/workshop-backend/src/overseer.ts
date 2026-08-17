@@ -4000,6 +4000,11 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
           });
           return;
         }
+
+        if (usage.isLowBalance) {
+          this.postSystemAlertMessage(chatId, "⚠️ Wallet balance is low (less than 5 credits remaining). Please recharge your wallet soon to avoid interruption to System AI.");
+        }
+
         // Free tier exhausted but the user can continue via their own Cloudflare gateway: route
         // inference through it so the usage bills their account. checkUsageAndBalance already
         // resolved the routing (reusing its connection lookup), so we don't decrypt the token again.
@@ -5235,6 +5240,21 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
       type: "error",
       message,
       ...(code ? { code } : {}),
+    });
+  }
+
+  postSystemAlertMessage(chatId: number, message: string) {
+    let meta = this.storage.chatMeta.get(chatId);
+    if (!meta) return;
+
+    let timestamp = this.getChatTimestamp();
+    this.storage.chats.put({
+      chatId,
+      sequence: this.nextChatSequence(chatId),
+      timestamp,
+      author: { type: "user", id: "system", name: "System" },
+      type: "message",
+      message,
     });
   }
 

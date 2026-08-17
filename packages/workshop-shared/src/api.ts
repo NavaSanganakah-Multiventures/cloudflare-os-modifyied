@@ -372,6 +372,9 @@ export interface AuthenticatedApi extends RpcTarget {
   // Get the user's current wallet balance for AI usage.
   getWalletBalance(): Promise<number>;
 
+  // Get the user's wallet transaction ledger.
+  getWalletTransactions(): Promise<WalletTransaction[]>;
+
   // Get the user's preference for AI mode: 'system' (uses wallet) or 'custom' (uses BYOK API keys).
   getAiPreference(): Promise<"system" | "custom">;
 
@@ -2974,4 +2977,11 @@ export type ShareLinkInfo = {
   // The role granted to anyone who redeems this link. Absent implies "build" for links created
   // before roles were introduced.
   role?: CollaboratorRole;
+};
+
+export type WalletTransaction = {
+  date: string; // ISO 8601 string
+  amount: number;
+  type: "credit" | "debit";
+  reason: string;
 };

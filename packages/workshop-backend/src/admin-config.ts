@@ -46,6 +46,9 @@ export type AdminConfig = {
   // any user can publish a blueprint calling itself a Document, but only this list decides what
   // the deployment offers.
   formats: FormatCuration[];
+
+  // Cost per request for System AI (in wallet credits).
+  systemAiCostPerRequest: number;
 };
 
 // One promoted blueprint. The blueprint itself supplies the noun, plural and icon, so improving
@@ -77,6 +80,7 @@ export const DEFAULT_ADMIN_CONFIG: AdminConfig = {
   disabledGatekeepers: [],
   ambientGatekeeperModes: {},
   formats: [],
+  systemAiCostPerRequest: 1,
 };
 
 // Longest `agentHint` a promoted format may carry. Every enabled format's hint goes into the
@@ -279,6 +283,7 @@ export function parseAdminConfig(raw: string | null): AdminConfig {
       disabledGatekeepers: strings(p.disabledGatekeepers).map(v => v.toLowerCase()),
       ambientGatekeeperModes,
       formats: parseFormats(p.formats),
+      systemAiCostPerRequest: typeof p.systemAiCostPerRequest === "number" ? p.systemAiCostPerRequest : 1,
     };
   } catch {
     return { ...DEFAULT_ADMIN_CONFIG };

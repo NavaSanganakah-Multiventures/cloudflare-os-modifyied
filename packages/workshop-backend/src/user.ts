@@ -1,5 +1,5 @@
 import { RpcStub } from "capnweb";
-import { GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, SUGGESTED_MODELS, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, GadgetMetadata, BlueprintMetadata, BlueprintLibrarySummary, BlueprintSource, BlueprintUserSummary, BLUEPRINT_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, BlueprintOutput, OutputSummary, WorkpieceId, ListOutputsResult, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
+import { GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, SUGGESTED_MODELS, CollaboratorRole, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, GadgetMetadata, BlueprintMetadata, BlueprintLibrarySummary, BlueprintSource, BlueprintUserSummary, BLUEPRINT_SCREENSHOT_R2_PREFIX, GatekeeperVendorInfo, BlueprintOutput, OutputSummary, WorkpieceId, ListOutputsResult, AUTH_ERROR_CODES, createAuthError, WalletTransaction } from '@gadgets/workshop-shared/api';
 import { Gatekeeper, GatekeeperUser, GatekeeperUserVerifier, GatekeeperVendor, AccountDescription, VendorDescription, GatekeeperConnectCallback, SupportedResource, ResourceConfiguratorFrame, AppUiContext, GatekeeperUiFrame } from "@gadgets/workshop-shared/gatekeeper";
 import { shouldAutoProvisionAccount, ambientGatekeeperMode } from "./provisioning-policy.js";
 import { CloudflareGatekeeperUser } from "@gadgets/workshop-shared/cloudflare-gatekeeper";
@@ -196,6 +196,7 @@ function makeUserStorage(storage: DurableObjectStorage) {
       onboardingCompleted: false,
 
       walletBalance: 100, // seeded starting balance for System AI
+      walletTransactions: <WalletTransaction[]>[],
       processedRazorpayPayments: <string[]>[],
       aiPreference: <"system" | "custom">"system",
 
@@ -678,6 +679,10 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
              resetAt: nextUtcMidnightIso() };
   }
 
+  async getWalletTransactions(): Promise<WalletTransaction[]> {
+    return this.storage.walletTransactions.get();
+  }
+
   async consumeWalletBalance(cost: number): Promise<boolean> {
     if (!Number.isFinite(cost) || cost < 0) {
       throw new TypeError("Invalid wallet cost: " + String(cost));
@@ -687,6 +692,9 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
       return false; // Insufficient balance
     }
     this.storage.walletBalance.put(current - cost);
+    let txs = this.storage.walletTransactions.get();
+    txs.push({ date: new Date().toISOString(), amount: cost, type: "debit", reason: "System AI Request" });
+    this.storage.walletTransactions.put(txs);
     return true;
   }
 
@@ -696,6 +704,9 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     }
     let current = this.storage.walletBalance.get();
     this.storage.walletBalance.put(current + amount);
+    let txs = this.storage.walletTransactions.get();
+    txs.push({ date: new Date().toISOString(), amount: amount, type: "credit", reason: "Razorpay Recharge" });
+    this.storage.walletTransactions.put(txs);
   }
 
   async createRazorpayOrder(amountRupee: number): Promise<{ orderId: string; amount: number; currency: string; keyId: string }> {
