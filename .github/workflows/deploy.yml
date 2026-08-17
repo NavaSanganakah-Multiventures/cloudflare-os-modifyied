@@ -198,6 +198,11 @@ jobs:
             fi
           done
 
+      - name: Deploy Developer API Gateway
+        run: |
+          cd packages/developer-api-gateway
+          npx wrangler deploy
+
       - name: Deploy Backend
         run: |
           cd packages/workshop-backend
