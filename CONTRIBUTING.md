@@ -1,4 +1,4 @@
-# Contributing to Cloudflare OS
+# Contributing to Aarya Smart
 
 At this time, we are not seeking outside contribution.
 
