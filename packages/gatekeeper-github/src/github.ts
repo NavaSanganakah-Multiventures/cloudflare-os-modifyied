@@ -4391,9 +4391,8 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
   }
 
   async waitForBuildResult(actionId: number): Promise<BuildResult> {
-    const key = this.#actionRecordKey(actionId);
     for (let i = 0; i < 60; i++) {
-      const record = this.ctx.storage.kv.get<StoredActionRecord>(key);
+      const record = this.#getActionRecord(actionId);
       if (record?.buildResult) {
         return record.buildResult;
       }
