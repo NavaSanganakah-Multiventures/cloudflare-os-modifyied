@@ -36,6 +36,9 @@ import {
 import { assertIssueSearchResultsInRepo, buildIssueSearchQuery } from "./github-search";
 import GITHUB_LOGO_SVG from "./github-logo.svg";
 import type {
+  BuildCommand,
+  BuildExecutorStrategy,
+  BuildResult,
   GitHubActor,
   GitHubBranch,
   GitHubCommit,
@@ -98,10 +101,15 @@ const logger = obsContext.createLogger({
   component: "gatekeeper.github", vendorId: VENDOR_ID,
 });
 
+interface BuildRunner {
+  runBuild(request: { repoUrl: string; branch: string; commands: string[] }): Promise<BuildResult>;
+}
+
 type Env = Cloudflare.Env & {
   BASE_URL?: string;
   CLIENT_ID?: string;
   CLIENT_SECRET?: string;
+  BUILD_RUNNER?: Fetcher<BuildRunner>;
 };
 
 type StoredNonce = {
@@ -293,6 +301,12 @@ type DisableWorkflowAction = BaseAction & {
   workflowId: string | number;
 };
 
+type ExecuteBuildAction = BaseAction & {
+  type: "executeBuild";
+  branch: string;
+  commands: BuildCommand[];
+};
+
 type GitHubAction =
   | CreateIssueAction
   | CreatePullRequestAction
@@ -309,7 +323,8 @@ type GitHubAction =
   | WriteFileAction
   | DeleteFileAction
   | DispatchWorkflowAction
-  | DisableWorkflowAction;
+  | DisableWorkflowAction
+  | ExecuteBuildAction;
 
 type StoredActionRecord = {
   action: GitHubAction;
@@ -320,6 +335,8 @@ type StoredActionRecord = {
   // The real commit produced by an applied writeFile/deleteFile action, for resolving
   // GitHubCommitHandle.getResult().
   commitResult?: GitHubCommit;
+  // The result of an applied executeBuild action, for waitForBuildResult().
+  buildResult?: BuildResult;
 };
 
 const NONCE_BYTES = 32;
@@ -331,6 +348,9 @@ const VIEWER_CACHE_TTL_MS = 5 * 60 * 1000;
 const DISCUSSION_SYNC_OVERLAP_MS = 5 * 1000;
 const DISCUSSION_SYNC_BAIL_LIMIT = 500;
 const MAX_REPLY_TARGET_HOPS = 50;
+
+// KV key prefix for per-repository build executor overrides chosen by the user in the resource configurator.
+const REPO_BUILD_EXECUTOR_PREFIX = "repoBuildExecutor:";
 
 const GITHUB_LOGO_URL = `data:image/svg+xml,${encodeURIComponent(GITHUB_LOGO_SVG)}`;
 
@@ -470,6 +490,12 @@ const DISABLE_WORKFLOW_ACTION: ActionKind = {
   tag: "githubDisableWorkflow",
   label: "Disable workflow",
   branchScoped: false,
+};
+
+const EXECUTE_BUILD_ACTION: ActionKind = {
+  tag: "githubExecuteBuild",
+  label: "Execute build in Cloudflare Containers",
+  branchScoped: true,
 };
 
 const REPO_RESOURCE: SupportedResource = {
@@ -1388,6 +1414,23 @@ export class UserAccount extends DurableObject<Env> {
     }
   }
 
+  async getRepoBuildExecutor(repoFullName: string): Promise<BuildExecutorStrategy | null> {
+    const value = this.ctx.storage.kv.get<string>(`${REPO_BUILD_EXECUTOR_PREFIX}${repoFullName}`);
+    if (value === "githubActions" || value === "cloudflareContainers" || value === "auto") {
+      return value;
+    }
+    return null;
+  }
+
+  async setRepoBuildExecutor(repoFullName: string, strategy: BuildExecutorStrategy | null): Promise<void> {
+    const key = `${REPO_BUILD_EXECUTOR_PREFIX}${repoFullName}`;
+    if (strategy === null || strategy === "auto") {
+      this.ctx.storage.kv.delete(key);
+    } else {
+      this.ctx.storage.kv.put(key, strategy);
+    }
+  }
+
   async alarm(): Promise<void> {
     // Drop the account if the flow never completed, or if this was a transient auth-only sign-in
     // grant (used once to read the email for login).
@@ -1504,9 +1547,15 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
     };
 
     if (resourceUrlPattern === REPO_RESOURCE.urlPattern) {
+      const getAccount = () => this.ctx.exports.UserAccount.get(
+        this.ctx.exports.UserAccount.idFromString(this.ctx.props.userObjectId));
       return {
         iframeHtml: GITHUB_REPO_CONFIGURATOR_HTML,
-        ui: new RpcStub(new GitHubRepoConfiguratorUI(getToken)),
+        ui: new RpcStub(new GitHubRepoConfiguratorUI(getToken, {
+          get: (repoFullName: string) => getAccount().getRepoBuildExecutor(repoFullName),
+          set: (repoFullName: string, buildExecutor: string | null) =>
+            getAccount().setRepoBuildExecutor(repoFullName, buildExecutor as BuildExecutorStrategy | null),
+        })),
       };
     }
 
@@ -2202,6 +2251,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       case "deleteFile":
       case "dispatchWorkflow":
       case "disableWorkflow":
+      case "executeBuild":
         // These actions affect the repo, not a specific issue/PR entity, so no pending action
         // depends on a provisional issue/PR resource.
         return false;
@@ -3420,6 +3470,23 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     return [...byThread.values()].toSorted((a, b) => a.comments[0].createdAt.getTime() - b.comments[0].createdAt.getTime());
   }
 
+  #account() {
+    return this.ctx.exports.UserAccount.get(
+      this.ctx.exports.UserAccount.idFromString(this.ctx.props.userObjectId));
+  }
+
+  /**
+   * Resolves the build executor strategy for this repository. Uses the user's per-repo override
+   * when set; otherwise falls back to GitHub Actions for public repos and Cloudflare Containers
+   * for private/internal repos.
+   */
+  async resolveBuildStrategy(): Promise<BuildExecutorStrategy> {
+    const metadata = await this.repoMetadata();
+    const override = await this.#account().getRepoBuildExecutor(metadata.fullName);
+    if (override) return override;
+    return metadata.visibility === "public" ? "githubActions" : "cloudflareContainers";
+  }
+
   async describe(): Promise<ResourceDescription> {
     switch (this.ctx.props.resourceKind) {
       case "repo": {
@@ -3476,6 +3543,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       REPLY_DIFF_COMMENT_ACTION,
       MERGE_PULL_REQUEST_ACTION,
       DISPATCH_WORKFLOW_ACTION,
+      EXECUTE_BUILD_ACTION,
     ];
   }
 
@@ -3766,6 +3834,12 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         ));
         // No #clearCaches(): disabling a workflow does not mutate cached entities
         // (issues/PRs/branches/files).
+        this.#markActionApproved(action);
+        return;
+      }
+      case "executeBuild": {
+        const result = await this.#executeBuildInContainer(action.branch, action.commands);
+        record.buildResult = result;
         this.#markActionApproved(action);
         return;
       }
@@ -4301,6 +4375,58 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     };
   }
 
+  async prepareExecuteBuild(
+    branch: string,
+    commands: BuildCommand[],
+  ): Promise<ExecuteBuildAction> {
+    return {
+      type: "executeBuild",
+      approvalId: this.#nextActionId(),
+      submittedAt: Date.now(),
+      owner: this.ctx.props.owner,
+      repo: this.ctx.props.repo,
+      branch,
+      commands,
+    };
+  }
+
+  async waitForBuildResult(actionId: number): Promise<BuildResult> {
+    // Poll for up to ~5 minutes. Container builds (especially Flutter) can take several minutes.
+    for (let i = 0; i < 300; i++) {
+      const record = this.#getActionRecord(actionId);
+      if (record?.buildResult) {
+        return record.buildResult;
+      }
+      if (record?.state === "rejected") {
+        throw new Error(`Build action ${actionId} was rejected.`);
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    throw new Error(`Timed out waiting for build action ${actionId} result. Cloudflare Containers builds longer than 5 minutes may need an async/polling API instead.`);
+  }
+
+  async #executeBuildInContainer(branch: string, commands: BuildCommand[]): Promise<BuildResult> {
+    const strategy = await this.resolveBuildStrategy();
+    if (strategy === "githubActions") {
+      throw new Error(
+        `Cannot executeBuild() when the resolved build strategy is githubActions. ` +
+        `Use dispatchWorkflow() instead.`)
+    }
+    if (!this.env.BUILD_RUNNER) {
+      throw new Error(
+        `BUILD_RUNNER service binding is not configured. ` +
+        `Deploy the cloudflareos-build-runner worker and wire it into the GitHub gatekeeper.`);
+    }
+    const metadata = await this.repoMetadata();
+    const token = this.#account().getAccessToken();
+    const repoUrl = `https://x-access-token:${token}@github.com/${metadata.owner}/${metadata.name}`;
+    return await (this.env.BUILD_RUNNER as Fetcher<BuildRunner>).runBuild({
+      repoUrl,
+      branch,
+      commands: commands.map(c => c.command),
+    });
+  }
+
   // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding — repo,
   // issue, or pull request — is scoped to one repository, and issues/PRs inherit the repo's
   // permissions, so the repository is the atomic ACL unit. To admit an observer we simply confirm
@@ -4689,6 +4815,29 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Read the log output of GitHub Actions job ${jobId}.`,
     });
     return this.#gatekeeper.getWorkflowJobLogs(jobId);
+  }
+
+  async getResolvedBuildStrategy(): Promise<BuildExecutorStrategy> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `Read resolved build strategy`,
+      description: `Read the resolved build executor strategy for this repository.`,
+    });
+    return this.#gatekeeper.resolveBuildStrategy();
+  }
+
+  async executeBuild(branch: string, commands: BuildCommand[]): Promise<BuildResult> {
+    const action = await this.#gatekeeper.prepareExecuteBuild(branch, commands);
+    const commandList = commands.map(c => c.label ? `${c.label}: ${c.command}` : c.command).join("\n");
+    await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
+      title: `Execute build in Cloudflare Containers`,
+      description: `Run commands on branch ${branch}:\n${commandList}`,
+      implementsRevert: false,
+      awaitDecision: true,
+      actionKind: EXECUTE_BUILD_ACTION,
+      autoApprovable: true,
+      branchRef: branch,
+    });
+    return await this.#gatekeeper.waitForBuildResult(action.approvalId);
   }
 }
 

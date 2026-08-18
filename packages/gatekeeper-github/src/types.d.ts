@@ -8,6 +8,26 @@ export interface GitHubRepo {
   getMetadata(): Promise<GitHubRepoMetadata>;
 
   /**
+   * Returns the resolved build executor strategy for this repository.
+   *
+   * The default is GitHub Actions for public repositories and Cloudflare Containers for
+   * private (and internal) repositories. The user can override the default per repository from
+   * the resource connection UI.
+   */
+  getResolvedBuildStrategy(): Promise<BuildExecutorStrategy>;
+
+  /**
+   * Execute build commands for the given branch using the resolved build executor strategy.
+   *
+   * When the resolved strategy is `cloudflareContainers`, this clones the branch into a
+   * Cloudflare Container and runs the provided commands.
+   *
+   * When the resolved strategy is `githubActions`, this method throws; use
+   * `dispatchWorkflow()` instead.
+   */
+  executeBuild(branch: string, commands: BuildCommand[]): Promise<BuildResult>;
+
+  /**
    * Creates a new issue in this repository.
    *
    * The issue may not be created on GitHub immediately. While creation is pending, the
@@ -770,6 +790,27 @@ export type GitHubProposedChangeResult = {
   /** The newly created pull request. */
   pullRequest: GitHubPullRequest;
 };
+
+/** A single build command to run inside the build executor. */
+export type BuildCommand = {
+  /** Shell command to execute. */
+  command: string;
+  /** Optional human-readable label for logs. */
+  label?: string;
+};
+
+/** Result of executing a build via the build executor. */
+export type BuildResult = {
+  /** Whether every command exited with code 0. */
+  success: boolean;
+  /** Exit code of the failing command, or 0 when successful. */
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+};
+
+/** Strategy controlling where builds for this repository are executed. */
+export type BuildExecutorStrategy = "auto" | "githubActions" | "cloudflareContainers";
 
 export type GitHubWriteFileOptions = {
   path: string;
