@@ -4391,7 +4391,8 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
   }
 
   async waitForBuildResult(actionId: number): Promise<BuildResult> {
-    for (let i = 0; i < 60; i++) {
+    // Poll for up to ~5 minutes. Container builds (especially Flutter) can take several minutes.
+    for (let i = 0; i < 300; i++) {
       const record = this.#getActionRecord(actionId);
       if (record?.buildResult) {
         return record.buildResult;
@@ -4399,9 +4400,9 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       if (record?.state === "rejected") {
         throw new Error(`Build action ${actionId} was rejected.`);
       }
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
-    throw new Error(`Timed out waiting for build action ${actionId} result.`);
+    throw new Error(`Timed out waiting for build action ${actionId} result. Cloudflare Containers builds longer than 5 minutes may need an async/polling API instead.`);
   }
 
   async #executeBuildInContainer(branch: string, commands: BuildCommand[]): Promise<BuildResult> {
