@@ -7531,9 +7531,17 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       // For GitHub repository connections, automatically enable auto-approval for the
       // auto-approvable action kinds on non-default branches so agents can complete planned
       // work without requiring the user to sit at the device. Default-branch writes remain
-      // blocked by the GitHub gatekeeper itself, so main is still protected.
-      let patterns = this.impl.storage.defaultAutoApproveBranchPatterns.get() ??
-          ["fix/*", "feature/*", "agent/*", "*", "!main"];
+      // blocked by the GitHub gatekeeper itself, so the repo's default branch is still protected.
+      let patterns: string[] | undefined;
+      try {
+        patterns = await result.getDefaultAutoApproveBranchPatterns();
+      } catch {
+        patterns = undefined;
+      }
+      if (!patterns) {
+        patterns = this.impl.storage.defaultAutoApproveBranchPatterns.get() ??
+            ["fix/*", "feature/*", "agent/*", "*", "!main"];
+      }
       await this.impl.autoEnableDefaultApprovalRules(await result.getId(), await this.#getClientProfile(), patterns);
     }
     await this.recordConnectionCreated(result, "gatekeeper", vendorId);
