@@ -2,6 +2,7 @@ import { Link, useRouterState } from '@tanstack/react-router'
 import { Desktop, Moon, Plug, Sun } from '@phosphor-icons/react'
 import { Tooltip } from '@cloudflare/kumo'
 import UserMenu from '../UserMenu'
+import WalletSubmenu from '../WalletSubmenu'
 import { useTheme } from '../../ThemeContext'
 import type { ThemeMode } from '../../theme'
 
@@ -87,6 +88,7 @@ export default function SidebarUtilityStrip({ collapsed = false }: { collapsed?:
         <Plug size={15} />
       </StripLink>
       <div className={collapsed ? 'flex flex-col items-center gap-2' : 'ml-auto flex items-center gap-1'}>
+        <WalletSubmenu />
         <ThemeModeButton />
         <UserMenu />
       </div>

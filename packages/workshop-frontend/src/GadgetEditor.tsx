@@ -16,6 +16,7 @@ import {
 import { RpcStub, RpcTarget } from 'capnweb'
 import { useAuthenticatedApi } from './AuthContext'
 import UserMenu from './components/UserMenu'
+import WalletSubmenu from './components/WalletSubmenu'
 import SiteLogo from './components/SiteLogo'
 
 import {
@@ -1447,8 +1448,9 @@ export default function GadgetEditor() {
             </WorkshopIconButton>
           )}
 
-          {/* User menu */}
-          <div className="ml-2">
+          {/* User menu and Wallet */}
+          <div className="ml-2 flex items-center gap-1">
+            <WalletSubmenu />
             <UserMenu />
           </div>
         </div>

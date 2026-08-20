@@ -1,15 +1,14 @@
 // Usage checker: combines the daily free-tier counter with the BYOK/balance logic to decide
 // whether a user's request may proceed, and whose credentials to use.
 //
-// Billing rules (see canProceedWithRequest):
 //   - Connected + balance >= minimum -> billed to the user's own gateway, no daily cap; the daily
 //     counter is NOT consumed (the platform free tier is reserved for everyone else).
 //   - Connected + balance below minimum (incl. $0), or not connected -> platform free tier; the
 //     daily counter is consumed and, once exhausted, the request is blocked.
 
-import { canProceedWithRequest, hasMinimumBalance, LimitWindowKind } from "@gadgets/workshop-shared/limits";
 import { CloudflareUsageInfo } from "@gadgets/workshop-shared/api";
-import { isCloudflareLimitsEnabled, getMinimumCloudflareBalance } from "../config.js";
+import { isCloudflareLimitsEnabled } from "../config.js";
+import { LimitWindowKind } from "@gadgets/workshop-shared/limits";
 import { getDailyLlmCallLimit } from "./config.js";
 import { getConnectionStatus, resolveConnection, ByokGatewayRouting } from "../cloudflare/connection-service.js";
 import type { UserDurableObject } from "../../user.js";
@@ -65,16 +64,10 @@ export async function checkUsageAndBalance(
     return unlimitedResult();
   }
 
-  const limit = getDailyLlmCallLimit(env);
-  const minimumBalance = getMinimumCloudflareBalance(env);
+  const aiPreference = await userStub.getAiPreference();
 
-  // Resolve the connected-account status up front: it determines billing even within the free tier
-  // (connected + funded users always bill their own gateway). `balance` is null when not connected
-  // or when the balance can't be read — treated as "not funded" so we fall back to the free tier
-  // rather than attempting a BYOK call that would fail.
   let hasUserToken = false;
   let balance: number | null = null;
-  // Routing to bill the user's own account, derivable only when connected with a resolved account.
   let byokRouting: ByokGatewayRouting | undefined;
   const conn = await resolveConnection(env, userStub);
   hasUserToken = conn.status.connected;
@@ -83,46 +76,68 @@ export async function checkUsageAndBalance(
     byokRouting = { accountId: conn.accountId, apiKey: conn.accessToken };
   }
 
-  // Connected + funded -> bill their gateway; don't touch the daily free-tier counter.
-  if (hasUserToken && hasMinimumBalance(balance, minimumBalance)) {
+  if (aiPreference === "custom") {
+    if (!hasUserToken) {
+      return {
+        allowed: false,
+        reason: "Custom AI is selected but no BYOK/API key is configured. Add a model in settings or switch to System AI.",
+        shouldUseByok: false,
+        withinLimits: false,
+        remaining: 0,
+        limit: Infinity,
+        windowKind: "daily",
+        resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
+        balance,
+        hasUserToken,
+      };
+    }
     return {
       allowed: true,
       shouldUseByok: true,
       withinLimits: true,
       remaining: Infinity,
       limit: Infinity,
+      windowKind: "daily",
+      resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
       balance,
       hasUserToken,
       byokRouting,
     };
   }
 
-  // Otherwise draw on the platform free tier. consumeDailyLlmCall() only increments while within
-  // the limit (it no-ops once `used >= limit`), so a blocked request never counts.
-  const quota = await userStub.consumeDailyLlmCall(limit);
+  // System AI uses the wallet as the single meter. Daily free tier is no longer consumed here.
+  const cost = 1; // 1 credit per request for System AI
+  const walletSuccess = await userStub.consumeWalletBalance(cost);
 
-  const decision = canProceedWithRequest({
-    withinLimits: quota.withinLimits,
-    hasUserToken,
-    balance,
-    minimumBalance,
-  });
+  if (!walletSuccess) {
+    return {
+      allowed: false,
+      reason: "Insufficient wallet balance (System AI). Recharge or switch to Custom AI (BYOK).",
+      shouldUseByok: false,
+      withinLimits: false,
+      remaining: 0,
+      limit: Infinity,
+      windowKind: "daily",
+      resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
+      balance,
+      hasUserToken,
+    };
+  }
 
+  // At this point quota/limit is governed entirely by wallet balance; report unlimited to callers.
   return {
-    ...decision,
-    withinLimits: quota.withinLimits,
-    remaining: quota.remaining,
-    limit: quota.limit,
+    allowed: true,
+    shouldUseByok: false,
+    withinLimits: true,
+    remaining: Infinity,
+    limit: Infinity,
     windowKind: "daily",
-    resetAt: quota.resetAt,
+    resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
     balance,
     hasUserToken,
-    byokRouting: decision.shouldUseByok ? byokRouting : undefined,
   };
 }
 
-// Read the user's current usage + connection status WITHOUT counting a call. Used by the UI to
-// render the usage banner. Returns an "unlimited" snapshot when limits are disabled.
 export async function getUsageInfo(
   env: Cloudflare.Env,
   userStub: DurableObjectStub<UserDurableObject>,

@@ -83,6 +83,10 @@ declare global {
       // Minimum connected-account balance (USD) to proceed via BYOK. Defaults to
       // MINIMUM_CLOUDFLARE_BALANCE.
       MINIMUM_CLOUDFLARE_BALANCE?: string;
+
+      // Razorpay payment gateway credentials for wallet recharge.
+      RAZORPAY_KEY_ID?: string;
+      RAZORPAY_KEY_SECRET?: string;
     }
   }
 }
