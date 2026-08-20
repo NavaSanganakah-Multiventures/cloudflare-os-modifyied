@@ -2346,6 +2346,9 @@ export async function runAgent(
           // Generate embedding for the query
           // @ts-ignore Cloudflare Workers AI types
           let embeddingResponse = await env.AI.run("@cf/baai/bge-base-en-v1.5", { text: [query] });
+          if (!embeddingResponse || !embeddingResponse.data || embeddingResponse.data.length === 0) {
+            return toolResult("Failed to generate embedding for the query.");
+          }
           let vector = embeddingResponse.data[0];
 
           // Search the vectorize index
@@ -2378,6 +2381,9 @@ export async function runAgent(
           // Generate embedding
           // @ts-ignore
           let embeddingResponse = await env.AI.run("@cf/baai/bge-base-en-v1.5", { text: [content] });
+          if (!embeddingResponse || !embeddingResponse.data || embeddingResponse.data.length === 0) {
+            return toolResult("Failed to generate embedding for the content.");
+          }
           let vector = embeddingResponse.data[0];
 
           let id = crypto.randomUUID();
