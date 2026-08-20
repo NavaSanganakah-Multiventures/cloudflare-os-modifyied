@@ -7811,10 +7811,11 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     let gatekeeper = this.impl.getGatekeeperFacet(action.gatekeeperId) as
         Fetcher<Required<Gatekeeper<any>>>;
     try {
+      // `action.action` is the numeric gatekeeper action key assigned by submitAction.
       return await gatekeeper.getActionStatus(action.action);
-    } catch {
-      // Gatekeeper does not implement getActionStatus â not supported for this action type.
-      return null;
+    } catch (err: any) {
+      logger.warn("failed to get workflow status", { actionId: id, error: err?.message || String(err) });
+      return { status: "Error checking status", logs: err?.message || String(err) };
     }
   }
 
