@@ -2888,7 +2888,7 @@ class OverseerImpl implements AgentHooks {
 
   // Record an observation that originated from a built-in agent tool (not a gatekeeper).
   // The `gatekeeperId` is set to the BUILTIN_TOOL_GATEKEEPER_ID sentinel so that downstream
-  // code (which expects a gatekeeper to dereference for approve/reject) never touches it — built-in
+  // code (which expects a gatekeeper to dereference for approve/reject) never touches it â built-in
   // observations bypass the approve/reject paths anyway.
   async recordAgentObservation(
       chatId: number,
@@ -5647,7 +5647,7 @@ class OverseerImpl implements AgentHooks {
     }
     let lines = [`Resource types offered by "${vendorId}" (${vendor.description.displayName}):`];
     for (let r of vendor.supportedResources) {
-      lines.push(`* ${r.title} — ${r.urlPattern}`)
+      lines.push(`* ${r.title} â ${r.urlPattern}`)
     }
     lines.push(
         `\nTo request one, call requestConnection with vendorId="${vendorId}" and a resourceUrl ` +
@@ -5752,7 +5752,7 @@ class OverseerImpl implements AgentHooks {
       seen.add(id);
       let lines = [
         `* blueprintId: ${id}`,
-        `  ${JSON.stringify(title)} — ${source}`,
+        `  ${JSON.stringify(title)} â ${source}`,
       ];
       let bindingNames = Object.entries(bindings ?? {});
       if (bindingNames.length > 0) {
@@ -5813,7 +5813,7 @@ class OverseerImpl implements AgentHooks {
         `about already *is* one of these, work on that one instead: asking to change an existing ` +
         `output is not a request for a second one.\n\n` +
         formats.map(format =>
-            `* ${format.output.noun} (plural: ${format.output.plural}) — ` +
+            `* ${format.output.noun} (plural: ${format.output.plural}) â ` +
             `${format.blueprintId}` + (format.agentHint ? `; ${format.agentHint}` : ``)).join("\n");
   }
 
@@ -5906,7 +5906,7 @@ class OverseerImpl implements AgentHooks {
             details = `unknown`;
             break;
         }
-        lines.push(`* ${name} — ${JSON.stringify(binding.title)} (${details})` +
+        lines.push(`* ${name} â ${JSON.stringify(binding.title)} (${details})` +
             (binding.description ? `: ${binding.description}` : ``));
       }
     }
@@ -6247,7 +6247,7 @@ class OverseerImpl implements AgentHooks {
   }
 
   // Render the observer verification failures as one line per binding, naming the connection and the
-  // account that was refused: `<resourceTitle> (<account label>) — <reason>.` Cold path only (we're
+  // account that was refused: `<resourceTitle> (<account label>) â <reason>.` Cold path only (we're
   // about to deny the open), so the extra User DO round trip per failure is fine. Discloses nothing
   // new: the reason was either already thrown to this same user or authored by us, and the account is
   // their own.
@@ -6278,7 +6278,7 @@ class OverseerImpl implements AgentHooks {
         });
       }
 
-      return `${observerBindingTitle(gk)} (${label}) — ${failure.reason}`;
+      return `${observerBindingTitle(gk)} (${label}) â ${failure.reason}`;
     }));
 
     return lines.join("\n");
@@ -7813,7 +7813,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     try {
       return await gatekeeper.getActionStatus(action.action);
     } catch {
-      // Gatekeeper does not implement getActionStatus — not supported for this action type.
+      // Gatekeeper does not implement getActionStatus â not supported for this action type.
       return null;
     }
   }
