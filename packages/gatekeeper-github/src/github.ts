@@ -3547,6 +3547,12 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     ];
   }
 
+  async getDefaultAutoApproveBranchPatterns(): Promise<string[]> {
+    const metadata = await this.repoMetadata();
+    const defaultBranch = defaultBranchFromMetadata(metadata);
+    return ['fix/*', 'feature/*', 'agent/*', '*', `!${defaultBranch}`];
+  }
+
   async submitActionForApproval(
     approvalQueue: RpcStub<ApprovalQueue>,
     action: GitHubAction,
@@ -3896,7 +3902,9 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         logs: logs || undefined
       };
     } catch (error: any) {
-      return { status: "Error checking status", logs: error.message };
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("failed to get action status from GitHub", { error: message });
+      return { status: "Error checking status", logs: message };
     }
   }
 
