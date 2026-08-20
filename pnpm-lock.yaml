@@ -54,6 +54,9 @@ importers:
         specifier: ^0.3.7
         version: 0.3.7
     devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^5.20260804.1
+        version: 5.20260804.1
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
