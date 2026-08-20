@@ -6,8 +6,8 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RpcStub } from 'capnweb'
 import {
-  createOpenGadgetError,
-  OPEN_GADGET_ERROR_CODES,
+  createOpenWorkspaceError,
+  OPEN_WORKSPACE_ERROR_CODES,
   type AuthenticatedApi,
   type GadgetMetadata,
   type Overseer,
@@ -34,7 +34,7 @@ function disposableStub<T extends object>(value: T, dispose = vi.fn<() => void>(
 }
 
 function api(overseer: RpcStub<Overseer>): RpcStub<AuthenticatedApi> {
-  return { openGadget: () => overseer } as unknown as RpcStub<AuthenticatedApi>
+  return { openWorkspace: () => overseer } as unknown as RpcStub<AuthenticatedApi>
 }
 
 const METADATA = {
@@ -123,7 +123,7 @@ describe('useWorkspaceOpen', () => {
     const deniedOverseerDispose = vi.fn<() => void>()
     const deniedOverseer = disposableStub({
       subscribeToMetadata: vi.fn<() => Promise<RpcStub<{}>>>(async () => {
-        throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceAccessDenied)
+        throw createOpenWorkspaceError(OPEN_WORKSPACE_ERROR_CODES.workspaceAccessDenied)
       }),
     }, deniedOverseerDispose) as unknown as RpcStub<Overseer>
 

@@ -157,6 +157,11 @@ export default function GadgetCodeInterface({ overseer, filesRoot, height = '100
   // React state for UI
   const [fileNames, setFileNames] = useState<string[]>([])
   const [activeFile, setActiveFile] = useState<string | null>(null)
+  
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('editorContextChange', { detail: { activeFile } }))
+  }, [activeFile])
+
   const fileSidebarRef = useRef<FileSidebarHandle | null>(null)
   const [isReady, setIsReady] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -606,8 +611,11 @@ export default function GadgetCodeInterface({ overseer, filesRoot, height = '100
         updateQueueRef.current.splice(0, sameTargetCount);
 
         // More updates may have been queued in the meantime. Loop to handle them.
-
-        // TODO: Consider putting a small delay here to coalesce more continuous keystrokes?
+        
+        // Coalesce continuous keystrokes with a small delay before the next send.
+        if (updateQueueRef.current.length > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
       }
     } finally {
       isSendingRef.current = false

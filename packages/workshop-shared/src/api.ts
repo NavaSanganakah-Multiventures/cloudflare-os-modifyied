@@ -267,26 +267,26 @@ function codedErrorFamily<Code extends string>(messages: Record<Code, string>) {
   };
 }
 
-/** Stable error codes attached to expected failures from `AuthenticatedApi.openGadget()`. */
-export const OPEN_GADGET_ERROR_CODES = {
+/** Stable error codes attached to expected failures from `AuthenticatedApi.openWorkspace()`. */
+export const OPEN_WORKSPACE_ERROR_CODES = {
   workspaceNotFound: "WORKSPACE_NOT_FOUND",
   workspaceAccessDenied: "WORKSPACE_ACCESS_DENIED",
 } as const;
 
-/** An expected failure code from `AuthenticatedApi.openGadget()`. */
-export type OpenGadgetErrorCode =
-    typeof OPEN_GADGET_ERROR_CODES[keyof typeof OPEN_GADGET_ERROR_CODES];
+/** An expected failure code from `AuthenticatedApi.openWorkspace()`. */
+export type OpenWorkspaceErrorCode =
+    typeof OPEN_WORKSPACE_ERROR_CODES[keyof typeof OPEN_WORKSPACE_ERROR_CODES];
 
-const openGadgetErrors = codedErrorFamily<OpenGadgetErrorCode>({
-  [OPEN_GADGET_ERROR_CODES.workspaceNotFound]: "Workspace not found.",
-  [OPEN_GADGET_ERROR_CODES.workspaceAccessDenied]: "You don't have access to this workspace.",
+const openWorkspaceErrors = codedErrorFamily<OpenWorkspaceErrorCode>({
+  [OPEN_WORKSPACE_ERROR_CODES.workspaceNotFound]: "Workspace not found.",
+  [OPEN_WORKSPACE_ERROR_CODES.workspaceAccessDenied]: "You don't have access to this workspace.",
 });
 
-/** Creates an expected `openGadget()` error with a machine-readable code. */
-export const createOpenGadgetError = openGadgetErrors.create;
+/** Creates an expected `openWorkspace()` error with a machine-readable code. */
+export const createOpenWorkspaceError = openWorkspaceErrors.create;
 
-/** Reads the machine-readable code from an expected `openGadget()` error. */
-export const getOpenGadgetErrorCode = openGadgetErrors.getCode;
+/** Reads the machine-readable code from an expected `openWorkspace()` error. */
+export const getOpenWorkspaceErrorCode = openWorkspaceErrors.getCode;
 
 /** Stable error codes attached to authentication failures. */
 export const AUTH_ERROR_CODES = {
@@ -399,7 +399,7 @@ export interface AuthenticatedApi extends RpcTarget {
   // can be pipelined on the returned Overseer.
   //
   // To allow for pipelining, this throws an exception if the gadget doesn't exist. Expected
-  // missing and authorization failures carry a code from `OPEN_GADGET_ERROR_CODES`.
+  // missing and authorization failures carry a code from `OPEN_WORKSPACE_ERROR_CODES`.
   //
   // `configureObservers` is invoked only when the opening user is a non-owner who must choose
   // connected accounts for one or more gatekeeper bindings before they can observe the gadget (see
@@ -407,7 +407,7 @@ export interface AuthenticatedApi extends RpcTarget {
   // so the common-case open is still a single pipelined round trip.
   //
   // TODO(multi-gadget): This should be renamed to openWorkspace().
-  openGadget(id: string, shareKey?: string,
+  openWorkspace(id: string, shareKey?: string,
              configureObservers?: RpcStub<ObserverConfigCallback>): Promise<RpcStub<Overseer>>;
 
   // Create a new workspace. It will start out titled "Untitled Workspace".
@@ -420,21 +420,21 @@ export interface AuthenticatedApi extends RpcTarget {
   //   chat message without explicitly creating a new gadget.
   //
   // TODO(multi-gadget): This should be renamed to newWorkspace().
-  newGadget(): Promise<RpcStub<Overseer>>;
+  newWorkspace(): Promise<RpcStub<Overseer>>;
 
   // List metadata about all the user's Gadgets. Used to display the front-page listing.
   //
   // Provisional gadgets are hidden.
   //
   // TODO: Pagination, sort options.
-  listGadgets(): Promise<GadgetMetadataWithTimestamps[]>;
+  listWorkspaces(): Promise<GadgetMetadataWithTimestamps[]>;
 
   // List the outputs of all the user's workspaces. Used to display the Outputs page, which lets
   // the user find things they made without remembering which workspace they made them in.
   //
   // Served from an index in the user's own account which each workspace pushes to; a workspace
   // shared with the user contributes its outputs from the first time the user opens it (matching
-  // when it appears in listGadgets()), and stops updating them if their access is revoked.
+  // when it appears in listWorkspaces()), and stops updating them if their access is revoked.
   // Provisional gadgets (still awaiting acceptance of a chat's changes) are never included.
   //
   // TODO: Pagination, sort options.
@@ -546,7 +546,7 @@ export interface AuthenticatedApi extends RpcTarget {
   // keyed by binding name. Throws if any are missing or if accountId/modelId are invalid.
   //
   // The returned Overseer can be used immediately (pipelining-friendly).
-  newGadgetFromBlueprint(
+  newWorkspaceFromBlueprint(
     blueprintId: string,
     bindings: Record<string, BlueprintBindingAssignment>
   ): Promise<RpcStub<Overseer>>;
@@ -1027,7 +1027,7 @@ export const SUGGESTED_MODELS: Record<
 //
 // TODO(multi-gadget): Rename `WorkspaceMetadata`.
 export type GadgetMetadata = {
-  // Unique ID for this workspace, used with `openGadget()`. This is a url-safe base64 value
+  // Unique ID for this workspace, used with `openWorkspace()`. This is a url-safe base64 value
   // chosen randomly when the workspace is created.
   id: string;
 
@@ -1107,7 +1107,7 @@ export type BlueprintOutput = {
 };
 
 // One entry of the "New ..." menu, as returned by `listOutputFormats()`. This names a blueprint the
-// deployment has promoted, instantiated with `newGadgetFromBlueprint(blueprintId, ...)` like any other.
+// deployment has promoted, instantiated with `newWorkspaceFromBlueprint(blueprintId, ...)` like any other.
 export type OutputFormatOffer = {
   blueprintId: string;
 
@@ -1141,7 +1141,7 @@ export type ListOutputsResult = {
 // One entry in the user's output index: something a workspace produced that the user can open
 // directly.
 export type OutputSummary = {
-  // The workspace that contains this output (an `openGadget()` id).
+  // The workspace that contains this output (an `openWorkspace()` id).
   workspaceId: string;
 
   // The workpiece within that workspace. `(workspaceId, workpieceId)` uniquely identifies an
@@ -1345,7 +1345,7 @@ export interface Overseer extends RpcTarget {
       : Promise<RpcStub<{}>>;
 
   // Receive the current viewer roster, then incremental updates as viewers come and go.
-  // A viewer is present for the lifetime of the openGadget() session.
+  // A viewer is present for the lifetime of the openWorkspace() session.
   subscribeToPresence(subscriber: RpcStub<PresenceSubscriber>): Promise<RpcStub<{}>>;
 
   // Change the workspace title.
@@ -1557,6 +1557,9 @@ export interface Overseer extends RpcTarget {
   newChat(initialMessage: string | SlashCommandRequest, modelId: string | null,
           capsules?: CapsuleSpecifier[], attachments?: ChatAttachmentHandle[],
           formats?: MessageFormatRef[]): Promise<number>;
+
+  // Spawns a background agent turn (Jules-like) to optimize the codebase.
+  triggerBackgroundAnalysis(): Promise<void>;
 
   // Send a message to the chat from this client. Sending a message causes the LLM to start
   // running if it isn't already.
@@ -2731,7 +2734,7 @@ export type BlueprintLibrarySummary = {
   pinned?: boolean;
 };
 
-// Binding assignment (input to newGadgetFromBlueprint).
+// Binding assignment (input to newWorkspaceFromBlueprint).
 // When instantiating a blueprint, the user provides a Record mapping binding name ->
 // assignment. Every required binding in the blueprint must have a corresponding entry.
 export type BlueprintBindingAssignment = {

@@ -231,6 +231,7 @@ export function makeStoredAssistantMessage(message: AssistantMessage): StoredAss
 //   factor out some sort of chat context object here -- maybe merge with LiveChatContext in
 //   overseer.ts?
 export interface AgentHooks {
+  getEnv(): Env;
   getChatAgentContext(chatId: number): AiChatAgentContext;
   buildYDoc(version: number | "current"): {ydoc: Y.Doc, version: number};
 
@@ -534,6 +535,18 @@ Typically (but not always), you will need to use the \`executeCode\` tool to com
 
 let READ_FILE_TOOL_DESCRIPTION = `
 Read the content of a file owned by one of the workspace's gadgets. Note that you will be informed any time a file changes, so it is not necessary to read a file again after you have already read it once. This cannot read chat attachments; attachments are provided directly in the conversation.
+`.trim();
+
+let GREP_SEARCH_TOOL_DESCRIPTION = `
+Search for a string or regular expression pattern across all files in the given workpiece (gadget). Use this to quickly find usages, variable definitions, or error messages without having to read all files manually.
+`.trim();
+
+let SEARCH_MEMORY_TOOL_DESCRIPTION = `
+Search the user's semantic memory (Vector Database) for past context, code snippets, or architectural decisions using natural language queries.
+`.trim();
+
+let SAVE_TO_MEMORY_TOOL_DESCRIPTION = `
+Save important information, decisions, or code snippets to the user's semantic memory (Vector Database) so you can recall it in future chat sessions.
 `.trim();
 
 let CREATE_GADGET_TOOL_DESCRIPTION = `
@@ -2255,6 +2268,19 @@ export async function runAgent(
         // An empty summary would discard the compacted history, so keep the history instead.
         if (!summary) throw new Error("Compaction produced an empty summary.");
 
+        // SEMANTIC COMPACTION: Save the compacted history summary to Vector Memory
+        try {
+          let env = hooks.getEnv();
+          // @ts-ignore
+          let embeddingResponse = await env.AI.run("@cf/baai/bge-base-en-v1.5", { text: [summary] });
+          let vector = embeddingResponse.data[0];
+          let id = crypto.randomUUID();
+          // @ts-ignore
+          await env.VECTOR_MEMORY.insert([{ id, values: vector, metadata: { text: "Chat Compaction Summary:\\n" + summary } }]);
+        } catch (memErr) {
+          logger.warn("failed to save compaction to vector memory", { error: memErr });
+        }
+
         return {
           chatId,
           compactedTo,
@@ -2307,6 +2333,71 @@ export async function runAgent(
   });
 
   let tools: Record<string, AgentTool> = {
+    searchMemory: defineTool({
+      name: "searchMemory",
+      label: "Search semantic memory",
+      description: SEARCH_MEMORY_TOOL_DESCRIPTION,
+      parameters: Type.Object({
+        query: Type.String({description: "Natural language query to search for in the vector database."}),
+      }),
+      execute: async (toolCallId, {query}) => {
+        try {
+          let env = hooks.getEnv();
+          // Generate embedding for the query
+          // @ts-ignore Cloudflare Workers AI types
+          let embeddingResponse = await env.AI.run("@cf/baai/bge-base-en-v1.5", { text: [query] });
+          if (!embeddingResponse || !embeddingResponse.data || embeddingResponse.data.length === 0) {
+            return toolResult("Failed to generate embedding for the query.");
+          }
+          let vector = embeddingResponse.data[0];
+
+          // Search the vectorize index
+          // @ts-ignore Cloudflare Vectorize types
+          let queryResponse = await env.VECTOR_MEMORY.query(vector, { topK: 5, returnMetadata: "all" });
+          
+          if (!queryResponse.matches || queryResponse.matches.length === 0) {
+            return toolResult("No relevant memory found.");
+          }
+
+          let results = queryResponse.matches.map((m: any) => m.metadata.text).join('\\n\\n--- \\n\\n');
+          return toolResult(`Found in memory:\\n\\n${results}`);
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          throw error;
+        }
+      }
+    }),
+
+    saveToMemory: defineTool({
+      name: "saveToMemory",
+      label: "Save to memory",
+      description: SAVE_TO_MEMORY_TOOL_DESCRIPTION,
+      parameters: Type.Object({
+        content: Type.String({description: "The information to save to memory."}),
+      }),
+      execute: async (toolCallId, {content}) => {
+        try {
+          let env = hooks.getEnv();
+          // Generate embedding
+          // @ts-ignore
+          let embeddingResponse = await env.AI.run("@cf/baai/bge-base-en-v1.5", { text: [content] });
+          if (!embeddingResponse || !embeddingResponse.data || embeddingResponse.data.length === 0) {
+            return toolResult("Failed to generate embedding for the content.");
+          }
+          let vector = embeddingResponse.data[0];
+
+          let id = crypto.randomUUID();
+          // @ts-ignore
+          await env.VECTOR_MEMORY.insert([{ id, values: vector, metadata: { text: content } }]);
+
+          return toolResult(`Successfully saved to memory with ID: ${id}`);
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          throw error;
+        }
+      }
+    }),
+
     readFile: defineTool({
       name: "readFile",
       label: "Read file",
@@ -2328,6 +2419,62 @@ export async function runAgent(
           }
           filesRead.add(fileKey(resolved.workpieceId, filename));
           return toolResult(text.toString(), {
+            observedCodeVersion: versionLock!
+          });
+        } catch (error) {
+          toolCallNotes.set(toolCallId, {
+            observedCodeVersion: versionLock!,
+            error: toolErrorText(error)
+          });
+          throw error;
+        }
+      }
+    }),
+
+    grepSearch: defineTool({
+      name: "grepSearch",
+      label: "Search code",
+      description: GREP_SEARCH_TOOL_DESCRIPTION,
+      parameters: Type.Object({
+        workpiece: workpieceParam,
+        query: Type.String({description: "The string or regex pattern to search for."}),
+        isRegex: Type.Optional(Type.Boolean({description: "Whether the query is a regular expression. Defaults to false."})),
+        caseInsensitive: Type.Optional(Type.Boolean({description: "Whether the search should be case insensitive. Defaults to false."}))
+      }),
+      execute: async (toolCallId, {workpiece, query, isRegex, caseInsensitive}) => {
+        try {
+          let resolved = hooks.resolveWorkpieceRoot(resolveToolWorkpieceId(workpiece), true, chatId);
+          let results: string[] = [];
+          
+          let regex: RegExp;
+          try {
+             let flags = "g";
+             if (caseInsensitive) flags += "i";
+             regex = new RegExp(isRegex ? query : query.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&'), flags);
+          } catch (e) {
+             throw new Error("Invalid regular expression.");
+          }
+
+          for (let [filename, text] of getSessionYDoc().getMap<Y.Text>(resolved.rootName)) {
+            let fileContent = text.toString();
+            let lines = fileContent.split('\\n');
+            let fileResults: string[] = [];
+            for (let i = 0; i < lines.length; i++) {
+              if (regex.test(lines[i])) {
+                fileResults.push(`${i + 1}: ${lines[i]}`);
+              }
+            }
+            if (fileResults.length > 0) {
+              results.push(`--- ${filename} ---\\n${fileResults.join('\\n')}`);
+            }
+          }
+          
+          let output = results.length > 0 ? results.join('\\n\\n') : "No matches found.";
+          if (output.length > 20000) {
+             output = output.substring(0, 20000) + "\\n\\n...[Truncated due to length]";
+          }
+
+          return toolResult(output, {
             observedCodeVersion: versionLock!
           });
         } catch (error) {

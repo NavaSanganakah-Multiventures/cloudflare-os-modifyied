@@ -115,7 +115,7 @@ export function useWorkspaceOpen({
         })()
         configureObservers = new RpcStub(configureObserversTarget)
 
-        overseerStub = authenticatedApi.openGadget(id, shareKey, configureObservers)
+        overseerStub = authenticatedApi.openWorkspace(id, shareKey, configureObservers)
         setOverseer({ stub: overseerStub })
 
         const resolvedSubscription = await overseerStub.subscribeToMetadata((nextMetadata) => {

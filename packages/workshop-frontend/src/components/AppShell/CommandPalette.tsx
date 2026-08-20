@@ -179,7 +179,7 @@ export default function CommandPalette({
     const isFresh = paletteCache && Date.now() - paletteCache.fetchedAt < PALETTE_CACHE_TTL_MS
     if (!isFresh) {
       Promise.all([
-        authenticatedApi.listGadgets(),
+        authenticatedApi.listWorkspaces(),
         authenticatedApi.listOwnBlueprints(),
         authenticatedApi.listLibraryBlueprints(),
         authenticatedApi.listOutputFormats(),

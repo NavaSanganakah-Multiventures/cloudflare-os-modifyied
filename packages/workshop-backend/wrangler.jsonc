@@ -59,6 +59,13 @@
     }
   ],
 
+  "vectorize": [
+    {
+      "binding": "VECTOR_MEMORY",
+      "index_name": "memory_index"
+    }
+  ],
+
   // All DO classes (UserDurableObject, OverseerDurableObject, AdminSettings, PendingLogin, ...) are
   // reached via ctx.exports and need no explicit durable_objects binding.
   "kv_namespaces": [
@@ -93,6 +100,9 @@
   //   "not_found_handling": "single-page-application",
   //   "run_worker_first": ["/api", "/api/*", "/blueprint-screenshot/*"]
   // },
+  "triggers": {
+    "crons": ["*/30 * * * *"]
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,

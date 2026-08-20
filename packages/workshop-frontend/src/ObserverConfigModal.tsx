@@ -24,7 +24,7 @@ import { AccountsSubscriberAdapter } from './accountsSubscriber'
 // to the data the Gadget read — that's how we uphold the "observers can't see data they couldn't
 // otherwise read" invariant. See observers-implementation-plan.md §5 Step 4.
 //
-// The overseer invokes ObserverConfigCallback.configure(needs) during openGadget(); this modal is
+// The overseer invokes ObserverConfigCallback.configure(needs) during openWorkspace(); this modal is
 // what fulfills that call. Resolving with one ObserverAccountChoice per need lets the open proceed;
 // cancelling rejects it (the open is denied and the caller shows an access-denied page).
 

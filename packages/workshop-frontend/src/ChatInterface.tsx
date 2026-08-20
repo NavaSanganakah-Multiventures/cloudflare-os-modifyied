@@ -4296,6 +4296,13 @@ function ChatInterface({
   // UI state
   const [_isSubscribed, setIsSubscribed] = useState(false);
   const [chatListReady, setChatListReady] = useState(false);
+  const [activeFileContext, setActiveFileContext] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleContextChange = (e: any) => setActiveFileContext(e.detail?.activeFile || null);
+    window.addEventListener('editorContextChange', handleContextChange);
+    return () => window.removeEventListener('editorContextChange', handleContextChange);
+  }, []);
   // Out-of-credits modal (free-tier limit reached). `usageModalShownFor` tracks the error sequence
   // we've already auto-opened for, so dismissing it doesn't immediately reopen.
   const [usageModalOpen, setUsageModalOpen] = useState(false);
@@ -5393,7 +5400,10 @@ function ChatInterface({
     attachments?: ChatAttachmentHandle[],
     formats?: MessageFormatRef[],
   ) => {
-    const message = typeof messageText === "string" ? messageText.trim() : messageText ?? "";
+    let message = typeof messageText === "string" ? messageText.trim() : messageText ?? "";
+    if (typeof message === "string" && message && activeFileContext && !message.includes(activeFileContext)) {
+      message = `[Context: User is currently viewing \`${activeFileContext}\`]\n\n${message}`;
+    }
     if (!message && (!attachments || attachments.length === 0)) return;
 
     // Use provided modelId or fall back to selectedModel
@@ -5432,7 +5442,10 @@ function ChatInterface({
     attachments?: ChatAttachmentHandle[],
     formats?: MessageFormatRef[],
   ) => {
-    const message = typeof messageText === "string" ? messageText.trim() : messageText ?? "";
+    let message = typeof messageText === "string" ? messageText.trim() : messageText ?? "";
+    if (typeof message === "string" && message && activeFileContext && !message.includes(activeFileContext)) {
+      message = `[Context: User is currently viewing \`${activeFileContext}\`]\n\n${message}`;
+    }
     if (!message && (!attachments || attachments.length === 0)) return;
     const model = modelId !== undefined ? modelId : selectedModel;
     try {
