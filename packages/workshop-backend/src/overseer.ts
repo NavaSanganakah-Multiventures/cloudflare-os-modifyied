@@ -7534,7 +7534,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       // blocked by the GitHub gatekeeper itself, so the repo's default branch is still protected.
       let patterns: string[] | undefined;
       try {
-        patterns = await result.getDefaultAutoApproveBranchPatterns();
+        patterns = await result.getGatekeeperDefaultAutoApproveBranchPatterns();
       } catch {
         patterns = undefined;
       }
@@ -7894,6 +7894,10 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
 
   async getDefaultAutoApproveBranchPatterns(): Promise<string[] | undefined> {
     return this.impl.storage.defaultAutoApproveBranchPatterns.get();
+  }
+
+  async getGatekeeperDefaultAutoApproveBranchPatterns(): Promise<string[] | undefined> {
+    return (this.facet as any).getDefaultAutoApproveBranchPatterns?.();
   }
 
   async setDefaultAutoApproveBranchPatterns(patterns: string[]): Promise<void> {
