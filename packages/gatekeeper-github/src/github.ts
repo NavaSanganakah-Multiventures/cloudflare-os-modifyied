@@ -3547,6 +3547,12 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     ];
   }
 
+  async getDefaultAutoApproveBranchPatterns(): Promise<string[]> {
+    const metadata = await this.repoMetadata();
+    const defaultBranch = defaultBranchFromMetadata(metadata);
+    return ['fix/*', 'feature/*', 'agent/*', '*', `!${defaultBranch}`];
+  }
+
   async submitActionForApproval(
     approvalQueue: RpcStub<ApprovalQueue>,
     action: GitHubAction,
