@@ -802,7 +802,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return this.getChatContext(selectedModel?.id ?? null);
   }
 
-  async listGadgets(): Promise<GadgetMetadataWithTimestamps[]> {
+  async listWorkspaces(): Promise<GadgetMetadataWithTimestamps[]> {
     let result: GadgetMetadataWithTimestamps[] = [];
     for (let gadget of this.storage.gadgets.list()) {
       if (isFullyCreated(gadget)) {
@@ -834,14 +834,14 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return this.storage.gadgets.get(id) || null;
   }
 
-  async newGadget(id: string, title: string): Promise<void> {
+  async newWorkspace(id: string, title: string): Promise<void> {
     let created = new Date();
     this.storage.gadgets.put({id, title, created});
   }
 
   async ensureGadgetRegistered(id: string, title: string): Promise<void> {
     if (this.storage.gadgets.get(id)) return;
-    await this.newGadget(id, title);
+    await this.newWorkspace(id, title);
   }
 
   async setGadgetLastActive(id: string, time: Date, totalCost: number | undefined): Promise<void> {

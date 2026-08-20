@@ -134,3 +134,22 @@ Instead:
    approval queue, so an admin must approve before anything is applied on GitHub.
 4. For existing files, obtain the blob `sha` by calling `readFile(path)` on the default branch
    before proposing the change.
+
+## Running Builds for Connected GitHub Repositories
+
+When you need to build/test code in a connected GitHub repository (for example Flutter or C++
+projects), do not try to build inside the agent sandbox. Instead, use the repository build
+executor feature exposed by the GitHubRepo binding.
+
+1. Call `repo.getResolvedBuildStrategy()` to determine whether builds go to **GitHub Actions**
+   or **Cloudflare Containers**. Default policy (Phase 1): public repos use GitHub Actions;
+   private/internal repos use Cloudflare Containers. The user can override this per repo
+   from the resource connection UI.
+2. If the resolved strategy is `githubActions`, trigger the appropriate workflow with
+   `repo.dispatchWorkflow()`. Provide the branch name and any required workflow inputs.
+3. If the resolved strategy is `cloudflareContainers`, run commands directly with
+   `repo.executeBuild(branch, commands)`. Pass an array of `{ command, label? }` objects.
+   The commands execute in a Cloudflare Container that includes Flutter, Android tools, and a
+   C/C++ toolchain (`build-essential`, `cmake`, `clang`, `ninja-build`).
+4. Always propose code changes first, then run the build on the resulting feature branch, and
+   report the build result (exit code, stdout, stderr) back to the user.

@@ -144,7 +144,7 @@ export default function Activity({
       if (result) {
         setStatusResult(result)
       } else {
-        toasts.add({ title: 'Status tracking not supported for this action', variant: 'error' })
+        toasts.add({ title: 'Status tracking not supported for this action', variant: 'info' })
       }
     } catch (e: any) {
       toasts.add({ title: 'Failed to check status', variant: 'error' })
@@ -340,7 +340,7 @@ export default function Activity({
                         ? togglingHooks.has(record.hookId)
                         : false}
                       onToggleHook={handleToggleHook}
-                      onCheckStatus={record.type === 'action' && record.description.title.toLowerCase().includes('workflow') ? () => void checkWorkflowStatus(record.id) : undefined}
+                      onCheckStatus={record.type === 'action' && record.description.actionKind?.tag === 'githubDispatchWorkflow' ? () => void checkWorkflowStatus(record.id) : undefined}
                       isCheckingStatus={checkingStatus === record.id}
                     />
                   ))}

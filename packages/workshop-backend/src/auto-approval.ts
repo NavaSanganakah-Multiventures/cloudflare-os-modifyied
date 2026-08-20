@@ -41,7 +41,7 @@ export function autoApprovalGate(
   if (description.actionKind.branchScoped !== false &&
       rule.branchPatterns && rule.branchPatterns.length > 0 &&
       (description.branchRef === undefined ||
-       !branchMatchesPatterns(description.branchRef, rule.branchPatterns))) {
+       !branchMatchesPatterns(normalizeBranchRef(description.branchRef), rule.branchPatterns))) {
     return "branch";
   }
   return "eligible";
@@ -83,6 +83,12 @@ function matchesGlob(str: string, pattern: string): boolean {
     pos = idx + part.length;
   }
   return pos <= end;
+}
+
+// Normalize a branch ref to a short branch name before pattern matching, so
+// patterns like "!main" work whether the gatekeeper passes "main" or "refs/heads/main".
+function normalizeBranchRef(branchRef: string): string {
+  return branchRef.replace(/^refs\/heads\//, "");
 }
 
 // Applies a single eligible pending action: invoke the gatekeeper, mark it approved, persist. The

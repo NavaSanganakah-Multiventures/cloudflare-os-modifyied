@@ -1,7 +1,7 @@
 import { RpcStub, RpcTarget, newWorkersRpcResponse } from "capnweb";
 import { validateRpc } from "capnweb-validate";
 import type { JWTPayload } from "jose";
-import { PublicApi, AuthenticatedApi, Overseer, GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, AiGatewayInfo, AiModelProvider, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, ObserverConfigCallback, BlueprintLibrarySummary, BlueprintPublicInfo, BlueprintUserSummary, BlueprintBindingAssignment, AgentSpawnerConfig, WorkpieceId, BLUEPRINT_SCREENSHOT_PATH_PREFIX, BLUEPRINT_SCREENSHOT_R2_PREFIX, blueprintScreenshotUrl, ServerConfig, CloudflareUsageInfo, CloudflareAccountOption, LoginAttempt, GatekeeperAppInfo, AdminApi, GatekeeperVendorInfo, OutputFormatOffer, ListOutputsResult, createOpenGadgetError, getOpenGadgetErrorCode, OPEN_GADGET_ERROR_CODES, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
+import { PublicApi, AuthenticatedApi, Overseer, GadgetMetadataWithTimestamps, AiChatAuthorInfo, AiModelConfig, AiGatewayInfo, AiModelProvider, ConnectedAccountsSubscriber, ConnectedAccountsFilter, GatekeeperVendorFilter, ObserverConfigCallback, BlueprintLibrarySummary, BlueprintPublicInfo, BlueprintUserSummary, BlueprintBindingAssignment, AgentSpawnerConfig, WorkpieceId, BLUEPRINT_SCREENSHOT_PATH_PREFIX, BLUEPRINT_SCREENSHOT_R2_PREFIX, blueprintScreenshotUrl, ServerConfig, CloudflareUsageInfo, CloudflareAccountOption, LoginAttempt, GatekeeperAppInfo, AdminApi, GatekeeperVendorInfo, OutputFormatOffer, ListOutputsResult, createOpenWorkspaceError, getOpenWorkspaceErrorCode, OPEN_WORKSPACE_ERROR_CODES, AUTH_ERROR_CODES, createAuthError } from '@gadgets/workshop-shared/api';
 import type { UiFeatureFlags } from "@gadgets/workshop-shared/feature-flags";
 import { getServerConfig } from "./deployment-config.js";
 import { isPasswordAuthEnabled, getAuthGatekeeperAllowlist } from "./auth/config.js";
@@ -246,7 +246,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     return resolveUiFeatureFlags(this.env, this.user.id.name!);
   }
 
-  async #openGadgetInternal(id: string, shareKey?: string,
+  async #openWorkspaceInternal(id: string, shareKey?: string,
                             configureObservers?: RpcStub<ObserverConfigCallback>)
       : Promise<NativeRpcStub<Overseer>> {
     let userId = this.user.id.toString();
@@ -255,7 +255,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     try {
       overseerId = this.overseers.idFromString(id);
     } catch {
-      throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceNotFound);
+      throw createOpenWorkspaceError(OPEN_WORKSPACE_ERROR_CODES.workspaceNotFound);
     }
     let overseer = this.overseers.get(overseerId);
 
@@ -290,7 +290,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
       // A denial proves this user's listing for the workspace is stale: revocation tries to drop it
       // (refreshAffectedCollaboratorListings), but that push is best-effort. Only catches entries
       // they click; others stay frozen at revocation, as a disconnected collaborator gets no pushes.
-      if (getOpenGadgetErrorCode(err) === OPEN_GADGET_ERROR_CODES.workspaceAccessDenied) {
+      if (getOpenWorkspaceErrorCode(err) === OPEN_WORKSPACE_ERROR_CODES.workspaceAccessDenied) {
         await this.user.forgetSharedGadget(id);
       }
       throw err;
@@ -305,32 +305,32 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     return result;
   }
 
-  async openGadget(id: string, shareKey?: string,
+  async openWorkspace(id: string, shareKey?: string,
                    configureObservers?: RpcStub<ObserverConfigCallback>)
       : Promise<RpcStub<Overseer>> {
     // @ts-expect-error Cap'n Web RPC stubs and native RPC stubs are compatible but the type
     //     system doesn't know this.
-    return this.#openGadgetInternal(id, shareKey, configureObservers);
+    return this.#openWorkspaceInternal(id, shareKey, configureObservers);
   }
 
-  async newGadget(): Promise<RpcStub<Overseer>> {
+  async newWorkspace(): Promise<RpcStub<Overseer>> {
     let id = this.overseers.newUniqueId().toString();
-    await this.user.newGadget(id, "Untitled Workspace");
+    await this.user.newWorkspace(id, "Untitled Workspace");
     recordAnalytics(this.ctx, this.env, {
       event_name: "gadget_created",
       user_id: this.user.id.toString(),
       gadget_id: id,
       source: "blank",
     });
-    let result = await this.openGadget(id);
+    let result = await this.openWorkspace(id);
     if (!result) {
       throw new Error("Open failed despite newly-created workspace?");
     }
     return result;
   }
 
-  async listGadgets(): Promise<GadgetMetadataWithTimestamps[]> {
-    return this.user.listGadgets();
+  async listWorkspaces(): Promise<GadgetMetadataWithTimestamps[]> {
+    return this.user.listWorkspaces();
   }
 
   listOutputs(): Promise<ListOutputsResult> {
@@ -463,7 +463,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     }
   }
 
-  async newGadgetFromBlueprint(
+  async newWorkspaceFromBlueprint(
     blueprintId: string,
     bindings: Record<string, BlueprintBindingAssignment>
   ): Promise<RpcStub<Overseer>> {
@@ -475,10 +475,10 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     let codeBytes = await readBlueprintContent(this.env, blueprintId, kvRecord.metadata.version);
     if (!codeBytes) throw new Error("Blueprint content not found in R2.");
 
-    // 3. Create new Overseer DO (same as newGadget()).
+    // 3. Create new Overseer DO (same as newWorkspace()).
     let id = this.overseers.newUniqueId().toString();
-    await this.user.newGadget(id, kvRecord.metadata.title);
-    let overseerResult = await this.#openGadgetInternal(id);
+    await this.user.newWorkspace(id, kvRecord.metadata.title);
+    let overseerResult = await this.#openWorkspaceInternal(id);
 
     // 4. Initialize from blueprint code.
     let overseerDo = this.overseers.get(this.overseers.idFromString(id));
@@ -907,5 +907,18 @@ export default {
     }
 
     return new Response("Not Found", {status: 404});
+  },
+
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    logger.info("Autonomous Background Agent (Jules) triggered", { event: "agent.scheduled" });
+    
+    // TODO: In the full implementation, this will:
+    // 1. Query the database for active workspaces
+    // 2. Spawn a background agent turn for each workspace that needs optimization
+    // 3. Use the agent loop to analyze code, run type checks, and generate proposed changes
+    
+    ctx.waitUntil((async () => {
+       // Implementation of proactive bug fixing & code optimization goes here
+    })());
   }
 } satisfies ExportedHandler<Env>;

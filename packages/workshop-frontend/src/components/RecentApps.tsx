@@ -78,7 +78,7 @@ export default function RecentApps() {
 
   useEffect(() => {
     let cancelled = false
-    authenticatedApi.listGadgets().then((list) => {
+    authenticatedApi.listWorkspaces().then((list) => {
       if (cancelled) return
       const sorted = [...list].toSorted((a, b) => b.lastActive.getTime() - a.lastActive.getTime())
       setGadgets(sorted.slice(0, 4))

@@ -267,26 +267,26 @@ function codedErrorFamily<Code extends string>(messages: Record<Code, string>) {
   };
 }
 
-/** Stable error codes attached to expected failures from `AuthenticatedApi.openGadget()`. */
-export const OPEN_GADGET_ERROR_CODES = {
+/** Stable error codes attached to expected failures from `AuthenticatedApi.openWorkspace()`. */
+export const OPEN_WORKSPACE_ERROR_CODES = {
   workspaceNotFound: "WORKSPACE_NOT_FOUND",
   workspaceAccessDenied: "WORKSPACE_ACCESS_DENIED",
 } as const;
 
-/** An expected failure code from `AuthenticatedApi.openGadget()`. */
-export type OpenGadgetErrorCode =
-    typeof OPEN_GADGET_ERROR_CODES[keyof typeof OPEN_GADGET_ERROR_CODES];
+/** An expected failure code from `AuthenticatedApi.openWorkspace()`. */
+export type OpenWorkspaceErrorCode =
+    typeof OPEN_WORKSPACE_ERROR_CODES[keyof typeof OPEN_WORKSPACE_ERROR_CODES];
 
-const openGadgetErrors = codedErrorFamily<OpenGadgetErrorCode>({
-  [OPEN_GADGET_ERROR_CODES.workspaceNotFound]: "Workspace not found.",
-  [OPEN_GADGET_ERROR_CODES.workspaceAccessDenied]: "You don't have access to this workspace.",
+const openWorkspaceErrors = codedErrorFamily<OpenWorkspaceErrorCode>({
+  [OPEN_WORKSPACE_ERROR_CODES.workspaceNotFound]: "Workspace not found.",
+  [OPEN_WORKSPACE_ERROR_CODES.workspaceAccessDenied]: "You don't have access to this workspace.",
 });
 
-/** Creates an expected `openGadget()` error with a machine-readable code. */
-export const createOpenGadgetError = openGadgetErrors.create;
+/** Creates an expected `openWorkspace()` error with a machine-readable code. */
+export const createOpenWorkspaceError = openWorkspaceErrors.create;
 
-/** Reads the machine-readable code from an expected `openGadget()` error. */
-export const getOpenGadgetErrorCode = openGadgetErrors.getCode;
+/** Reads the machine-readable code from an expected `openWorkspace()` error. */
+export const getOpenWorkspaceErrorCode = openWorkspaceErrors.getCode;
 
 /** Stable error codes attached to authentication failures. */
 export const AUTH_ERROR_CODES = {
@@ -414,7 +414,7 @@ export interface AuthenticatedApi extends RpcTarget {
   // can be pipelined on the returned Overseer.
   //
   // To allow for pipelining, this throws an exception if the gadget doesn't exist. Expected
-  // missing and authorization failures carry a code from `OPEN_GADGET_ERROR_CODES`.
+  // missing and authorization failures carry a code from `OPEN_WORKSPACE_ERROR_CODES`.
   //
   // `configureObservers` is invoked only when the opening user is a non-owner who must choose
   // connected accounts for one or more gatekeeper bindings before they can observe the gadget (see
@@ -422,7 +422,7 @@ export interface AuthenticatedApi extends RpcTarget {
   // so the common-case open is still a single pipelined round trip.
   //
   // TODO(multi-gadget): This should be renamed to openWorkspace().
-  openGadget(id: string, shareKey?: string,
+  openWorkspace(id: string, shareKey?: string,
              configureObservers?: RpcStub<ObserverConfigCallback>): Promise<RpcStub<Overseer>>;
 
   // Create a new workspace. It will start out titled "Untitled Workspace".
@@ -435,21 +435,21 @@ export interface AuthenticatedApi extends RpcTarget {
   //   chat message without explicitly creating a new gadget.
   //
   // TODO(multi-gadget): This should be renamed to newWorkspace().
-  newGadget(): Promise<RpcStub<Overseer>>;
+  newWorkspace(): Promise<RpcStub<Overseer>>;
 
   // List metadata about all the user's Gadgets. Used to display the front-page listing.
   //
   // Provisional gadgets are hidden.
   //
   // TODO: Pagination, sort options.
-  listGadgets(): Promise<GadgetMetadataWithTimestamps[]>;
+  listWorkspaces(): Promise<GadgetMetadataWithTimestamps[]>;
 
   // List the outputs of all the user's workspaces. Used to display the Outputs page, which lets
   // the user find things they made without remembering which workspace they made them in.
   //
   // Served from an index in the user's own account which each workspace pushes to; a workspace
   // shared with the user contributes its outputs from the first time the user opens it (matching
-  // when it appears in listGadgets()), and stops updating them if their access is revoked.
+  // when it appears in listWorkspaces()), and stops updating them if their access is revoked.
   // Provisional gadgets (still awaiting acceptance of a chat's changes) are never included.
   //
   // TODO: Pagination, sort options.
@@ -561,7 +561,7 @@ export interface AuthenticatedApi extends RpcTarget {
   // keyed by binding name. Throws if any are missing or if accountId/modelId are invalid.
   //
   // The returned Overseer can be used immediately (pipelining-friendly).
-  newGadgetFromBlueprint(
+  newWorkspaceFromBlueprint(
     blueprintId: string,
     bindings: Record<string, BlueprintBindingAssignment>
   ): Promise<RpcStub<Overseer>>;
@@ -599,7 +599,7 @@ export interface AuthenticatedApi extends RpcTarget {
 
   // Returns a capability for managing deployment-wide admin settings, or null when the caller is not
   // an admin. The access check happens once here, so the returned stub's methods need no per-call
-  // checks. (Authentication config ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ sign-in providers, password login ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ is intentionally not
+  // checks. (Authentication config ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ sign-in providers, password login ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ is intentionally not
   // managed here; it stays env-var driven.)
   getAdminApi(): Promise<RpcStub<AdminApi> | null>;
 
@@ -620,7 +620,7 @@ export type GatekeeperAppInfo = {
 };
 
 // ---------------------------------------------------------------------------
-// Context Library ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ pluggable separate worker (packages/gatekeeper-context)
+// Context Library ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ pluggable separate worker (packages/gatekeeper-context)
 // ---------------------------------------------------------------------------
 //
 // The Context Library lives in its own Worker, bound as the auto-provisioned gatekeeper
@@ -669,7 +669,7 @@ export type AdminResource = {
   enabled: boolean;
 };
 
-// Provisioning mode for an auto-provisioning ("ambient") gatekeeper ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ one that mints a connected
+// Provisioning mode for an auto-provisioning ("ambient") gatekeeper ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ one that mints a connected
 // account with no OAuth flow (VendorDescription.autoProvisionsAccount), e.g. the Context Library:
 //   - 'disabled': not available; no account is provisioned and any existing one is dormant.
 //   - 'optional': users opt in from the Connectors page; not forced on anyone (the default).
@@ -713,7 +713,7 @@ export const MAX_SITE_NAME_LENGTH = 40;
 
 // What this deployment calls itself when the admin has not set a custom `siteName`. Also the
 // product's own name, so it appears in prose the server and UI address to the user.
-export const DEFAULT_SITE_NAME = "Cloudflare OS";
+export const DEFAULT_SITE_NAME = "Aarya Smart";
 
 // The name to display for this deployment. Accepts an unset or not-yet-loaded `siteName` so both
 // the server (reading admin config) and the client (reading ServerConfig) resolve it identically.
@@ -733,7 +733,7 @@ export type AdminSettingsView = {
   signupsEnabled: boolean;
   // Site name shown next to the top-bar logo ("" falls back to DEFAULT_SITE_NAME).
   siteName: string;
-  /** Custom deployment logo, or undefined to use the default Cloudflare OS mark. */
+  /** Custom deployment logo, or undefined to use the default Aarya Smart mark. */
   siteLogo?: AvatarImage;
   // Agent system-prompt instructions ("" when unset).
   instanceInstructions: string;
@@ -787,7 +787,7 @@ export type AdminFormat = {
 // Capability for managing deployment-wide admin settings, obtained via
 // AuthenticatedApi.getAdminApi() (which is null for non-admins). The access check happens when the
 // capability is minted, so these methods don't re-check. Covers branding, agent instructions, and
-// which gatekeeper connectors/resources are offered ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ NOT authentication config (that's env-var
+// which gatekeeper connectors/resources are offered ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ NOT authentication config (that's env-var
 // driven). Each setter throws on invalid input.
 export interface AdminApi {
   // Read all admin-managed settings for the admin UI in one call.
@@ -801,7 +801,7 @@ export interface AdminApi {
   setSiteName(name: string): Promise<void>;
 
   /** Set the deployment logo from browser-rasterized PNG bytes and return its canonical public
-   * image, or undefined after reset. Pass null to restore the default Cloudflare OS mark. The
+   * image, or undefined after reset. Pass null to restore the default Aarya Smart mark. The
    * caller must supply decodable PNG data; the server enforces its header, size, and dimensions. */
   setSiteLogo(data: Uint8Array | null): Promise<AvatarImage | undefined>;
 
@@ -911,7 +911,7 @@ export type ServerConfig = {
   // DEFAULT_SITE_NAME.
   siteName: string;
 
-  /** Custom deployment logo, or undefined to use the default Cloudflare OS mark. */
+  /** Custom deployment logo, or undefined to use the default Aarya Smart mark. */
   siteLogo?: AvatarImage;
 
   // Deployment-wide top-bar notice (centered text in the top navigation bar). Empty when none is set.
@@ -1042,7 +1042,7 @@ export const SUGGESTED_MODELS: Record<
 //
 // TODO(multi-gadget): Rename `WorkspaceMetadata`.
 export type GadgetMetadata = {
-  // Unique ID for this workspace, used with `openGadget()`. This is a url-safe base64 value
+  // Unique ID for this workspace, used with `openWorkspace()`. This is a url-safe base64 value
   // chosen randomly when the workspace is created.
   id: string;
 
@@ -1122,7 +1122,7 @@ export type BlueprintOutput = {
 };
 
 // One entry of the "New ..." menu, as returned by `listOutputFormats()`. This names a blueprint the
-// deployment has promoted, instantiated with `newGadgetFromBlueprint(blueprintId, ...)` like any other.
+// deployment has promoted, instantiated with `newWorkspaceFromBlueprint(blueprintId, ...)` like any other.
 export type OutputFormatOffer = {
   blueprintId: string;
 
@@ -1156,7 +1156,7 @@ export type ListOutputsResult = {
 // One entry in the user's output index: something a workspace produced that the user can open
 // directly.
 export type OutputSummary = {
-  // The workspace that contains this output (an `openGadget()` id).
+  // The workspace that contains this output (an `openWorkspace()` id).
   workspaceId: string;
 
   // The workpiece within that workspace. `(workspaceId, workpieceId)` uniquely identifies an
@@ -1243,6 +1243,7 @@ export interface CodeSubscriber {
 // Specifies the state of an action in the action log:
 // * pending: Action has not been applied yet. It is waiting for approval.
 // * approved: Action was approved and applied.
+// * rejected: Action was rejected by the user.
 // * failed: Action execution failed (e.g., API error).
 export type ActionState = "pending" | "approved" | "rejected" | "failed";
 
@@ -1359,7 +1360,7 @@ export interface Overseer extends RpcTarget {
       : Promise<RpcStub<{}>>;
 
   // Receive the current viewer roster, then incremental updates as viewers come and go.
-  // A viewer is present for the lifetime of the openGadget() session.
+  // A viewer is present for the lifetime of the openWorkspace() session.
   subscribeToPresence(subscriber: RpcStub<PresenceSubscriber>): Promise<RpcStub<{}>>;
 
   // Change the workspace title.
@@ -1571,6 +1572,9 @@ export interface Overseer extends RpcTarget {
   newChat(initialMessage: string | SlashCommandRequest, modelId: string | null,
           capsules?: CapsuleSpecifier[], attachments?: ChatAttachmentHandle[],
           formats?: MessageFormatRef[]): Promise<number>;
+
+  // Spawns a background agent turn (Jules-like) to optimize the codebase.
+  triggerBackgroundAnalysis(): Promise<void>;
 
   // Send a message to the chat from this client. Sending a message causes the LLM to start
   // running if it isn't already.
@@ -2000,7 +2004,7 @@ export type AiChatMessageBody = {
   // vendor's SupportedResource.urlPattern values, e.g. "https://github.com/:owner/:repo" or the
   // whole-instance "https://*"). The backend guarantees every connection request resolves to a
   // concrete resource (see resolveRequestedResource), and the accept modal pre-selects exactly this
-  // resource ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ so accepting never opens a blank "create new connection" picker.
+  // resource ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ so accepting never opens a blank "create new connection" picker.
   resourceUrlPattern?: string;
 
   // Why the agent wants this connection. Shown to the user to inform their decision.
@@ -2712,8 +2716,8 @@ export type BlueprintGadgetSummary = {
   dirty?: boolean;        // true if last publish failed and needs retry
 };
 
-// Where a blueprint the user owns came from. This distinguishes the case the UI cares about ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ the
-// source workspace still exists, so it can be opened and it owns deletion of the blueprint ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ from
+// Where a blueprint the user owns came from. This distinguishes the case the UI cares about ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ the
+// source workspace still exists, so it can be opened and it owns deletion of the blueprint ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ from
 // the two cases where it does not, so no caller has to infer that from display text. `workspaceId`
 // is reachable only in the case where opening it is meaningful.
 export type BlueprintSource =
@@ -2745,7 +2749,7 @@ export type BlueprintLibrarySummary = {
   pinned?: boolean;
 };
 
-// Binding assignment (input to newGadgetFromBlueprint).
+// Binding assignment (input to newWorkspaceFromBlueprint).
 // When instantiating a blueprint, the user provides a Record mapping binding name ->
 // assignment. Every required binding in the blueprint must have a corresponding entry.
 export type BlueprintBindingAssignment = {

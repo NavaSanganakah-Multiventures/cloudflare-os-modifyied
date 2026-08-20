@@ -8,6 +8,26 @@ export interface GitHubRepo {
   getMetadata(): Promise<GitHubRepoMetadata>;
 
   /**
+   * Returns the resolved build executor strategy for this repository.
+   *
+   * The default is GitHub Actions for public repositories and Cloudflare Containers for
+   * private (and internal) repositories. The user can override the default per repository from
+   * the resource connection UI.
+   */
+  getResolvedBuildStrategy(): Promise<BuildExecutorStrategy>;
+
+  /**
+   * Execute build commands for the given branch using the resolved build executor strategy.
+   *
+   * When the resolved strategy is `cloudflareContainers`, this clones the branch into a
+   * Cloudflare Container and runs the provided commands.
+   *
+   * When the resolved strategy is `githubActions`, this method throws; use
+   * `dispatchWorkflow()` instead.
+   */
+  executeBuild(branch: string, commands: BuildCommand[]): Promise<BuildResult>;
+
+  /**
    * Creates a new issue in this repository.
    *
    * The issue may not be created on GitHub immediately. While creation is pending, the
@@ -112,7 +132,10 @@ export interface GitHubRepo {
    * write, and pull request creation) pass through the approval queue.
    *
    * INSTRUCTION FOR AI AGENT: After calling this method, you should call `dispatchWorkflow`
-   * on the newly created branch to run the CI tests.
+   * on the newly created branch to run the CI tests. IMPORTANT: `dispatchWorkflow` only works
+   * if the workflow file already exists on the default branch (`main`). If you are adding a new workflow,
+   * you MUST propose it in its own isolated branch and PR, merge it into `main`, and ONLY THEN 
+   * propose your other code changes in a separate branch so they can be tested.
    */
   proposeFileChange(options: GitHubProposeFileChangeOptions): Promise<GitHubProposedChangeResult>;
 
@@ -129,6 +152,13 @@ export interface GitHubRepo {
    * after you finish proposing or making code changes on a branch, so that the
    * new code is tested automatically. Use `listWorkflows` to discover a workflow's
    * filename or ID if you don't already know it.
+   * 
+   * CRITICAL: `dispatchWorkflow` will fail if the target workflow does not exist on the
+   * default branch (e.g. `main`). Even if a workflow appears "active" in `listWorkflows`,
+   * you MUST verify that its file actually exists on the default branch by calling `readFile(path, "main")`.
+   * If the file is missing (e.g. `readFile` throws an error) or you are adding a completely new workflow,
+   * you must first create a branch solely for adding that workflow, open a PR, and get it merged into `main`.
+   * Any other feature changes or bug fixes must be done in a separate branch.
    *
    * @param workflowId The ID or filename of the workflow.
    * @param ref The branch or tag name to run the workflow on.
@@ -137,10 +167,30 @@ export interface GitHubRepo {
   dispatchWorkflow(workflowId: string | number, ref: string, inputs?: Record<string, any>): Promise<void>;
 
   /**
+   * Disables a GitHub Actions workflow.
+   * 
+   * INSTRUCTION FOR AI AGENT: If you encounter a workflow in `listWorkflows` that you
+   * intend to run but it no longer exists on the default branch (a "zombie" workflow),
+   * use this method to disable it. This will send a manual approval request to the user,
+   * keeping the repository clean and preventing confusion. After disabling it, you can
+   * proceed to create a completely new workflow from scratch if needed.
+   * 
+   * @param workflowId The numeric ID or filename of the workflow.
+   */
+  disableWorkflow(workflowId: string | number): Promise<void>;
+
+  /**
    * Lists the GitHub Actions workflows defined in this repository.
    *
    * Use this to discover a workflow's filename (e.g. `"ci.yml"`) or numeric ID before
    * calling `dispatchWorkflow`. Reading the catalog is an observation.
+   * 
+   * INSTRUCTION FOR AI AGENT: This API may return workflows that were deleted in the past.
+   * Ignore workflows where `state === "deleted"`. For any workflow you intend to use,
+   * ALWAYS verify the file still exists on the default branch using `readFile(path, "main")`.
+   * IMPORTANT: Sometimes the API returns `state: "active"` even if the file is completely
+   * missing from `main` (because it ran in the past). NEVER trust the `state` alone.
+   * If `readFile` fails, treat it as a non-existent workflow that you must recreate from scratch.
    */
   listWorkflows(): Promise<{ total_count: number; workflows: GitHubWorkflow[] }>;
 
@@ -740,6 +790,27 @@ export type GitHubProposedChangeResult = {
   /** The newly created pull request. */
   pullRequest: GitHubPullRequest;
 };
+
+/** A single build command to run inside the build executor. */
+export type BuildCommand = {
+  /** Shell command to execute. */
+  command: string;
+  /** Optional human-readable label for logs. */
+  label?: string;
+};
+
+/** Result of executing a build via the build executor. */
+export type BuildResult = {
+  /** Whether every command exited with code 0. */
+  success: boolean;
+  /** Exit code of the failing command, or 0 when successful. */
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+};
+
+/** Strategy controlling where builds for this repository are executed. */
+export type BuildExecutorStrategy = "auto" | "githubActions" | "cloudflareContainers";
 
 export type GitHubWriteFileOptions = {
   path: string;

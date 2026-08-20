@@ -614,6 +614,11 @@ export interface Gatekeeper<Session> extends DurableObject {
   // time. Gatekeepers with no auto-approvable actions return [].
   getAutoApprovableActions(): Promise<ActionKind[]>;
 
+  // Returns a set of branch patterns that should be used as the default for auto-approval
+  // rules on this gatekeeper. Repo-style gatekeepers can use this to exclude the repository's
+  // default branch. Returns undefined when the gatekeeper has no opinion.
+  getDefaultAutoApproveBranchPatterns?(): Promise<string[] | undefined>;
+
   // Get the capability representing this resource's RPC interface which will be provided to the
   // Gadget.
   //
