@@ -9,7 +9,8 @@
     {
       "class_name": "BuildRunnerContainer",
       "image": "./Dockerfile",
-      "max_instances": 5
+      "max_instances": 5,
+      "instance_type": "standard-3"
     }
   ],
   "durable_objects": {
