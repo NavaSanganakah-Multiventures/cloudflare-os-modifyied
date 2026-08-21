@@ -4,9 +4,16 @@ Cloudflare Containers-based build runner for the Aarya Smart GitHub gatekeeper.
 
 This package builds a container image that includes:
 
-- Flutter SDK
-- Android command-line tools
+- Flutter SDK (web, test, and Linux desktop targets)
 - C/C++ toolchain (`build-essential`, `cmake`, `clang`, `ninja-build`)
+
+> **Note:** The full Android SDK is intentionally **not** bundled. The previous
+> base image (`ghcr.io/cirruslabs/flutter:stable`) bundled the complete Android
+> SDK (~2 GB), which pushed the final image to 2867 MB — exceeding Cloudflare
+> Containers' 2000 MB image size limit. Instead the Flutter SDK is installed
+> directly via a shallow `git clone` on a slim Debian base. The container has
+> internet access at runtime, so additional Flutter engine artifacts are
+> downloaded on demand. For Android APK builds, use GitHub Actions.
 
 The gatekeeper can invoke `BuildRunner.runBuild()` to clone a repository branch
 and execute arbitrary shell commands inside the container.
