@@ -3,7 +3,7 @@
 // into customer accounts via the Workers script-upload API).
 //
 // This is the open-source analog of gadgets-internal's generate-wrangler-prod.js: it parses each
-// package's wrangler.jsonc and emits binding *templates* â every account-specific value replaced
+// package's wrangler.jsonc and emits binding *templates* Ã¢ÂÂ every account-specific value replaced
 // by a placeholder the deploy service resolves from instance state:
 //
 //   $ACCOUNT_ID              the user's account tag
@@ -22,7 +22,7 @@ import { parse } from "jsonc-parser";
 
 export const MANIFEST_VERSION = 1;
 
-// wrangler.jsonc keys this generator understands. Anything else fails closed â a new config key
+// wrangler.jsonc keys this generator understands. Anything else fails closed Ã¢ÂÂ a new config key
 // on a deployable worker needs an explicit decision about how customer instances get it.
 const HANDLED_CONFIG_KEYS = new Set([
   "$schema", "name", "main", "build", "compatibility_date", "compatibility_flags", "rules",
@@ -59,7 +59,7 @@ const PREINSTALL = new Set(["gatekeeper-context", "gatekeeper-scheduler"]);
 
 // Gatekeepers that may be installed at most once per instance; the deploy service enforces this
 // at install time. The giveaway is the account declaring an agent singleton
-// (`AccountDescription.singleton` â context's `ContextLibrary`, scheduler's `ScheduleSession`):
+// (`AccountDescription.singleton` Ã¢ÂÂ context's `ContextLibrary`, scheduler's `ScheduleSession`):
 // the Workshop auto-provisions those accounts and folds the singleton into every workspace as an
 // ambient gatekeeper, so a second install would hand every user a duplicate ambient capsule.
 // Independent of PREINSTALL in principle; the two sets coincide today only because every ambient
@@ -151,6 +151,13 @@ export function buildWorkerEntry({ pkgName, config, mainModule, modules, deployI
       bucket_name: `$R2_${r2.binding}_NAME`,
     });
   }
+  for (const v of config.vectorize ?? []) {
+    bindings.push({
+      type: "vectorize",
+      name: v.binding,
+      index_name: `$VECTORIZE_${v.binding}_NAME`,
+    });
+  }
   if (config.browser) {
     // `remote` is dev-only wrangler behavior; the deployed binding is just { type, name }.
     bindings.push({ type: "browser", name: config.browser.binding });
@@ -193,8 +200,8 @@ export function buildWorkerEntry({ pkgName, config, mainModule, modules, deployI
     vars.PUBLIC_BASE_URL = "$PUBLIC_BASE_URL";
     // Every deployed backend gets the Workers AI binding (hardcoded like PUBLIC_BASE_URL, not
     // read from wrangler.jsonc): webFetch's toMarkdown conversion depends on it, and it costs
-    // nothing when unused. (Inference does not â Workers AI models are reached over HTTPS like
-    // every other provider.) No placeholders â the deploy renderer passes it through.
+    // nothing when unused. (Inference does not Ã¢ÂÂ Workers AI models are reached over HTTPS like
+    // every other provider.) No placeholders Ã¢ÂÂ the deploy renderer passes it through.
     bindings.push({ type: "ai", name: "WORKERS_AI" });
     // Installed gatekeepers are called through GATEKEEPER_* service bindings with the
     // GatekeeperVendor entrypoint (same shape run-dev-server.js generates for dev).
@@ -208,7 +215,7 @@ export function buildWorkerEntry({ pkgName, config, mainModule, modules, deployI
     };
   } else if (kind === "router") {
     // The router routes /gatekeeper/<short>/* by scanning its own GATEKEEPER_* bindings
-    // (default entrypoint â it forwards whole HTTP requests, not vendor RPC).
+    // (default entrypoint Ã¢ÂÂ it forwards whole HTTP requests, not vendor RPC).
     gatekeeperBindingExpansion = { propsByPackage: {} };
   } else {
     vars.BASE_URL = `$PUBLIC_BASE_URL/gatekeeper/${shortName(pkgName)}`;
@@ -249,6 +256,7 @@ export function buildWorkerEntry({ pkgName, config, mainModule, modules, deployI
     bindings,
     vars,
     observability: config.observability ?? { enabled: false },
+    ...(config.triggers ? { triggers: config.triggers } : {}),
     ...(gatekeeperBindingExpansion ? { gatekeeperBindingExpansion } : {}),
     ...(assetsConfig ? { assetsConfig } : {}),
     ...(inputs ? { inputs } : {}),
@@ -265,7 +273,7 @@ export function assetR2Key(cfHash) {
 
 // Assembles the full manifest.
 //  - workers: [{ pkgName, config, mainModule, modules, deployInputs }]
-//  - assetVariants: { [variantName]: { manifest, blobs } } from collectAssets() â attached to
+//  - assetVariants: { [variantName]: { manifest, blobs } } from collectAssets() Ã¢ÂÂ attached to
 //    every worker entry that has an assetsConfig (today: just the router).
 export function generateManifest({
   releaseId, commit, createdAt, wranglerVersion, workers, assetVariants,
