@@ -263,7 +263,7 @@
           "name": "CLIENT_ID",
           "redirectUriTemplate": "{PUBLIC_BASE_URL}/gatekeeper/github/oauth",
           "setupSteps": [
-            "In GitHub Developer settings, create a new OAuth App (an OAuth App, not a GitHub App — GitHub Apps ignore OAuth scopes).",
+            "In GitHub Developer settings, create a new OAuth App (an OAuth App, not a GitHub App â GitHub Apps ignore OAuth scopes).",
             "Set the Homepage URL to your instance URL, and the Authorization callback URL to the redirect URI below.",
             "Register the application, then generate a new client secret.",
             "Copy the Client ID and client secret here."
@@ -733,7 +733,7 @@
           "setupSteps": [
             "Create a Slack app (from scratch) in the workspace you want gadgets to read.",
             "Under OAuth & Permissions, add the redirect URL below.",
-            "Enable token rotation (OAuth & Permissions > Token Rotation) — tokens are then short-lived and refreshed automatically.",
+            "Enable token rotation (OAuth & Permissions > Token Rotation) â tokens are then short-lived and refreshed automatically.",
             "Copy the app's Client ID and Client Secret (Basic Information > App Credentials) here."
           ]
         },
@@ -1050,6 +1050,11 @@
           "type": "r2_bucket"
         },
         {
+          "index_name": "$VECTORIZE_VECTOR_MEMORY_NAME",
+          "name": "VECTOR_MEMORY",
+          "type": "vectorize"
+        },
+        {
           "name": "BROWSER",
           "type": "browser"
         },
@@ -1120,6 +1125,11 @@
           "enabled": true,
           "head_sampling_rate": 0.5
         }
+      },
+      "triggers": {
+        "crons": [
+          "*/30 * * * *"
+        ]
       },
       "vars": {
         "PUBLIC_BASE_URL": "$PUBLIC_BASE_URL"
