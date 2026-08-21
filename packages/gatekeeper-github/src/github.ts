@@ -422,12 +422,14 @@ const EDIT_WORKFLOW_FILE_ACTION: ActionKind = {
 };
 
 // True when `path` points at a GitHub Actions workflow definition. GitHub only recognizes files
-// directly under `.github/workflows/` with a `.yml`/`.yaml` extension as workflows, so this is
-// the precise set that warrants the dedicated action kind.
-function isWorkflowFilePath(path: string): boolean {
+// *directly* under `.github/workflows/` (no nested subdirectories) with a `.yml`/`.yaml` extension
+// as workflows, so this is the precise set that warrants the dedicated action kind. Exported for
+// unit testing.
+export function isWorkflowFilePath(path: string): boolean {
   const normalized = path.replace(/^\/+/, "");
   if (!normalized.startsWith(".github/workflows/")) return false;
-  return normalized.endsWith(".yml") || normalized.endsWith(".yaml");
+  const suffix = normalized.slice(".github/workflows/".length);
+  return (suffix.endsWith(".yml") || suffix.endsWith(".yaml")) && !suffix.includes("/");
 }
 
 const CREATE_BRANCH_ACTION: ActionKind = {
