@@ -188,7 +188,7 @@ jobs:
 
           node inject-bindings.mjs
 
-          - name: Create Vectorize Index
+      - name: Create Vectorize Index
         run: |
           cd packages/workshop-backend
           npx wrangler vectorize create memory_index --dimensions 768 --metric cosine || echo "Index 'memory_index' already exists or could not be created; continuing..."
