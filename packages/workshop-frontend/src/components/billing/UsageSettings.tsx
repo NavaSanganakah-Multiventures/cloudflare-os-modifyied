@@ -19,8 +19,9 @@ export default function UsageSettings() {
   const [aiPref, setAiPref] = useState<'system' | 'custom'>('system')
   const [loading, setLoading] = useState(true)
   const [amount, setAmount] = useState('')
-  const { recharge, loading: recharging, error, success } = useWalletRecharge(refresh)
 
+  // refresh must be declared before useWalletRecharge, which receives it as the
+  // post-recharge callback (using it before its const declaration is a TDZ error).
   const refresh = useCallback(async () => {
     try {
       const [bal, pref] = await Promise.all([
@@ -35,6 +36,8 @@ export default function UsageSettings() {
       setLoading(false)
     }
   }, [authenticatedApi])
+
+  const { recharge, loading: recharging, error, success } = useWalletRecharge(refresh)
 
   useEffect(() => {
     if (!limitsEnabled) { setLoading(false); return }
@@ -53,7 +56,7 @@ export default function UsageSettings() {
       </h2>
       <div className="rounded-xl border border-kumo-line bg-kumo-base p-5">
         {loading || balance === null ? (
-          <p className="text-sm text-kumo-subtle">Loading wallet…</p>
+          <p className="text-sm text-kumo-subtle">Loading walletâ¦</p>
         ) : (
           <div className="space-y-6">
             <div>
@@ -75,7 +78,7 @@ export default function UsageSettings() {
 
             <p className="text-xs text-kumo-subtle">
               Each System AI request is billed at the model's real per-call cost (USD), deducted
-              after it completes — so cheap models cost less and expensive ones more. Top up with
+              after it completes â so cheap models cost less and expensive ones more. Top up with
               Razorpay (INR) below.
             </p>
 
