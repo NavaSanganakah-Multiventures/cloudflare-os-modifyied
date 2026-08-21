@@ -32,6 +32,7 @@ import { recordAnalytics } from "./analytics";
 import { reportIssue } from "@gadgets/backend-utils/error-reporting";
 import type { ProductAnalyticsConnectionType, ProductAnalyticsGadgetInput } from "./analytics";
 import { checkUsageAndBalance } from "./ai-gateway-billing/limits/usage-checker";
+import { isCloudflareLimitsEnabled } from "./ai-gateway-billing/config";
 import { completeAgentCatalogSnapshot, normalizeAgentCatalog } from "./agent-catalog";
 import { refreshCachedBalance } from "./ai-gateway-billing/cloudflare/connection-service";
 import { SharingManager, SharingCaller, CollaboratorRecord, ShareKeyRecord } from "./sharing";
@@ -1044,6 +1045,11 @@ class OverseerImpl implements AgentHooks {
   // If `alarm()` is currently waiting for all agents to finish, this resolves its wait. Invoked
   // when the running-agent count drops to zero.
   #allAgentsIdleWaiters: (() => void)[] = [];
+
+  // Set for the duration of a System AI agent turn so per-call inference costs get charged to the
+  // owner's USD wallet as they are incurred (see addChatMessages). False for BYOK (Custom AI)
+  // turns, which bill the user's own provider and never touch the wallet.
+  #walletChargeActive = false;
 
   // How long to set the keep-alive alarm into the future. Whenever the agent count goes from zero
   // to one, we schedule an alarm this far out; whenever it drops back to zero, we clear it. The
@@ -2888,7 +2894,7 @@ class OverseerImpl implements AgentHooks {
 
   // Record an observation that originated from a built-in agent tool (not a gatekeeper).
   // The `gatekeeperId` is set to the BUILTIN_TOOL_GATEKEEPER_ID sentinel so that downstream
-  // code (which expects a gatekeeper to dereference for approve/reject) never touches it ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ built-in
+  // code (which expects a gatekeeper to dereference for approve/reject) never touches it ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ built-in
   // observations bypass the approve/reject paths anyway.
   async recordAgentObservation(
       chatId: number,
@@ -4006,6 +4012,10 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
         if (usage.shouldUseByok) {
           byokRouting = usage.byokRouting;
           if (byokRouting) byokOwnerStub = ownerStub;
+        } else if (isCloudflareLimitsEnabled(this.env)) {
+          // System AI with the wallet flow enabled: charge this turn's real per-call costs to the
+          // owner's USD wallet as they are incurred (see addChatMessages).
+          this.#walletChargeActive = true;
         }
       }
 
@@ -4135,6 +4145,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
       }
       liveChat.activeAgentCallbacks.clear();
     } finally {
+      this.#walletChargeActive = false;
       // If this turn billed the user's own Cloudflare account, refresh their cached balance now (in
       // the background) so the next turn's billing decision reflects the spend just incurred. Runs
       // on both the success and error paths so the
@@ -5393,6 +5404,15 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
     meta.lastActive = this.getChatTimestamp();
     this.storage.chatMeta.put(meta);
 
+    // Wallet billing (System AI): charge the deterministic catalog-priced estimate (USD) for this
+    // step to the owner's wallet. Independent of the AI-Gateway cost lookup below (best-effort UI
+    // accounting); the estimate is always available synchronously, so failed turns aren't
+    // over-charged and cheap/expensive models are billed accurately.
+    if (estimatedCost && this.#walletChargeActive && this.ownerId) {
+      this.ctx.waitUntil(
+        this.users.get(this.users.idFromString(this.ownerId)).consumeWalletBalance(estimatedCost));
+    }
+
     if (aiGatewayLogId && aiGatewayLogRoute) {
       // Best-effort UI accounting only. The log ID is not persisted, so a DO restart can lose
       // this update. Do not use this total as a billing source of truth.
@@ -5679,7 +5699,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
     }
     let lines = [`Resource types offered by "${vendorId}" (${vendor.description.displayName}):`];
     for (let r of vendor.supportedResources) {
-      lines.push(`* ${r.title} ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ${r.urlPattern}`)
+      lines.push(`* ${r.title} ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ${r.urlPattern}`)
     }
     lines.push(
         `\nTo request one, call requestConnection with vendorId="${vendorId}" and a resourceUrl ` +
@@ -5784,7 +5804,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
       seen.add(id);
       let lines = [
         `* blueprintId: ${id}`,
-        `  ${JSON.stringify(title)} ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ${source}`,
+        `  ${JSON.stringify(title)} ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ${source}`,
       ];
       let bindingNames = Object.entries(bindings ?? {});
       if (bindingNames.length > 0) {
@@ -5845,7 +5865,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
         `about already *is* one of these, work on that one instead: asking to change an existing ` +
         `output is not a request for a second one.\n\n` +
         formats.map(format =>
-            `* ${format.output.noun} (plural: ${format.output.plural}) ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ` +
+            `* ${format.output.noun} (plural: ${format.output.plural}) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ` +
             `${format.blueprintId}` + (format.agentHint ? `; ${format.agentHint}` : ``)).join("\n");
   }
 
@@ -5938,7 +5958,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
             details = `unknown`;
             break;
         }
-        lines.push(`* ${name} ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ${JSON.stringify(binding.title)} (${details})` +
+        lines.push(`* ${name} ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ${JSON.stringify(binding.title)} (${details})` +
             (binding.description ? `: ${binding.description}` : ``));
       }
     }
@@ -6297,7 +6317,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
   }
 
   // Render the observer verification failures as one line per binding, naming the connection and the
-  // account that was refused: `<resourceTitle> (<account label>) ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ <reason>.` Cold path only (we're
+  // account that was refused: `<resourceTitle> (<account label>) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ <reason>.` Cold path only (we're
   // about to deny the open), so the extra User DO round trip per failure is fine. Discloses nothing
   // new: the reason was either already thrown to this same user or authored by us, and the account is
   // their own.
@@ -6328,7 +6348,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
         });
       }
 
-      return `${observerBindingTitle(gk)} (${label}) ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ${failure.reason}`;
+      return `${observerBindingTitle(gk)} (${label}) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ${failure.reason}`;
     }));
 
     return lines.join("\n");
