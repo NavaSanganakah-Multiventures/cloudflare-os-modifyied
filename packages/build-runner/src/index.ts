@@ -1,5 +1,5 @@
 import { Container, getContainer } from "@cloudflare/containers";
-import { DurableObjectNamespace, WorkerEntrypoint } from "cloudflare:workers";
+import { WorkerEntrypoint } from "cloudflare:workers";
 
 export interface BuildRequest {
   /** HTTPS URL used to clone the repository. For private repos, embed an access token. */
