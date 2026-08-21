@@ -246,3 +246,6 @@ Aarya Smart has far too many open source dependencies to list here. But, we'd li
 * [Monaco](https://microsoft.github.io/monaco-editor/) which makes it too easy to embed a beautiful text editor -- for those of us who still look at the code.
 * [Yjs](https://yjs.dev/), which we use extensively to sync code changes between clients and agents and replay histories.
 * [Vite](https://vite.dev/), which makes the development loop so pleasant.
+
+
+<!-- write-check: update existing file test -->
