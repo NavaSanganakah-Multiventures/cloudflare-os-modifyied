@@ -118,10 +118,24 @@ export interface GitHubRepo {
    *
    * The write is queued for approval and only applied to GitHub after the decision. The
    * returned handle resolves to the real commit once the write has been applied.
+   *
+   * NOTE FOR AI AGENT: Editing a GitHub Actions workflow file (`.github/workflows/*.{yml,yaml}`)
+   * is automatically categorized as a distinct approval action ("Edit GitHub Actions workflow
+   * files"), separate from ordinary file writes. The user can enable or disable auto-approval
+   * for workflow edits independently from regular file writes. You call this same method
+   * regardless; the categorization is automatic based on the file path. Never write directly
+   * to the default branch — always create a feature branch first (see the branch-first
+   * workflow in AGENTS.md).
    */
   writeFile(options: GitHubWriteFileOptions): Promise<GitHubCommitHandle>;
 
-  /** Deletes a file in the repository. Queued for approval; resolves via the returned handle. */
+  /**
+   * Deletes a file in the repository. Queued for approval; resolves via the returned handle.
+   *
+   * NOTE FOR AI AGENT: Deleting a GitHub Actions workflow file is automatically categorized as
+   * a distinct approval action, just like `writeFile` for workflow files. Never delete
+   * directly from the default branch — always use a feature branch.
+   */
   deleteFile(options: GitHubDeleteFileOptions): Promise<GitHubCommitHandle>;
 
   /**
@@ -131,17 +145,29 @@ export interface GitHubRepo {
    * The AI agent chooses a meaningful branch name. All side effects (branch creation, file
    * write, and pull request creation) pass through the approval queue.
    *
-   * INSTRUCTION FOR AI AGENT: After calling this method, you should call `dispatchWorkflow`
-   * on the newly created branch to run the CI tests. IMPORTANT: `dispatchWorkflow` only works
-   * if the workflow file already exists on the default branch (`main`). If you are adding a new workflow,
-   * you MUST propose it in its own isolated branch and PR, merge it into `main`, and ONLY THEN 
-   * propose your other code changes in a separate branch so they can be tested.
+   * WARNING FOR AI AGENT: Do NOT use this method. It bundles branch creation, file write,
+   * and PR creation into the approval queue simultaneously, with no way to verify each step
+   * succeeded before proceeding to the next. Instead, follow the MANDATORY branch-first
+   * workflow described in AGENTS.md: create the branch yourself, write the file on it, verify
+   * the commit landed (poll the returned handle's `getResult()` AND re-check the branch SHA
+   * advanced), and only then open the PR yourself.
+   *
+   * After your changes are on a branch, call `dispatchWorkflow` on that branch to run CI.
+   * IMPORTANT: `dispatchWorkflow` only works if the workflow file already exists on the
+   * default branch (`main`) AND has a `workflow_dispatch` trigger in its `on:` section.
+   * If you are adding a new workflow, you MUST propose it in its own isolated branch and PR,
+   * merge it into `main`, and ONLY THEN propose your other code changes in a separate branch
+   * so they can be tested.
    */
   proposeFileChange(options: GitHubProposeFileChangeOptions): Promise<GitHubProposedChangeResult>;
 
   /**
    * Proposes a file deletion by creating a feature branch, deleting the file on that branch,
    * and opening a pull request back to the default branch.
+   *
+   * WARNING FOR AI AGENT: Do NOT use this method. It has the same verification gaps as
+   * `proposeFileChange()`. Follow the manual branch-first workflow from AGENTS.md instead:
+   * create the branch, delete the file on it, verify the commit landed, then open the PR.
    */
   proposeFileDeletion(options: GitHubProposeFileDeletionOptions): Promise<GitHubProposedChangeResult>;
 
@@ -154,11 +180,14 @@ export interface GitHubRepo {
    * filename or ID if you don't already know it.
    * 
    * CRITICAL: `dispatchWorkflow` will fail if the target workflow does not exist on the
-   * default branch (e.g. `main`). Even if a workflow appears "active" in `listWorkflows`,
-   * you MUST verify that its file actually exists on the default branch by calling `readFile(path, "main")`.
-   * If the file is missing (e.g. `readFile` throws an error) or you are adding a completely new workflow,
-   * you must first create a branch solely for adding that workflow, open a PR, and get it merged into `main`.
-   * Any other feature changes or bug fixes must be done in a separate branch.
+   * default branch (e.g. `main`) OR if the workflow's `on:` section does not include the
+   * `workflow_dispatch` trigger. Even if a workflow appears "active" in `listWorkflows`,
+   * you MUST verify TWO things before dispatching:
+   *   1. The workflow file exists on the default branch by calling `readFile(path, "main")`.
+   *   2. The workflow's `on:` section includes `workflow_dispatch:` (read the file content to check).
+   * If the file is missing (e.g. `readFile` throws an error) or lacks `workflow_dispatch`, you
+   * must first create a branch solely for adding/fixing that workflow, open a PR, and get it merged
+   * into `main`. Any other feature changes or bug fixes must be done in a separate branch.
    *
    * @param workflowId The ID or filename of the workflow.
    * @param ref The branch or tag name to run the workflow on.
