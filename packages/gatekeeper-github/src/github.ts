@@ -408,6 +408,30 @@ const DELETE_REPO_FILE_ACTION: ActionKind = {
   branchScoped: true,
 };
 
+// Editing a GitHub Actions workflow file (.github/workflows/*.{yml,yaml}) is its own action kind.
+// Workflow files can execute arbitrary code in CI, so they warrant a distinct approval card and a
+// separate auto-approval toggle in the UI. Without this, a workflow file edit is categorized as an
+// ordinary "Write repository files" action: if the user enables auto-approval for file writes, a
+// workflow edit is silently auto-applied (the card never appears) and the user has no way to
+// control workflow edits independently. One kind covers create, update, and delete of workflow
+// files so the user sees a single "Edit GitHub Actions workflow files" control.
+const EDIT_WORKFLOW_FILE_ACTION: ActionKind = {
+  tag: "githubEditWorkflowFile",
+  label: "Edit GitHub Actions workflow files",
+  branchScoped: true,
+};
+
+// True when `path` points at a GitHub Actions workflow definition. GitHub only recognizes files
+// *directly* under `.github/workflows/` (no nested subdirectories) with a `.yml`/`.yaml` extension
+// as workflows, so this is the precise set that warrants the dedicated action kind. Exported for
+// unit testing.
+export function isWorkflowFilePath(path: string): boolean {
+  const normalized = path.replace(/^\/+/, "");
+  if (!normalized.startsWith(".github/workflows/")) return false;
+  const suffix = normalized.slice(".github/workflows/".length);
+  return (suffix.endsWith(".yml") || suffix.endsWith(".yaml")) && !suffix.includes("/");
+}
+
 const CREATE_BRANCH_ACTION: ActionKind = {
   tag: "githubCreateBranch",
   label: "Create branches",
@@ -3529,6 +3553,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
   async getAutoApprovableActions(): Promise<ActionKind[]> {
     return [
       WRITE_REPO_FILE_ACTION,
+      EDIT_WORKFLOW_FILE_ACTION,
       DELETE_REPO_FILE_ACTION,
       CREATE_BRANCH_ACTION,
       CREATE_PULL_REQUEST_ACTION,
@@ -4652,7 +4677,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
           : " Content is provided as base64 (binary)."),
       implementsRevert: false,
       awaitDecision: true,
-      actionKind: WRITE_REPO_FILE_ACTION,
+      actionKind: isWorkflowFilePath(options.path) ? EDIT_WORKFLOW_FILE_ACTION : WRITE_REPO_FILE_ACTION,
       autoApprovable: true,
       branchRef: action.branch,
     });
@@ -4678,7 +4703,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
         `${action.branch ? ` on branch ${action.branch}` : " on the default branch"}.`,
       implementsRevert: false,
       awaitDecision: true,
-      actionKind: DELETE_REPO_FILE_ACTION,
+      actionKind: isWorkflowFilePath(options.path) ? EDIT_WORKFLOW_FILE_ACTION : DELETE_REPO_FILE_ACTION,
       autoApprovable: true,
       branchRef: action.branch,
     });
