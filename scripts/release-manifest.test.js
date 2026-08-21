@@ -1,7 +1,7 @@
 // Golden test for the release manifest generator, run against the repo's REAL wrangler.jsonc
 // configs (with fixture bundles/assets substituted for actual builds, so no compilation is
 // needed). A deliberate consequence: changing any deployable package's wrangler.jsonc fails this
-// test until scripts/testdata/golden-manifest.json is regenerated â forcing a conscious decision
+// test until scripts/testdata/golden-manifest.json is regenerated — forcing a conscious decision
 // about how the change reaches customer instances.
 //
 // Regenerate with: UPDATE_GOLDEN=1 node --test scripts/release-manifest.test.js
@@ -21,7 +21,7 @@ const ROOT = join(SCRIPTS, "..");
 const TESTDATA = join(SCRIPTS, "testdata");
 const GOLDEN_PATH = join(TESTDATA, "golden-manifest.json");
 
-// Placeholder syntax the deploy-side renderer understands. Closed list â see manifest-lib.mjs.
+// Placeholder syntax the deploy-side renderer understands. Closed list — see manifest-lib.mjs.
 const PLACEHOLDER_RE =
     /^\$(ACCOUNT_ID|PUBLIC_BASE_URL|KV_[A-Z0-9_]+_ID|R2_[A-Z0-9_]+_NAME|VECTORIZE_[A-Z0-9_]+_NAME|WORKER_NAME\([a-z0-9-]+\)|SECRET\([A-Z0-9_]+\))/;
 
