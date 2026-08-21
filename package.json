@@ -11,7 +11,7 @@
     "dev-client": "cd packages/workshop-frontend && pnpm run dev",
     "dev-server": "node run-dev-server.js",
     "clean": "pnpm run --recursive clean",
-    "lint:check": "oxlint --format json",
+    "lint:check": "oxlint",
     "lint:fix": "oxlint --fix",
     "types:check": "pnpm run --recursive --if-present types:check",
     "lint": "pnpm run lint:check && pnpm run types:check",
