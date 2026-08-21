@@ -8,6 +8,8 @@ import { createTypedStorage, collection } from "@gadgets/typed-storage";
 import { createWorkshopLogger } from "./observability";
 import { getAiGatewayConfig } from "./ai-gateway.js";
 import { utcDayKey, nextUtcMidnightIso, DailyQuotaResult } from "./ai-gateway-billing/limits/config.js";
+import { getUsdToInrRate, getWalletStartBalance } from "./ai-gateway-billing/config.js";
+import { DEFAULT_WALLET_START_BALANCE_USD } from "@gadgets/workshop-shared/limits";
 import type { AdminSettings } from "./admin-settings.js";
 import { isReservedBlueprintKey, readBlueprintKvRecord } from "./blueprint-archive.js";
 import { filterEnabledResources, isResourceDisabled, readAdminConfig } from "./admin-config.js";
@@ -42,8 +44,8 @@ export type ProvidedAccountInfo = {
 
 // The singleton/UI methods (createAccount on GatekeeperVendor; getSingletonGatekeeperClass /
 // startAppUi on GatekeeperUser) are optional on their interfaces. We don't need to probe whether a
-// method is present — we already know from the declaration flags (autoProvisionsAccount /
-// description.singleton / .providesUi) that we gated on — but TypeScript still can't call an optional
+// method is present â we already know from the declaration flags (autoProvisionsAccount /
+// description.singleton / .providesUi) that we gated on â but TypeScript still can't call an optional
 // method on the mapped stub type directly, so we view the stub through a plain shape that marks the
 // needed method required. These are derived from the source interfaces (Pick + Required) rather than
 // re-declared, so they can't drift. They are intentionally NOT wrapped in Service/Fetcher: a plain
@@ -195,7 +197,7 @@ function makeUserStorage(storage: DurableObjectStorage) {
       preferredModel: <string | null>null,
       onboardingCompleted: false,
 
-      walletBalance: 100, // seeded starting balance for System AI
+      walletBalance: <number>DEFAULT_WALLET_START_BALANCE_USD, // seeded starting balance (USD) for System AI
       processedRazorpayPayments: <string[]>[],
       aiPreference: <"system" | "custom">"system",
 
@@ -310,7 +312,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   // Returns true when this login created the account on first use. When the account doesn't yet
-  // exist and `allowCreate` is false (deployment signups are closed), refuses rather than creating —
+  // exist and `allowCreate` is false (deployment signups are closed), refuses rather than creating â
   // existing users can still sign in.
   async authenticateFromCfAccess(email: string, allowCreate: boolean): Promise<boolean> {
     if (!this.storage.created.get()) {
@@ -319,6 +321,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
       }
       // Create on first use.
       this.storage.created.put(true);
+      this.storage.walletBalance.put(getWalletStartBalance(this.env));
       this.storage.profile.put({
         type: "user",
         name: email.split("@")[0],
@@ -376,6 +379,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     }
 
     this.storage.created.put(true);
+    this.storage.walletBalance.put(getWalletStartBalance(this.env));
     this.storage.profile.put({
       type: "user",
       name: displayName,
@@ -390,7 +394,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
   // Log in via an authentication gatekeeper, creating the account on first use. The user DO is keyed
   // by the verified email (this DO's id derives from idFromName(email)), so `email` is also used as
-  // the profile id and the initial display name is the email's local-part — consistent with the
+  // the profile id and the initial display name is the email's local-part â consistent with the
   // Cloudflare Access flow. Password login is left disabled for these accounts. Returns the session
   // secret to store client-side.
   //
@@ -399,11 +403,12 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   // clobber a customized name with the email local-part.
   //
   // When the account doesn't yet exist and `allowCreate` is false (deployment signups are closed),
-  // returns null instead of creating one — existing users can still sign in.
+  // returns null instead of creating one â existing users can still sign in.
   async loginOrCreateViaGatekeeper(email: string, allowCreate: boolean): Promise<string | null> {
     if (!this.storage.created.get()) {
       if (!allowCreate) return null;
       this.storage.created.put(true);
+      this.storage.walletBalance.put(getWalletStartBalance(this.env));
       this.storage.profile.put({
         type: "user",
         name: email.split("@")[0],
@@ -754,7 +759,11 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     if (payment.order_id !== orderId) {
       throw new Error("Razorpay payment order_id mismatch");
     }
-    await this.addWalletBalance(payment.amount / 100);
+    // Razorpay charges in INR paise; convert to USD at the configured rate before crediting the
+    // (USD-denominated) wallet, so the balance stays in a single currency.
+    const inrAmount = payment.amount / 100;
+    const usdAmount = inrAmount / getUsdToInrRate(this.env);
+    await this.addWalletBalance(usdAmount);
     this.storage.processedRazorpayPayments.put([...processed, paymentId]);
   }
 
@@ -1186,7 +1195,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
           let enabledResources =
               filterEnabledResources(config, id, supportedResources);
           if (enabledResources.length == 0) {
-            // Every resource for this vendor is disabled (or it advertised none) — hide the vendor.
+            // Every resource for this vendor is disabled (or it advertised none) â hide the vendor.
             return null;
           }
 
@@ -1233,7 +1242,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   // Iterate every connected-account record, skipping any that fails to load. A record can fail to
   // deserialize when its account stub points at a gatekeeper Worker that's no longer bound in this
   // deployment (workerd throws "Stub refers to a service that doesn't exist"). Skipping it keeps one
-  // stale account from breaking listing, provisioning, and opt-in for all the others — the same
+  // stale account from breaking listing, provisioning, and opt-in for all the others â the same
   // resilience subscribeConnectedAccounts relies on (it iterates through this).
   *#connectedAccountRecords(): Generator<ConnectedAccountRecord> {
     let nextAccountId = this.storage.nextAccountId.get();
@@ -1290,7 +1299,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
         .map(({vendorId, description}) => ({id: vendorId, description, supportedResources: []}));
   }
 
-  // Per-vendor dedup of concurrent provisionAmbientAccount() calls — same DO-input-gate race as
+  // Per-vendor dedup of concurrent provisionAmbientAccount() calls â same DO-input-gate race as
   // #ensureAccountsPromise (see its comment below), e.g. a double-click on "Add". Cleared on completion.
   #provisionPromises = new Map<string, Promise<void>>();
 
@@ -1403,7 +1412,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
   // Get the gatekeeper class implementing a singleton account's agent session. The overseer installs
   // this gatekeeper into the owner's gadgets (as a Facet) like any other gatekeeper, so the session
-  // and catalog run gadget-side in the gatekeeper's own worker — no further round-trips through this
+  // and catalog run gadget-side in the gatekeeper's own worker â no further round-trips through this
   // DO. The account capability stays encapsulated here; only the class reference crosses out.
   async getSingletonGatekeeperClass(accountId: number)
       : Promise<DurableObjectClass<Gatekeeper<any>> | null> {
@@ -1448,7 +1457,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
     async function notifyAdd(record: ConnectedAccountRecord) {
       // Ambient (auto-provisioned) accounts only appear in the Connectors list when their vendor is
-      // "optional" — i.e. the user opted in and can manage/remove it. "enabled" (forced) accounts have
+      // "optional" â i.e. the user opted in and can manage/remove it. "enabled" (forced) accounts have
       // nothing to manage, and "disabled" ones are dormant, so both are hidden.
       // Forced accounts are included when observer verification explicitly requests them.
       if (record.autoProvisioned) {
@@ -1555,13 +1564,13 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     let account = this.storage.connectedAccounts.get(accountId);
     if (account) {
       if (account.autoProvisioned) {
-        // A forced ("enabled") ambient account can't be removed by the user — the admin controls it.
+        // A forced ("enabled") ambient account can't be removed by the user â the admin controls it.
         if (shouldAutoProvisionAccount(await readAdminConfig(this.env), account.vendorId)) {
           throw new Error("This account is provided automatically and can't be disconnected.");
         }
         // An opt-in ("optional") ambient account: the user added it, so let them remove it. revoke()
         // gives the gatekeeper a chance to delete its own per-user storage (e.g. the account's
-        // private collections DO) — it's its cleanup hook, not just OAuth revocation. Best-effort:
+        // private collections DO) â it's its cleanup hook, not just OAuth revocation. Best-effort:
         // a gatekeeper that throws (or has nothing to revoke) must not block the user's disconnect.
         try {
           await account.account.revoke();
@@ -1618,13 +1627,13 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     // A repeated sign-in is a re-authorization, so the *fresh* grant is the one we want. If this
     // identity is already connected for this vendor, refresh that record in place rather than letting
     // putConnectedAccount's dedup discard the new grant: keeping the stale record would leave billing
-    // broken whenever the old token had expired or was rotated out by this very re-auth — the
+    // broken whenever the old token had expired or was rotated out by this very re-auth â the
     // opposite of what signing in again should accomplish.
     if (uniqueName) {
       let existing = this.#findConnectedAccountByIdentity(vendorId, uniqueName);
       if (existing) {
         // Drop the now-stale grant (a separate gatekeeper-side object from the fresh one), then point
-        // the existing record — keeping its id, so UI references stay stable — at the fresh grant.
+        // the existing record â keeping its id, so UI references stay stable â at the fresh grant.
         try {
           await existing.account.revoke();
         } catch (err) {
@@ -1723,7 +1732,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
     // Block whole gatekeepers + disabled resources at this single core-side chokepoint where a
     // resourceUrl becomes a capability (reached only via the user/UI-facing Overseer.newGatekeeper
-    // and blueprint instantiation — never from gadget or agent code).
+    // and blueprint instantiation â never from gadget or agent code).
     let config = await readAdminConfig(this.env);
     let vendorId = account.vendorId.toLowerCase();
     if (config.disabledGatekeepers.includes(vendorId)) {
@@ -1745,7 +1754,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   // overseer passes the returned verifier to a gatekeeper's `addObserver()` so the gatekeeper can
   // check whether this user is allowed to observe the data read through it. Returns null if the
   // account no longer exists (or never existed). Throws if the account belongs to a different
-  // vendor (not a legitimate UI state — only reachable by bypassing client-side filtering).
+  // vendor (not a legitimate UI state â only reachable by bypassing client-side filtering).
   //
   // Account *selection* (which of the user's accounts to use for a given binding) is done by the
   // frontend; this method validates and resolves a chosen account to its verifier.
@@ -1754,7 +1763,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     let account = this.storage.connectedAccounts.get(accountId);
     if (!account) return null;
     if (account.vendorId !== expectedVendorId) {
-      // Details stay server-side: this error reaches the browser via ensureObserver → open.
+      // Details stay server-side: this error reaches the browser via ensureObserver â open.
       console.error(
           `getVerifier: account ${accountId} vendor "${account.vendorId}" ` +
           `!= expected "${expectedVendorId}"`);
