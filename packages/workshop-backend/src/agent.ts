@@ -387,7 +387,7 @@ A new workspace contains no Gadgets: use the \`createGadget\` tool to create one
 
 When the user asks for a new Gadget, ALWAYS consider starting from a blueprint. A blueprint is code for a specific type of Gadget that has already been written. The \`listBlueprints\` tool returns a list of available blueprints. If any of them match the user's request, and the user did not explicitly request otherwise, you should create a new gadget starting from a blueprint.
 
-Note that users rarely ask for "a Gadget" in those words. They ask for a thing: a doc, a deck, a tracker, a tool that does X. Any of those is a request for a new Gadget, and so a request to consider a blueprint ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ including when the workspace already contains a Gadget, which does not make the request an edit to that one.
+Note that users rarely ask for "a Gadget" in those words. They ask for a thing: a doc, a deck, a tracker, a tool that does X. Any of those is a request for a new Gadget, and so a request to consider a blueprint ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ including when the workspace already contains a Gadget, which does not make the request an edit to that one.
 
 Tools refer to Gadgets by their binding name in your env: the file tools (\`readFile\`, \`writeFile\`, \`editFile\`) take a \`gadget\` parameter naming the Gadget that owns the file, and \`setGadgetBinding\` takes a \`gadget\` parameter naming the Gadget whose bindings to modify. Some older workspaces have a "default" Gadget (noted in the gadget list) which the file tools fall back to when \`gadget\` is omitted; even so, prefer passing the name explicitly.
 
@@ -552,13 +552,13 @@ Save important information, decisions, or code snippets to the user's semantic m
 let CREATE_GADGET_TOOL_DESCRIPTION = `
 Create a new Gadget in this workspace. The new gadget immediately becomes available in your \`env\` under the \`bindingName\` you choose, which is also how you refer to it in other tools (the \`workpiece\` parameter of the file tools, etc.).
 
-Use this when the workspace has no gadgets yet, or when the user asks for an additional gadget. Always choose a short, descriptive title ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ the user will see it.
+Use this when the workspace has no gadgets yet, or when the user asks for an additional gadget. Always choose a short, descriptive title ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ the user will see it.
 
 By default the new gadget is empty. Pass \`blueprintId\` (discovered with the \`listBlueprints\` tool, or given by the user) to instead start the gadget from a blueprint's code; the result then also describes the bindings the blueprint expects you to wire up.
 `.trim();
 
 let LIST_BLUEPRINTS_TOOL_DESCRIPTION = `
-List the blueprints available to the user: their own published blueprints, their blueprint library, and this deployment's featured blueprints. A blueprint is a shareable snapshot of a Gadget's code; instantiate one as a new Gadget by passing its \`blueprintId\` to \`createGadget\`. There is no search ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ read the list and pick the best match yourself.
+List the blueprints available to the user: their own published blueprints, their blueprint library, and this deployment's featured blueprints. A blueprint is a shareable snapshot of a Gadget's code; instantiate one as a new Gadget by passing its \`blueprintId\` to \`createGadget\`. There is no search ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ read the list and pick the best match yourself.
 `.trim();
 
 let WRITE_FILE_TOOL_DESCRIPTION = `
@@ -611,7 +611,7 @@ The bindings in your \`env\` belong to this chat; a Gadget's code sees only the 
 
 The addition is part of your proposed changes: like code edits, it takes permanent effect when the user accepts your changes.
 
-NOTE: You do NOT need this tool to use a resource yourself with \`executeCode\` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ your own bindings are already available there. ONLY use it when a Gadget's code needs the resource.
+NOTE: You do NOT need this tool to use a resource yourself with \`executeCode\` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ your own bindings are already available there. ONLY use it when a Gadget's code needs the resource.
 `.trim();
 
 let EXECUTE_CODE_TOOL_DESCRIPTION = `
@@ -633,7 +633,7 @@ List the resource types a gatekeeper vendor offers, so you can construct a resou
 `.trim();
 
 let REQUEST_CONNECTION_TOOL_DESCRIPTION = `
-Ask the user to connect a gatekeeper resource (e.g. a ClickHouse cluster, a GitHub repo). Pre-configure as much as you can: always pass vendorId, and pass resourceUrl when you can infer it (use listConnectableResources to learn the URL patterns). The request must resolve to a specific resource: if you pass a resourceUrl it must match one of the vendor's patterns, and if the vendor offers multiple resource types with no whole-instance option you MUST pass a matching resourceUrl. Otherwise the call is rejected with guidance and no card is shown ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ fix the request and try again. You also choose \`bindingName\`: the name the resource will have in your env once connected (you know why you want the resource, so pick a name that reflects its role). On success this shows the user an accept/deny card in the chat. It does NOT block: your turn ends after a successful call, and you will be resumed once the user accepts (the resource becomes available as \`env.<bindingName>\`, which you can describeBinding and use from executeCode; wire it into a Gadget with setGadgetBinding only if the Gadget's code needs it) or denies (your turn simply ends; wait for the user's next message).
+Ask the user to connect a gatekeeper resource (e.g. a ClickHouse cluster, a GitHub repo). Pre-configure as much as you can: always pass vendorId, and pass resourceUrl when you can infer it (use listConnectableResources to learn the URL patterns). The request must resolve to a specific resource: if you pass a resourceUrl it must match one of the vendor's patterns, and if the vendor offers multiple resource types with no whole-instance option you MUST pass a matching resourceUrl. Otherwise the call is rejected with guidance and no card is shown ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ fix the request and try again. You also choose \`bindingName\`: the name the resource will have in your env once connected (you know why you want the resource, so pick a name that reflects its role). On success this shows the user an accept/deny card in the chat. It does NOT block: your turn ends after a successful call, and you will be resumed once the user accepts (the resource becomes available as \`env.<bindingName>\`, which you can describeBinding and use from executeCode; wire it into a Gadget with setGadgetBinding only if the Gadget's code needs it) or denies (your turn simply ends; wait for the user's next message).
 `.trim();
 
 let GIVE_UP_TOOL_DESCRIPTION = `
@@ -649,7 +649,7 @@ type CodePreviewEntry = {
   parser: StreamingToolInputParser;
   // The edit's target workpiece, resolved from the streaming input's prefix fields once they are
   // complete. `null` means resolution failed (e.g. the agent omitted `workpiece` in a workspace
-  // with no default gadget) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ the tool call itself will fail, so no preview is shown.
+  // with no default gadget) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ the tool call itself will fail, so no preview is shown.
   target?: {workpieceId: WorkpieceId, rootName: string} | null;
   // Whether we've already emitted the toolCallTarget event. To avoid emitting multiple times.
   targetEmitted?: boolean;
@@ -1496,7 +1496,7 @@ export async function runAgent(
                   // migration -- degrade to a text marker rather than failing the whole replay.
                   return [{
                     type: "text",
-                    text: `\n\n[Attached file${filename} (${attachment.mimeType}) omitted ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ` +
+                    text: `\n\n[Attached file${filename} (${attachment.mimeType}) omitted ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ` +
                         `this file type is not supported by the current model]`,
                   }];
                 }
@@ -1924,7 +1924,7 @@ export async function runAgent(
               timestamp: msgTimestamp,
             });
           } else {
-            // Defensive: accept always records a gatekeeperId, so this shouldn't happen ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ but never
+            // Defensive: accept always records a gatekeeperId, so this shouldn't happen ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ but never
             // leave a resumed agent with no context about the outcome.
             modelMessages.push({
               role: "user",
@@ -2086,7 +2086,7 @@ export async function runAgent(
           "Aside from any resources described below, the `env` object is empty.";
     } else {
       let lines = namedSeeds.map(seed =>
-          `* env.${seed.name} ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ` +
+          `* env.${seed.name} ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ` +
           (seed.isGadget
               ? `RPC stub to the server-side Durable Object of the Gadget ` +
                 `${JSON.stringify(seed.title)}.`
@@ -2169,8 +2169,8 @@ export async function runAgent(
             let chatName = chatNameFor(b.target);
             return `* ${b.name}: ${b.title}` +
                 (chatName !== undefined
-                    ? ` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ in your env as \`env.${chatName}\``
-                    : ` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ (no binding for this in your env)`);
+                    ? ` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ in your env as \`env.${chatName}\``
+                    : ` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ (no binding for this in your env)`);
           }));
         }
         return lines.join("\n");
@@ -2198,7 +2198,7 @@ export async function runAgent(
           `for the user's next message.\n` +
           `If one of these services likely holds information relevant to the task, consider ` +
           `requesting a connection and reading from it before you answer, instead of answering from ` +
-          `guesswork ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ a connection often gives you the real information. Connectable vendors:\n` +
+          `guesswork ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ a connection often gives you the real information. Connectable vendors:\n` +
           `${connectableVendors.map(v => `* ${v.id}: ${v.displayName}`).join("\n")}`;
     }
 
@@ -2452,7 +2452,7 @@ export async function runAgent(
              if (caseInsensitive) flags += "i";
              regex = new RegExp(isRegex ? query : query.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&'), flags);
           } catch (e) {
-             throw new Error("Invalid regular expression.");
+             throw new Error("Invalid regular expression.", { cause: e });
           }
 
           for (let [filename, text] of getSessionYDoc().getMap<Y.Text>(resolved.rootName)) {
@@ -3272,7 +3272,7 @@ export function makeStorableArgs(
     throw new Error("Agent callback arguments exceed maximum nesting depth of 64.");
   }
 
-  // Transient RPC stubs ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ collect and replace with loopback.
+  // Transient RPC stubs ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ collect and replace with loopback.
   if (value instanceof NativeRpcStub) {
     let index = transientStubs.length;
     // @ts-ignore RPC types cause excessively deep instantiation.

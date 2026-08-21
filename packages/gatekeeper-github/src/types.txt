@@ -1,3 +1,4 @@
+// Source: packages/gatekeeper-github/src/types.d.ts
 /**
  * A GitHub repository.
  *
