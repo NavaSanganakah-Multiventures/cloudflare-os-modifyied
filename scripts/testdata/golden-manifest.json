@@ -240,6 +240,11 @@
     "gatekeeper-github": {
       "bindings": [
         {
+          "name": "BUILD_RUNNER",
+          "service": "$WORKER_NAME(cloudflareos-build-runner)",
+          "type": "service"
+        },
+        {
           "name": "CLIENT_ID",
           "text": "$SECRET(CLIENT_ID)",
           "type": "secret_text"
@@ -1050,6 +1055,11 @@
           "type": "r2_bucket"
         },
         {
+          "index_name": "$VECTORIZE_VECTOR_MEMORY_NAME",
+          "name": "VECTOR_MEMORY",
+          "type": "vectorize"
+        },
+        {
           "name": "BROWSER",
           "type": "browser"
         },
@@ -1120,6 +1130,11 @@
           "enabled": true,
           "head_sampling_rate": 0.5
         }
+      },
+      "triggers": {
+        "crons": [
+          "*/30 * * * *"
+        ]
       },
       "vars": {
         "PUBLIC_BASE_URL": "$PUBLIC_BASE_URL"
