@@ -7,7 +7,7 @@
 //     daily counter is consumed and, once exhausted, the request is blocked.
 
 import { CloudflareUsageInfo } from "@gadgets/workshop-shared/api";
-import { isCloudflareLimitsEnabled } from "../config.js";
+import { isCloudflareLimitsEnabled, getMinWalletBalance } from "../config.js";
 import { LimitWindowKind } from "@gadgets/workshop-shared/limits";
 import { getDailyLlmCallLimit } from "./config.js";
 import { getConnectionStatus, resolveConnection, ByokGatewayRouting } from "../cloudflare/connection-service.js";
@@ -105,35 +105,36 @@ export async function checkUsageAndBalance(
     };
   }
 
-  // System AI uses the wallet as the single meter. Daily free tier is no longer consumed here.
-  const cost = 1; // 1 credit per request for System AI
-  const walletSuccess = await userStub.consumeWalletBalance(cost);
-
-  if (!walletSuccess) {
+  // System AI uses the wallet (held in USD) as the single meter. We only *check* the balance here;
+  // the actual cost of each LLM call is deducted after it completes (see Overseer.addChatMessages),
+  // so failed turns are never charged and cheap/expensive models are billed accurately.
+  const walletBalance = await userStub.getWalletBalance();
+  const minBalance = getMinWalletBalance(env);
+  if (walletBalance <= minBalance) {
     return {
       allowed: false,
-      reason: "Insufficient wallet balance (System AI). Recharge or switch to Custom AI (BYOK).",
+      reason: "Wallet balance is too low for System AI. Recharge your wallet or switch to Custom AI (BYOK).",
       shouldUseByok: false,
       withinLimits: false,
-      remaining: 0,
+      remaining: Math.max(0, walletBalance),
       limit: Infinity,
       windowKind: "daily",
       resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
-      balance,
+      balance: walletBalance,
       hasUserToken,
     };
   }
 
-  // At this point quota/limit is governed entirely by wallet balance; report unlimited to callers.
+  // Within wallet budget: the turn may proceed; the per-call cost is charged as it is incurred.
   return {
     allowed: true,
     shouldUseByok: false,
     withinLimits: true,
-    remaining: Infinity,
+    remaining: walletBalance,
     limit: Infinity,
     windowKind: "daily",
     resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
-    balance,
+    balance: walletBalance,
     hasUserToken,
   };
 }
@@ -155,7 +156,7 @@ export async function getUsageInfo(
   }
 
   const limit = getDailyLlmCallLimit(env);
-  // These two reads are independent — run them together to halve latency on this UI polling path.
+  // These two reads are independent â run them together to halve latency on this UI polling path.
   const [quota, status] = await Promise.all([
     userStub.checkDailyLlmCount(limit),
     getConnectionStatus(env, userStub),
