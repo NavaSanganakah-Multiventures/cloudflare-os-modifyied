@@ -101,7 +101,7 @@ const logger = obsContext.createLogger({
   component: "gatekeeper.github", vendorId: VENDOR_ID,
 });
 
-interface BuildRunner {
+interface BuildRunner extends RpcTarget {
   runBuild(request: { repoUrl: string; branch: string; commands: string[] }): Promise<BuildResult>;
 }
 
@@ -639,7 +639,7 @@ function branchFromResponse(branch: GitHubBranchResponse, owner: string, repo: s
 function commitResultFromResponse(commit: GitHubCommitResponse["commit"]): GitHubCommit {
   return {
     sha: commit.sha,
-    // html_url is the web URL (https://github.com/owner/repo/commit/ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦); url is the API URL.
+    // html_url is the web URL (https://github.com/owner/repo/commit/ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦); url is the API URL.
     url: commit.html_url ?? commit.url,
   };
 }
@@ -1640,7 +1640,7 @@ export class GitHubVerifier extends WorkerEntrypoint<Env, GitHubVerifierProps>
       return true;
     } catch (error) {
       // GitHub returns 404 for private repos the token cannot see (to avoid leaking existence), and
-      // 403 in some org-policy cases ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ either way the observer lacks read access.
+      // 403 in some org-policy cases ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ either way the observer lacks read access.
       if (error instanceof GitHubApiError && (error.status === 404 || error.status === 403)) {
         return false;
       }
@@ -2322,7 +2322,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         return this.#entityIdMatches(action.pullId, logicalId);
       }
 
-      if (action.type === "createBranch" || action.type === "writeFile" || action.type === "deleteFile" || action.type === "dispatchWorkflow" || action.type === "disableWorkflow") {
+      if (action.type === "createBranch" || action.type === "writeFile" || action.type === "deleteFile" || action.type === "dispatchWorkflow" || action.type === "disableWorkflow" || action.type === "executeBuild") {
         // Repo-level actions are never attached to an issue/PR entity.
         return false;
       }
@@ -3184,7 +3184,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           if (reviewBuf.length < 100) reviewsDone = true;
         }
 
-        // Both sources empty ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ done.
+        // Both sources empty ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ done.
         if (commentBuf.length === 0 && reviewBuf.length === 0) break;
 
         // Take the entry with the earlier createdAt.
@@ -3903,7 +3903,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       };
     } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
-      logger.warn("failed to get action status from GitHub", { error: message });
+      logger.warn("failed to get action status from GitHub", { event: "get_action_status_failed", error: message });
       return { status: "Error checking status", logs: message };
     }
   }
@@ -4435,8 +4435,8 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     });
   }
 
-  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding â repo,
-  // issue, or pull request â is scoped to one repository, and issues/PRs inherit the repo's
+  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding Ã¢ÂÂ repo,
+  // issue, or pull request Ã¢ÂÂ is scoped to one repository, and issues/PRs inherit the repo's
   // permissions, so the repository is the atomic ACL unit. To admit an observer we simply confirm
   // they can read that repo, using their own token via the verifier (see GitHubVerifier).
   //
@@ -4648,7 +4648,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Write file ${options.path} in ${action.owner}/${action.repo}` +
         `${action.branch ? ` on branch ${action.branch}` : " on the default branch"}.` +
         (options.content !== undefined
-          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\nâ¦" : ""}\n\`\`\``
+          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\nÃ¢ÂÂ¦" : ""}\n\`\`\``
           : " Content is provided as base64 (binary)."),
       implementsRevert: false,
       awaitDecision: true,
