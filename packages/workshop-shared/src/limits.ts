@@ -12,6 +12,22 @@ export const MINIMUM_CLOUDFLARE_BALANCE = 2.0;
 // Default number of LLM calls a user may make per (calendar) day on the free tier.
 export const DEFAULT_DAILY_LLM_CALL_LIMIT = 100;
 
+// Wallet billing (the "price" model): the wallet holds a USD balance; each System AI request
+// deducts the model's real per-call cost (catalog-priced from actual token usage), so users
+// instantly see whether a turn was cheap or expensive. Balances are displayed in both USD and
+// INR (converted at the rate below); the wallet itself is stored in USD since inference costs
+// arrive in USD.
+export const DEFAULT_USD_TO_INR_RATE = 90;
+// Starting wallet balance (USD) granted to new users on first sign-up.
+export const DEFAULT_WALLET_START_BALANCE_USD = 1;
+// Minimum wallet balance (USD) required to start a new System AI agent turn.
+export const DEFAULT_MIN_WALLET_BALANCE_USD = 0;
+
+// Format a USD amount as an INR string at the given exchange rate, e.g. (1, 90) -> "₹90.00".
+export function formatInr(usd: number, rate: number = DEFAULT_USD_TO_INR_RATE): string {
+  return `₹${(usd * rate).toFixed(2)}`;
+}
+
 // User-facing message for an insufficient connected-account balance.
 export function insufficientBalanceMessage(minimum: number = MINIMUM_CLOUDFLARE_BALANCE): string {
   return `Cloudflare AI Gateway balance is below $${minimum}. Please add credits or use BYOK.`;
