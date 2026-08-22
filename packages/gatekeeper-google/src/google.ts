@@ -2415,11 +2415,10 @@ class GoogleDocSessionImpl extends RpcTarget implements GoogleDocSession {
       description: "Read the title and modification time of the document.",
     });
 
-    // The Docs API doesn't return lastModified directly (that's a Drive API field).
-    // For now, use the fetch timestamp as an approximation.
-    // TODO: Use Drive API files.get for actual modifiedTime.
+    // The Docs API doesn't return lastModified directly; fetch it from Drive.
+    let driveModifiedTime = await this.#docsApi.getModifiedTime(this.#documentId);
     let lastModified = pendingActions.reduce(
-        (latest, action) => Math.max(latest, action.submittedAt), snapshot.fetchedAt);
+        (latest, action) => Math.max(latest, action.submittedAt), driveModifiedTime.getTime());
     return {
       title: snapshot.title ?? "Untitled document",
       lastModified: new Date(lastModified),
