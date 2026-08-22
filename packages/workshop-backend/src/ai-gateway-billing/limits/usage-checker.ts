@@ -164,7 +164,7 @@ export async function getUsageInfo(
   }
 
   const limit = getDailyLlmCallLimit(env);
-  // These two reads are independent — run them together to halve latency on this UI polling path.
+  // These two reads are independent â run them together to halve latency on this UI polling path.
   const [quota, status] = await Promise.all([
     userStub.checkDailyLlmCount(limit),
     getConnectionStatus(env, userStub),
