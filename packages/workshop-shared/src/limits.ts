@@ -20,8 +20,10 @@ export const DEFAULT_DAILY_LLM_CALL_LIMIT = 100;
 export const DEFAULT_USD_TO_INR_RATE = 90;
 // Starting wallet balance (USD) granted to new users on first sign-up.
 export const DEFAULT_WALLET_START_BALANCE_USD = 1;
-// Minimum wallet balance (USD) required to start a new System AI agent turn.
-export const DEFAULT_MIN_WALLET_BALANCE_USD = 0;
+// Minimum wallet balance (USD) required to start a new System AI agent turn. 0.01 avoids the
+// "UI shows $0.00 but tiny positive backend balance still allows turns" problem, while still
+// letting users spend their last cent. Override with the MIN_WALLET_BALANCE env var.
+export const DEFAULT_MIN_WALLET_BALANCE_USD = 0.01;
 
 // Format a USD amount as an INR string at the given exchange rate, e.g. (1, 90) -> "₹90.00".
 export function formatInr(usd: number, rate: number = DEFAULT_USD_TO_INR_RATE): string {
