@@ -4533,7 +4533,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     return metadata;
   }
 
-  async createIssue(options: GitHubCreateIssueOptions): Promise<GitHubIssue> {
+  async createIssue(options: GitHubCreateIssueOptions & { _awaitDecision?: boolean }): Promise<GitHubIssue> {
     const action = await this.#gatekeeper.prepareCreateIssue(options);
     await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
       title: `Create issue ${options.title}`,
@@ -4541,11 +4541,12 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       implementsRevert: false,
       actionKind: CREATE_ISSUE_ACTION,
       autoApprovable: true,
+      awaitDecision: options._awaitDecision ?? true,
     });
     return new GitHubIssueImpl(this.#gatekeeper, this.#approvalQueue.dup(), action.provisionalId, "issue");
   }
 
-  async createPullRequest(options: GitHubCreatePullRequestOptions): Promise<GitHubPullRequest> {
+  async createPullRequest(options: GitHubCreatePullRequestOptions & { _awaitDecision?: boolean }): Promise<GitHubPullRequest> {
     const action = await this.#gatekeeper.prepareCreatePullRequest(options);
     await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
       title: `Create pull request ${options.title}`,
@@ -4554,6 +4555,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       actionKind: CREATE_PULL_REQUEST_ACTION,
       autoApprovable: true,
       branchRef: options.head,
+      awaitDecision: options._awaitDecision ?? true,
     });
     return new GitHubPullRequestImpl(this.#gatekeeper, this.#approvalQueue.dup(), action.provisionalId);
   }
@@ -4640,7 +4642,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     return this.#gatekeeper.listDirectory(path, ref);
   }
 
-  async createBranch(name: string, sha: string): Promise<GitHubBranch> {
+  async createBranch(name: string, sha: string, _awaitDecision = true): Promise<GitHubBranch> {
     const action = await this.#gatekeeper.prepareCreateBranch(name, sha);
     await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
       title: `Create branch ${name}`,
@@ -4648,7 +4650,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       implementsRevert: false,
       // The gatekeeper doesn't simulate branch creation, so the agent should wait for the
       // decision before proceeding (otherwise its reads won't reflect the new branch).
-      awaitDecision: true,
+      awaitDecision: _awaitDecision,
       actionKind: CREATE_BRANCH_ACTION,
       autoApprovable: true,
       branchRef: action.branchName,
@@ -4656,7 +4658,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     return { name, sha, url: branchTreeUrl(action.owner, action.repo, name) };
   }
 
-  async writeFile(options: GitHubWriteFileOptions): Promise<GitHubCommitHandle> {
+  async writeFile(options: GitHubWriteFileOptions & { _awaitDecision?: boolean }): Promise<GitHubCommitHandle> {
     const metadata = await this.getMetadata();
     const defaultBranch = defaultBranchFromMetadata(metadata);
     const targetBranch = options.branch ?? defaultBranch;
@@ -4676,17 +4678,17 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
           ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\nÃÂ¢ÃÂÃÂ¦" : ""}\n\`\`\``
           : " Content is provided as base64 (binary)."),
       implementsRevert: false,
-      awaitDecision: true,
+      awaitDecision: options._awaitDecision ?? true,
       actionKind: isWorkflowFilePath(options.path) ? EDIT_WORKFLOW_FILE_ACTION : WRITE_REPO_FILE_ACTION,
       autoApprovable: true,
-      branchRef: action.branch,
+      branchRef: action.branch ?? targetBranch,
     });
     // The commit is only created on GitHub once the action is approved. Use the returned
     // handle's getResult() to learn the real commit SHA and URL after the decision.
     return new GitHubCommitHandleImpl(this.#gatekeeper, action.approvalId);
   }
 
-  async deleteFile(options: GitHubDeleteFileOptions): Promise<GitHubCommitHandle> {
+  async deleteFile(options: GitHubDeleteFileOptions & { _awaitDecision?: boolean }): Promise<GitHubCommitHandle> {
     const metadata = await this.getMetadata();
     const defaultBranch = defaultBranchFromMetadata(metadata);
     const targetBranch = options.branch ?? defaultBranch;
@@ -4702,10 +4704,10 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Delete file ${options.path} from ${action.owner}/${action.repo}` +
         `${action.branch ? ` on branch ${action.branch}` : " on the default branch"}.`,
       implementsRevert: false,
-      awaitDecision: true,
+      awaitDecision: options._awaitDecision ?? true,
       actionKind: isWorkflowFilePath(options.path) ? EDIT_WORKFLOW_FILE_ACTION : DELETE_REPO_FILE_ACTION,
       autoApprovable: true,
-      branchRef: action.branch,
+      branchRef: action.branch ?? targetBranch,
     });
     // Same as writeFile: resolve the real commit via getResult() after the decision.
     return new GitHubCommitHandleImpl(this.#gatekeeper, action.approvalId);
@@ -4720,7 +4722,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     }
 
     const defaultBranchRef = await this.getBranch(defaultBranch);
-    const branch = await this.createBranch(options.branchName, defaultBranchRef.sha);
+    const branch = await this.createBranch(options.branchName, defaultBranchRef.sha, false);
 
     const commitHandle = await this.writeFile({
       path: options.path,
@@ -4729,6 +4731,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       contentBase64: options.contentBase64,
       branch: options.branchName,
       sha: options.sha,
+      _awaitDecision: false,
     });
 
     const pullRequest = await this.createPullRequest({
@@ -4750,13 +4753,14 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     }
 
     const defaultBranchRef = await this.getBranch(defaultBranch);
-    const branch = await this.createBranch(options.branchName, defaultBranchRef.sha);
+    const branch = await this.createBranch(options.branchName, defaultBranchRef.sha, false);
 
     const commitHandle = await this.deleteFile({
       path: options.path,
       message: options.message,
       sha: options.sha,
       branch: options.branchName,
+      _awaitDecision: false,
     });
 
     const pullRequest = await this.createPullRequest({
