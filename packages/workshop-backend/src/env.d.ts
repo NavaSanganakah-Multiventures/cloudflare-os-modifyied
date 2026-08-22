@@ -87,6 +87,18 @@ declare global {
       // Razorpay payment gateway credentials for wallet recharge.
       RAZORPAY_KEY_ID?: string;
       RAZORPAY_KEY_SECRET?: string;
+
+      // USD->INR exchange rate used to display wallet balances in both currencies. Defaults to
+      // DEFAULT_USD_TO_INR_RATE.
+      USD_TO_INR_RATE?: string;
+
+      // Starting wallet balance (USD) granted to new users. Defaults to
+      // DEFAULT_WALLET_START_BALANCE_USD.
+      WALLET_START_BALANCE?: string;
+
+      // Minimum wallet balance (USD) required to start a new System AI agent turn. Defaults to
+      // DEFAULT_MIN_WALLET_BALANCE_USD.
+      MIN_WALLET_BALANCE?: string;
     }
   }
 }

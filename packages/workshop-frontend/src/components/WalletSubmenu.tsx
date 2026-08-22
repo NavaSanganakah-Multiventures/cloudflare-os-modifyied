@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { DropdownMenu } from '@cloudflare/kumo'
 import { useAuthenticatedApi } from '../AuthContext'
+import { useServerConfig } from '../ServerConfigContext'
+import { DEFAULT_USD_TO_INR_RATE } from '@gadgets/workshop-shared/limits'
 import { MENU_CONTENT, MENU_ITEM, MENU_POSITIONER_STYLE } from './menuStyles'
 import { Brain, Wallet, Plus } from '@phosphor-icons/react'
 
@@ -18,6 +20,8 @@ function loadRazorpayScript(): Promise<void> {
 
 export default function WalletSubmenu() {
   const { authenticatedApi } = useAuthenticatedApi()
+  const serverConfig = useServerConfig()
+  const rate = serverConfig?.usdToInrRate ?? DEFAULT_USD_TO_INR_RATE
   const [balance, setBalance] = useState<number | null>(null)
   const [aiPref, setAiPref] = useState<'system' | 'custom'>('system')
   const [loading, setLoading] = useState(true)
@@ -124,7 +128,11 @@ export default function WalletSubmenu() {
         <div className="px-3 py-2 border-b border-kumo-line mb-1 flex items-center gap-2">
           <Wallet size={16} className="text-kumo-subtle" />
           <span className="text-sm text-kumo-subtle font-medium">
-            Balance: <span className="text-kumo-default">{balance?.toFixed(2) ?? '0.00'} credits</span>
+            Balance:{' '}
+            <span className="text-kumo-default">
+              ${balance != null ? balance.toFixed(2) : '0.00'}
+              <span className="text-kumo-subtle"> (₹{((balance ?? 0) * rate).toFixed(2)})</span>
+            </span>
           </span>
         </div>
         <DropdownMenu.Item
@@ -132,14 +140,14 @@ export default function WalletSubmenu() {
           className={`${MENU_ITEM} flex items-center justify-between`}
         >
           <span>Use System AI (Wallet)</span>
-          {aiPref === 'system' && <span className="text-kumo-brand">✓</span>}
+          {aiPref === 'system' && <span className="text-kumo-brand">â</span>}
         </DropdownMenu.Item>
         <DropdownMenu.Item
           onClick={() => handleSelect('custom')}
           className={`${MENU_ITEM} flex items-center justify-between`}
         >
           <span>Use My Custom AI (BYOK)</span>
-          {aiPref === 'custom' && <span className="text-kumo-brand">✓</span>}
+          {aiPref === 'custom' && <span className="text-kumo-brand">â</span>}
         </DropdownMenu.Item>
 
         <div className="border-t border-kumo-line mt-1 pt-2 px-3 py-2">
@@ -165,11 +173,16 @@ export default function WalletSubmenu() {
               {rechargeLoading ? '...' : 'Pay'}
             </button>
           </div>
+          {rechargeAmount && Number(rechargeAmount) > 0 && (
+            <p className="text-[11px] text-kumo-subtle mt-1">
+              Adds ~${(Number(rechargeAmount) / rate).toFixed(2)} to your wallet
+            </p>
+          )}
           {rechargeError && (
             <p className="text-xs text-red-500 mt-1 max-w-[200px]">{rechargeError}</p>
           )}
           {rechargeSuccess && (
-            <p className="text-xs text-green-600 mt-1">Wallet recharged!</p>
+            <p className="text-xs text-green-600 mt-1">Wallet recharged! Balance updated.</p>
           )}
         </div>
       </DropdownMenu.Content>
