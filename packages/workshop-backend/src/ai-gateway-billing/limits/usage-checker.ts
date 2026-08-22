@@ -7,7 +7,7 @@
 //     daily counter is consumed and, once exhausted, the request is blocked.
 
 import { CloudflareUsageInfo } from "@gadgets/workshop-shared/api";
-import { isCloudflareLimitsEnabled, getMinWalletBalance } from "../config.js";
+import { isCloudflareLimitsEnabled, getMinWalletBalance, getMinimumCloudflareBalance } from "../config.js";
 import { LimitWindowKind } from "@gadgets/workshop-shared/limits";
 import { getDailyLlmCallLimit } from "./config.js";
 import { getConnectionStatus, resolveConnection, ByokGatewayRouting } from "../cloudflare/connection-service.js";
@@ -77,31 +77,32 @@ export async function checkUsageAndBalance(
   }
 
   if (aiPreference === "custom") {
-    if (!hasUserToken) {
+    // A funded Cloudflare connection lets Custom AI route through the user's own AI Gateway for
+    // unified BYOK billing (all providers). Without one, the user's own provider API keys are used
+    // directly; we still allow the turn and do not charge the wallet.
+    if (hasUserToken && balance !== null && balance >= getMinimumCloudflareBalance(env)) {
       return {
-        allowed: false,
-        reason: "Custom AI is selected but no BYOK/API key is configured. Add a model in settings or switch to System AI.",
-        shouldUseByok: false,
-        withinLimits: false,
-        remaining: 0,
+        allowed: true,
+        shouldUseByok: true,
+        withinLimits: true,
+        remaining: Infinity,
         limit: Infinity,
         windowKind: "daily",
         resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
         balance,
         hasUserToken,
+        byokRouting,
       };
     }
+
     return {
       allowed: true,
-      shouldUseByok: true,
+      shouldUseByok: false,
       withinLimits: true,
       remaining: Infinity,
       limit: Infinity,
-      windowKind: "daily",
-      resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
       balance,
       hasUserToken,
-      byokRouting,
     };
   }
 
@@ -120,7 +121,7 @@ export async function checkUsageAndBalance(
       limit: Infinity,
       windowKind: "daily",
       resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
-      balance: walletBalance,
+      balance,
       hasUserToken,
     };
   }
@@ -134,7 +135,7 @@ export async function checkUsageAndBalance(
     limit: Infinity,
     windowKind: "daily",
     resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
-    balance: walletBalance,
+    balance,
     hasUserToken,
   };
 }
@@ -156,7 +157,7 @@ export async function getUsageInfo(
   }
 
   const limit = getDailyLlmCallLimit(env);
-  // These two reads are independent â run them together to halve latency on this UI polling path.
+  // These two reads are independent — run them together to halve latency on this UI polling path.
   const [quota, status] = await Promise.all([
     userStub.checkDailyLlmCount(limit),
     getConnectionStatus(env, userStub),
