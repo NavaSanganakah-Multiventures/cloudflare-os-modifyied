@@ -20,6 +20,8 @@ export interface UsageCheckResult {
   reason?: string;
   // Whether to serve the request using the user's own gateway/keys rather than the platform's.
   shouldUseByok: boolean;
+  // Whether this request should be charged against the user's System AI wallet.
+  shouldChargeWallet: boolean;
   // Whether the user is within their free-tier limit.
   withinLimits: boolean;
   // Calls remaining in the current window (Infinity when limits are disabled).
@@ -43,6 +45,7 @@ function unlimitedResult(): UsageCheckResult {
   return {
     allowed: true,
     shouldUseByok: false,
+    shouldChargeWallet: false,
     withinLimits: true,
     remaining: Infinity,
     limit: Infinity,
@@ -84,6 +87,7 @@ export async function checkUsageAndBalance(
       return {
         allowed: true,
         shouldUseByok: true,
+        shouldChargeWallet: false,
         withinLimits: true,
         remaining: Infinity,
         limit: Infinity,
@@ -98,6 +102,7 @@ export async function checkUsageAndBalance(
     return {
       allowed: true,
       shouldUseByok: false,
+      shouldChargeWallet: false,
       withinLimits: true,
       remaining: Infinity,
       limit: Infinity,
@@ -116,6 +121,7 @@ export async function checkUsageAndBalance(
       allowed: false,
       reason: "Wallet balance is too low for System AI. Recharge your wallet or switch to Custom AI (BYOK).",
       shouldUseByok: false,
+      shouldChargeWallet: false,
       withinLimits: false,
       remaining: Math.max(0, walletBalance),
       limit: Infinity,
@@ -130,6 +136,7 @@ export async function checkUsageAndBalance(
   return {
     allowed: true,
     shouldUseByok: false,
+    shouldChargeWallet: true,
     withinLimits: true,
     remaining: walletBalance,
     limit: Infinity,
