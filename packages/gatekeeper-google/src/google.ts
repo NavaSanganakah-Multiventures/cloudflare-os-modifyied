@@ -722,7 +722,6 @@ export class UserAccount extends DurableObject<Env> {
             : "google.token.mint.expiry",
       });
 
-      // TODO: If new refresh token returned, use it.
       let result = await getAccessToken(refreshToken, clientId, clientSecret,
           AbortSignal.timeout(TOKEN_MINT_TIMEOUT_MS));
       if (!result.ok) {
@@ -750,6 +749,15 @@ export class UserAccount extends DurableObject<Env> {
         let current = this.ctx.storage.kv.get<GoogleAccessToken>("accessToken");
         if (current) return current;
         throw new Error("Google credentials changed while refreshing. Please try again.");
+      }
+
+      // Google may rotate the refresh token on a refresh. Store the new one before publishing the
+      // access token so a later retry doesn't try to use the superseded token.
+      if (result.refreshToken) {
+        logger.info("Google refresh token rotated", {
+          event: "google.token.refresh.rotated",
+        });
+        this.ctx.storage.kv.put<string>("refreshToken", result.refreshToken);
       }
 
       this.ctx.storage.kv.put<GoogleAccessToken>("accessToken", result.token);
