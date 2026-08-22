@@ -99,7 +99,9 @@ export type RefreshFailure =
   | { ok: false; reason: "revoked" }
   | { ok: false; reason: "policyBlocked"; detail: string };
 
-export type AccessTokenResult = { ok: true; token: GoogleAccessToken } | RefreshFailure;
+export type AccessTokenResult =
+    { ok: true; token: GoogleAccessToken; refreshToken?: string }
+    | RefreshFailure;
 
 // Exchange a refresh token for an access token. `signal` lets the caller bound the round trip
 export async function getAccessToken(
@@ -143,6 +145,7 @@ export async function getAccessToken(
   const data = await response.json() as {
     access_token: string;
     expires_in: number;
+    refresh_token?: string;
   };
 
   return {
@@ -151,6 +154,7 @@ export async function getAccessToken(
       token: data.access_token,
       expires: new Date(Date.now() + data.expires_in * 1000),
     },
+    ...(data.refresh_token ? { refreshToken: data.refresh_token } : {}),
   };
 }
 
