@@ -1290,7 +1290,9 @@ class GmailSessionImpl extends RpcTarget implements GmailSession {
     this.#ctx = ctx;
   }
 
-  // TODO: The dup'd approvalQueue RPC stub should be disposed when the session ends.
+  [Symbol.dispose](): void {
+    this.#ctx.approvalQueue[Symbol.dispose]();
+  }
 
   async listThreads(): Promise<Cursor<GmailThreadEntry>> {
     const scopeDescription = this.#ctx.searchQuery
@@ -2349,6 +2351,10 @@ class GoogleDocSessionImpl extends RpcTarget implements GoogleDocSession {
     this.#simulationCache = simulationCache;
   }
 
+  [Symbol.dispose](): void {
+    this.#approvalQueue[Symbol.dispose]();
+  }
+
   async #getSnapshot(forceRefresh?: boolean): Promise<DocSnapshot> {
     if (!forceRefresh) {
       let cached = await this.#storage.get<DocSnapshot>("docSnapshot");
@@ -3087,6 +3093,10 @@ class GoogleCalendarSessionImpl extends RpcTarget implements GoogleCalendarSessi
     this.#observeAvailabilityCalendars = observeAvailabilityCalendars;
   }
 
+  [Symbol.dispose](): void {
+    this.#approvalQueue[Symbol.dispose]();
+  }
+
   async getCapabilities(): Promise<GoogleCalendarCapabilities> {
     return {availabilityMode: this.#availabilityMode};
   }
@@ -3447,6 +3457,10 @@ class BigQuerySessionImpl extends RpcTarget implements BigQuerySession {
     this.#scopedDatasetId = scopedDatasetId;
     this.#scopedTableId = scopedTableId;
     this.#observe = observe;
+  }
+
+  [Symbol.dispose](): void {
+    this.#approvalQueue[Symbol.dispose]();
   }
 
   // Authorize an observation that reveals data belonging to specific dataset(s), tracking them and
