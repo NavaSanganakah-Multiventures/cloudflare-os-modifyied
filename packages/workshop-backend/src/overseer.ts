@@ -32,7 +32,6 @@ import { recordAnalytics } from "./analytics";
 import { reportIssue } from "@gadgets/backend-utils/error-reporting";
 import type { ProductAnalyticsConnectionType, ProductAnalyticsGadgetInput } from "./analytics";
 import { checkUsageAndBalance } from "./ai-gateway-billing/limits/usage-checker";
-import { isCloudflareLimitsEnabled } from "./ai-gateway-billing/config";
 import { completeAgentCatalogSnapshot, normalizeAgentCatalog } from "./agent-catalog";
 import { refreshCachedBalance } from "./ai-gateway-billing/cloudflare/connection-service";
 import { SharingManager, SharingCaller, CollaboratorRecord, ShareKeyRecord } from "./sharing";
@@ -4012,7 +4011,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
         if (usage.shouldUseByok) {
           byokRouting = usage.byokRouting;
           if (byokRouting) byokOwnerStub = ownerStub;
-        } else if (isCloudflareLimitsEnabled(this.env)) {
+        } else if (usage.shouldChargeWallet) {
           // System AI with the wallet flow enabled: charge this turn's real per-call costs to the
           // owner's USD wallet as they are incurred (see addChatMessages).
           this.#walletChargeActive = true;

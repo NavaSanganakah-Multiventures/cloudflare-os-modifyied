@@ -709,11 +709,11 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     }
     this.#migrateWalletIfNeeded();
     let current = this.storage.walletBalance.get();
-    if (current < cost) {
-      return false; // Insufficient balance
-    }
+    // Always record the charge so the balance accurately reflects spend. This prevents a stale
+    // small positive balance from letting unlimited free turns through the gate. Returns false
+    // when the charge overdrew the wallet; the next gate check will then block further System AI.
     this.storage.walletBalance.put(current - cost);
-    return true;
+    return current >= cost;
   }
 
   async addWalletBalance(amount: number): Promise<void> {

@@ -7,7 +7,7 @@
 //     daily counter is consumed and, once exhausted, the request is blocked.
 
 import { CloudflareUsageInfo } from "@gadgets/workshop-shared/api";
-import { isCloudflareLimitsEnabled, getMinWalletBalance } from "../config.js";
+import { isCloudflareLimitsEnabled, getMinWalletBalance, getMinimumCloudflareBalance } from "../config.js";
 import { LimitWindowKind } from "@gadgets/workshop-shared/limits";
 import { getDailyLlmCallLimit } from "./config.js";
 import { getConnectionStatus, resolveConnection, ByokGatewayRouting } from "../cloudflare/connection-service.js";
@@ -20,6 +20,8 @@ export interface UsageCheckResult {
   reason?: string;
   // Whether to serve the request using the user's own gateway/keys rather than the platform's.
   shouldUseByok: boolean;
+  // Whether this request should be charged against the user's System AI wallet.
+  shouldChargeWallet: boolean;
   // Whether the user is within their free-tier limit.
   withinLimits: boolean;
   // Calls remaining in the current window (Infinity when limits are disabled).
@@ -43,6 +45,7 @@ function unlimitedResult(): UsageCheckResult {
   return {
     allowed: true,
     shouldUseByok: false,
+    shouldChargeWallet: false,
     withinLimits: true,
     remaining: Infinity,
     limit: Infinity,
@@ -77,31 +80,34 @@ export async function checkUsageAndBalance(
   }
 
   if (aiPreference === "custom") {
-    if (!hasUserToken) {
+    // A funded Cloudflare connection lets Custom AI route through the user's own AI Gateway for
+    // unified BYOK billing (all providers). Without one, the user's own provider API keys are used
+    // directly; we still allow the turn and do not charge the wallet.
+    if (hasUserToken && balance !== null && balance >= getMinimumCloudflareBalance(env)) {
       return {
-        allowed: false,
-        reason: "Custom AI is selected but no BYOK/API key is configured. Add a model in settings or switch to System AI.",
-        shouldUseByok: false,
-        withinLimits: false,
-        remaining: 0,
+        allowed: true,
+        shouldUseByok: true,
+        shouldChargeWallet: false,
+        withinLimits: true,
+        remaining: Infinity,
         limit: Infinity,
         windowKind: "daily",
         resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
         balance,
         hasUserToken,
+        byokRouting,
       };
     }
+
     return {
       allowed: true,
-      shouldUseByok: true,
+      shouldUseByok: false,
+      shouldChargeWallet: false,
       withinLimits: true,
       remaining: Infinity,
       limit: Infinity,
-      windowKind: "daily",
-      resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
       balance,
       hasUserToken,
-      byokRouting,
     };
   }
 
@@ -115,12 +121,13 @@ export async function checkUsageAndBalance(
       allowed: false,
       reason: "Wallet balance is too low for System AI. Recharge your wallet or switch to Custom AI (BYOK).",
       shouldUseByok: false,
+      shouldChargeWallet: false,
       withinLimits: false,
       remaining: Math.max(0, walletBalance),
       limit: Infinity,
       windowKind: "daily",
       resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
-      balance: walletBalance,
+      balance,
       hasUserToken,
     };
   }
@@ -129,12 +136,13 @@ export async function checkUsageAndBalance(
   return {
     allowed: true,
     shouldUseByok: false,
+    shouldChargeWallet: true,
     withinLimits: true,
     remaining: walletBalance,
     limit: Infinity,
     windowKind: "daily",
     resetAt: new Date(Date.now() + 86400 * 1000).toISOString(),
-    balance: walletBalance,
+    balance,
     hasUserToken,
   };
 }
