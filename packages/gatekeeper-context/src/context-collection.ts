@@ -17,6 +17,7 @@ import {
   isSkillManifestPath, parseSkillManifest, type SkillIndexEntry,
 } from "./agent-skill.js";
 import { obsContext } from "./observability.js";
+import { extractDocumentText, descriptionFromExtractedText } from "./extractors.js";
 
 const logger = obsContext.createLogger({
   component: "gatekeeper.context", vendorId: VENDOR_ID,
@@ -75,6 +76,7 @@ type ContextRecord = {
   description: string;
   contentType: string;
   body: string;
+  extractedText?: string;
   lastUpdated: Date;
 };
 
@@ -322,6 +324,7 @@ export class ContextCollectionDurableObject extends DurableObject<Cloudflare.Env
         name: record.name,
         description: manifest?.description ?? record.description,
         contentType: record.contentType ?? DEFAULT_DOCUMENT_CONTENT_TYPE,
+        ...(record.extractedText ? {hasExtractedText: true} : {}),
         ...(manifest ? {skillName: manifest.name} : {}),
         lastUpdated: record.lastUpdated,
       });
@@ -344,6 +347,7 @@ export class ContextCollectionDurableObject extends DurableObject<Cloudflare.Env
       description: manifest?.description ?? record.description,
       contentType,
       body: record.body,
+      ...(record.extractedText ? {extractedText: record.extractedText} : {}),
       ...(manifest ? {skillName: manifest.name} : {}),
       lastUpdated: record.lastUpdated,
     };
@@ -364,6 +368,21 @@ export class ContextCollectionDurableObject extends DurableObject<Cloudflare.Env
     let record: ContextRecord = {
       path, name: baseName(path), description: doc.description, contentType, body: doc.body, lastUpdated: new Date(),
     };
+
+    // Best-effort text extraction for binary documents (PDFs, images, Office docs).
+    if (!isTextContentType(contentType)) {
+      try {
+        let extracted = await extractDocumentText(contentType, doc.body, this.env);
+        if (extracted) {
+          record.extractedText = extracted;
+          if (!record.description) record.description = descriptionFromExtractedText(extracted) ?? "";
+        }
+      } catch (err) {
+        logger.warn("failed to extract document text on upload", {
+          event: "context.extraction.upload.failed", path, contentType, error: err,
+        });
+      }
+    }
 
     this.storage.transaction(() => {
       let isNew = !this.storage.documents.get(path);
@@ -581,6 +600,22 @@ export class ContextCollectionDurableObject extends DurableObject<Cloudflare.Env
     }
 
     if (result.commit) {
+      // Best-effort text extraction for binary documents from the git mirror.
+      for (let doc of result.documents) {
+        if (!isTextContentType(doc.contentType)) {
+          try {
+            let extracted = await extractDocumentText(doc.contentType, doc.body, this.env);
+            if (extracted) {
+              doc.extractedText = extracted;
+              if (!doc.description) doc.description = descriptionFromExtractedText(extracted) ?? "";
+            }
+          } catch (err) {
+            logger.warn("failed to extract document text from git mirror", {
+              event: "context.extraction.git.failed", path: doc.path, contentType: doc.contentType, error: err,
+            });
+          }
+        }
+      }
       // The repo was updated to a new commit, stored documents need to be updated.
       this.#replaceArtifactDocuments(result.commit, result.documents);
     } else {
@@ -606,20 +641,21 @@ export class ContextCollectionDurableObject extends DurableObject<Cloudflare.Env
       let snippet: string | undefined;
 
       let isText = isTextContentType(record.contentType ?? DEFAULT_DOCUMENT_CONTENT_TYPE);
+      let searchableBody = isText ? record.body : (record.extractedText ?? "");
       let nameLower = record.name.toLowerCase();
       let descLower = record.description.toLowerCase();
-      let bodyLower = isText ? record.body.toLowerCase() : "";
+      let bodyLower = searchableBody.toLowerCase();
 
       for (let token of tokens) {
         if (nameLower.includes(token)) score += 10;
         if (descLower.includes(token)) score += 5;
-        let bodyIdx = isText ? bodyLower.indexOf(token) : -1;
+        let bodyIdx = bodyLower.indexOf(token);
         if (bodyIdx >= 0) {
           score += 1;
           if (!snippet) {
             let start = Math.max(0, bodyIdx - 40);
-            let end = Math.min(record.body.length, bodyIdx + token.length + 80);
-            snippet = (start > 0 ? "..." : "") + record.body.slice(start, end) + (end < record.body.length ? "..." : "");
+            let end = Math.min(searchableBody.length, bodyIdx + token.length + 80);
+            snippet = (start > 0 ? "..." : "") + searchableBody.slice(start, end) + (end < searchableBody.length ? "..." : "");
           }
         }
       }
