@@ -21,6 +21,8 @@
     "capnweb": "^0.8.0",
     "capnweb-validate": "0.2.1",
     "isomorphic-git": "^1.40.0",
+    "fflate": "^0.8.2",
+    "unpdf": "^1.8.1",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
