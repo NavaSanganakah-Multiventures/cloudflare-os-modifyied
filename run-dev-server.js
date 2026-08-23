@@ -215,6 +215,13 @@ for (const gk of gatekeepers) {
     }
   }
 
+  // Inject Workers AI binding into the Context gatekeeper for image OCR text extraction.
+  // Mirrors the backend --use-workers-ai-binding injection; the code degrades gracefully
+  // when AI is absent (PDF/Office extraction still works, image OCR is skipped).
+  if (useWorkersAi && gk.name === "gatekeeper-context") {
+    config.ai = { binding: "AI" };
+  }
+
   const outPath = join(gk.dir, "wrangler.dev.jsonc");
   writeFileSync(outPath, JSON.stringify(config, null, 2) + "\n");
   console.log(`generated: ${outPath}`);
@@ -241,7 +248,7 @@ for (const gk of gatekeepers) {
   const OPTIONAL_FEATURE_VARS = [
     "DISABLE_PASSWORD_AUTH", "AUTH_GATEKEEPERS", "ENABLE_CLOUDFLARE_LIMITS", "PUBLIC_BASE_URL",
     "DAILY_LLM_CALL_LIMIT", "MINIMUM_CLOUDFLARE_BALANCE",
-    // Platform AI Gateway — makes the cross-provider model catalog available. The
+    // Platform AI Gateway â makes the cross-provider model catalog available. The
     // ACCOUNT_ID/API_TOKEN pair is required whenever CF_AI_GATEWAY is set (all inference goes
     // over HTTPS with tokens).
     "CF_AI_GATEWAY", "CF_AI_GATEWAY_PROVIDERS", "CF_AI_GATEWAY_ACCOUNT_ID",
