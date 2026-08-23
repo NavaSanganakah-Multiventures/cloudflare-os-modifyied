@@ -6,6 +6,8 @@ declare namespace Cloudflare {
     CONTEXT_COLLECTIONS: KVNamespace;
     // Optional Git-compatible backing repos for artifact-backed context collections.
     ARTIFACTS?: Artifacts;
+    // Optional: Workers AI binding enables OCR text extraction from images.
+    AI?: Ai;
   }
 
   interface GlobalProps {
