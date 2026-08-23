@@ -35,6 +35,12 @@
   ],
 
   // Optional: add an Artifacts binding named ARTIFACTS to enable Git-backed collections.
+  // Optional: Workers AI binding for OCR text extraction from images.
+  // Remove this block if your deployment does not support Workers AI; the code degrades gracefully.
+  "ai": {
+    "binding": "AI"
+  },
+
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,
