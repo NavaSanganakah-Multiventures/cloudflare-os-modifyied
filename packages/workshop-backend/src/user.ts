@@ -607,7 +607,15 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   // balances, exactly once. Reads/writes here are synchronous under the DO input gate.
   #migrateWalletIfNeeded(): void {
     if (this.storage.walletUnitsMigrated.get()) return;
-    if (!this.storage.created.get()) return;
+
+    // Only migrate if this is an already-created legacy user.
+    // If they aren't created yet, they are a new user and get the full USD default start balance
+    // without migration.
+    if (!this.storage.created.get()) {
+      this.storage.walletUnitsMigrated.put(true);
+      return;
+    }
+
     const oldBalance = this.storage.walletBalance.get();
     this.storage.walletBalance.put(oldBalance / getUsdToInrRate(this.env));
     this.storage.walletUnitsMigrated.put(true);

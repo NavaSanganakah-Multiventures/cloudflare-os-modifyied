@@ -4388,6 +4388,14 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
     return this.env as Env;
   }
 
+  async getWalletBalance(): Promise<number> {
+    return await this.#ownerUserStub().getWalletBalance();
+  }
+
+  async createRechargeOrder(amountINR: number): Promise<{ keyId: string; amount: number; currency: string; orderId: string }> {
+    return await this.#ownerUserStub().createRazorpayOrder(amountINR);
+  }
+
   getChatAgentContext(chatId: number): AiChatAgentContext {
     return this.storage.chatContext.get(chatId) || {chatId};
   }

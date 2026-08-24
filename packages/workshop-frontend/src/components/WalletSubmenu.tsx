@@ -4,7 +4,7 @@ import { useAuthenticatedApi } from '../AuthContext'
 import { useServerConfig } from '../ServerConfigContext'
 import { DEFAULT_USD_TO_INR_RATE } from '@gadgets/workshop-shared/limits'
 import { MENU_CONTENT, MENU_ITEM, MENU_POSITIONER_STYLE } from './menuStyles'
-import { Brain, Wallet, Plus } from '@phosphor-icons/react'
+import { Brain, Wallet, Plus, Check } from '@phosphor-icons/react'
 
 function loadRazorpayScript(): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -140,14 +140,14 @@ export default function WalletSubmenu() {
           className={`${MENU_ITEM} flex items-center justify-between`}
         >
           <span>Use System AI (Wallet)</span>
-          {aiPref === 'system' && <span className="text-kumo-brand">â</span>}
+          {aiPref === 'system' && <Check size={16} weight="bold" className="text-kumo-brand" />}
         </DropdownMenu.Item>
         <DropdownMenu.Item
           onClick={() => handleSelect('custom')}
           className={`${MENU_ITEM} flex items-center justify-between`}
         >
           <span>Use My Custom AI (BYOK)</span>
-          {aiPref === 'custom' && <span className="text-kumo-brand">â</span>}
+          {aiPref === 'custom' && <Check size={16} weight="bold" className="text-kumo-brand" />}
         </DropdownMenu.Item>
 
         <div className="border-t border-kumo-line mt-1 pt-2 px-3 py-2">

@@ -56,7 +56,7 @@ export default function UsageSettings() {
       </h2>
       <div className="rounded-xl border border-kumo-line bg-kumo-base p-5">
         {loading || balance === null ? (
-          <p className="text-sm text-kumo-subtle">Loading wallet…</p>
+          <p className="text-sm text-kumo-subtle">Loading wallet...</p>
         ) : (
           <div className="space-y-6">
             <div>
@@ -78,7 +78,7 @@ export default function UsageSettings() {
 
             <p className="text-xs text-kumo-subtle">
               Each System AI request is billed at the model's real per-call cost (USD), deducted
-              after it completes â so cheap models cost less and expensive ones more. Top up with
+              after it completes — so cheap models cost less and expensive ones more. Top up with
               Razorpay (INR) below.
             </p>
 

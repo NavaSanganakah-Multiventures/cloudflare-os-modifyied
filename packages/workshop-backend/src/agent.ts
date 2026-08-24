@@ -318,6 +318,9 @@ export interface AgentHooks {
   // so the dependency surface stays explicit.
   getWebFetchEnv(): WebFetchEnv;
 
+  getWalletBalance(): Promise<number>;
+  createRechargeOrder(amountINR: number): Promise<{ keyId: string; amount: number; currency: string; orderId: string }>;
+
   // Deployment-wide, admin-authored instructions to append to the agent's system prompt. Returns
   // "" when none are set. Read on each turn so admin edits take effect promptly.
   getInstanceInstructions(): Promise<string>;
@@ -644,6 +647,15 @@ Ask the user to connect a gatekeeper resource (e.g. a ClickHouse cluster, a GitH
 
 let GIVE_UP_TOOL_DESCRIPTION = `
 Gives up on handling the current callbacks, rejecting all outstanding callbacks with an error. Use this if you cannot fulfill the callbacks after attempting to do so.
+`.trim();
+
+let GET_WALLET_BALANCE_TOOL_DESCRIPTION = `
+Gets the user's current wallet balance in USD. Use this tool when the user asks for their wallet balance or remaining credits.
+`.trim();
+
+let CREATE_RECHARGE_ORDER_TOOL_DESCRIPTION = `
+Creates a Razorpay order to recharge the user's wallet. Use this when the user asks to add funds or recharge their wallet.
+You must pass the amount in INR (minimum 1). Returns the order details. Once created, ask the user to use the UI's wallet menu to complete the payment.
 `.trim();
 
 // =======================================================================================
@@ -2339,6 +2351,41 @@ export async function runAgent(
   });
 
   let tools: Record<string, AgentTool> = {
+    getWalletBalance: defineTool({
+      name: "getWalletBalance",
+      label: "Get wallet balance",
+      description: GET_WALLET_BALANCE_TOOL_DESCRIPTION,
+      parameters: Type.Object({}),
+      execute: async (toolCallId) => {
+        try {
+          const balance = await hooks.getWalletBalance();
+          return toolResult(`Current wallet balance: $${balance.toFixed(2)} USD`);
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          return toolResult(toolErrorText(error), { error: toolErrorText(error) });
+        }
+      }
+    }),
+
+    createRechargeOrder: defineTool({
+      name: "createRechargeOrder",
+      label: "Create recharge order",
+      description: CREATE_RECHARGE_ORDER_TOOL_DESCRIPTION,
+      parameters: Type.Object({
+        amountINR: Type.Number({ description: "Amount in INR to recharge (e.g. 50, 100). Must be at least 1." }),
+      }),
+      execute: async (toolCallId, { amountINR }) => {
+        try {
+          const order = await hooks.createRechargeOrder(amountINR);
+          const details = `Order created! Order ID: ${order.orderId}, Amount: ${order.amount / 100} ${order.currency}. Please ask the user to use the UI to complete payment.`;
+          return toolResult(details, { output: order } as Partial<AiToolCall>);
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          return toolResult(toolErrorText(error), { error: toolErrorText(error) });
+        }
+      }
+    }),
+
     searchMemory: defineTool({
       name: "searchMemory",
       label: "Search semantic memory",
