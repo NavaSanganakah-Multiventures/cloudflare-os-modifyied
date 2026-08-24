@@ -131,7 +131,7 @@ export async function handleClientErrorRequest(
   }
 
   const input = await readBoundedJson(request);
-  if (input === "too-large") return new Response("Payload Too Large", { status: 413 });
+  if (input === "too-large") return new Response(null, { status: 204 });
   if (input === "invalid") return new Response("Invalid JSON", { status: 400 });
   const report = normalizeFrontendErrorReport(input);
   if (!report) return new Response("Invalid frontend error report", { status: 400 });
