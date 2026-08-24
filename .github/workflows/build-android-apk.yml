@@ -1,0 +1,93 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'flutter/**'
+      - '.github/workflows/build-android-apk.yml'
+  workflow_dispatch:
+    inputs:
+      app:
+        description: 'Flutter app to build'
+        required: true
+        default: 'user'
+        type: choice
+        options:
+          - user
+          - admin
+          - both
+      build_type:
+        description: 'APK build type'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - debug
+          - release
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.app || 'user' }}
+  cancel-in-progress: true
+
+jobs:
+  select-apps:
+    name: Select apps to build
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.set.outputs.apps }}
+    steps:
+      - name: Determine app matrix
+        id: set
+        run: |
+          APP="${{ inputs.app || 'user' }}"
+          if [ "$APP" = "both" ]; then
+            echo 'apps=["user","admin"]' >> "$GITHUB_OUTPUT"
+          else
+            echo "apps=["$APP"]" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-apk:
+    name: Build ${{ matrix.app }} APK
+    needs: select-apps
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJson(needs.select-apps.outputs.apps) }}
+    defaults:
+      run:
+        working-directory: flutter/${{ matrix.app }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          flutter-version: '3.29.0'
+          cache: true
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Build APK
+        run: flutter build apk --${{ inputs.build_type || 'release' }}
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app }}-${{ inputs.build_type || 'release' }}-apk
+          path: flutter/${{ matrix.app }}/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
