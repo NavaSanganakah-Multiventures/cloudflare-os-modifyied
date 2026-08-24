@@ -141,6 +141,14 @@ jobs:
 
             // Auto-connect KV for gatekeepers
             injectKvIds(gkConfig, gk);
+
+            // Inject Workers AI binding into the Context gatekeeper for image OCR.
+            // Workers AI is available on all Cloudflare accounts; the code degrades
+            // gracefully when the binding is absent (PDF/Office extraction still works).
+            if (gk === "gatekeeper-context") {
+              gkConfig.ai = { binding: "AI" };
+            }
+
             fs.writeFileSync(gkConfigPath, JSON.stringify(gkConfig, null, 2));
 
             // Inject OAuth Secrets using individual GitHub Secrets (e.g. GITHUB_CLIENT_ID)

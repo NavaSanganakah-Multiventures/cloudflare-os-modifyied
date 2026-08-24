@@ -32,7 +32,7 @@ export type ContextSearchResult = {
 // A listing entry returned when browsing the content tree.
 export type ContextListingEntry = {
   type: "collection";
-  // A collectionId — pass to list()/search() to see inside it, not to read() (which takes a docId).
+  // A collectionId â pass to list()/search() to see inside it, not to read() (which takes a docId).
   id: string;
   title: string;
   description?: string;
@@ -162,6 +162,10 @@ export type ContextDocument = {
   // Literal text for text content types; base64 for binary ones.
   body: string;
 
+  // Text extracted from binary documents (PDFs, images, Office docs) for search and agent reads.
+  // Undefined for text documents (which are already searchable) or when extraction failed.
+  extractedText?: string;
+
   // Set when this document is a valid skill.
   skillName?: string;
 
@@ -174,6 +178,8 @@ export type ContextDocumentSummary = {
   name: string;
   description: string;
   contentType: string;
+  // Whether text was extracted from this binary document (for UI badges, etc.).
+  hasExtractedText?: boolean;
   skillName?: string;
   lastUpdated: Date;
 };
@@ -263,6 +269,14 @@ const EXTENSION_CONTENT_TYPES: Record<string, string> = {
   ico: "image/x-icon",
   bmp: "image/bmp",
   pdf: "application/pdf",
+  // Office Open XML (zip + XML; text extracted server-side for search).
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  // OpenDocument (zip + XML; text extracted server-side for search).
+  odt: "application/vnd.oasis.opendocument.text",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+  odp: "application/vnd.oasis.opendocument.presentation",
 };
 
 // Derive a MIME type from a path's file extension, defaulting to markdown.

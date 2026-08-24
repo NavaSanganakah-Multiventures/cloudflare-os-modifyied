@@ -114,7 +114,7 @@ export class LibraryReadSession extends RpcTarget {
     results.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
     results = results.slice(0, limit);
 
-    // Nothing matched → nothing was observed, so don't record an observation (mirrors read()).
+    // Nothing matched â nothing was observed, so don't record an observation (mirrors read()).
     if (results.length === 0) return results;
     let collectionIds = [...new Set(results.map(r => r.collectionId).filter((id): id is string => !!id))];
     // Authorize after fetching, before returning data.
@@ -132,7 +132,7 @@ export class LibraryReadSession extends RpcTarget {
     path?: string;
   }): Promise<ContextListing> {
     let listing = await this.#fetchListing(opts);
-    // Nothing listed → nothing was observed, so don't record an observation (mirrors read()).
+    // Nothing listed â nothing was observed, so don't record an observation (mirrors read()).
     if (listing.entries.length === 0) return listing;
     // Both collection contents and top-level collection titles/descriptions reveal collection data.
     let collectionIds = opts?.collectionId
@@ -162,7 +162,7 @@ export class LibraryReadSession extends RpcTarget {
     if (!enabled.has(collectionId)) return null;
 
     let doc = await this.#collection(collectionId).getContextDocument(path);
-    // No document found (missing or inaccessible) → nothing was observed, so don't record one.
+    // No document found (missing or inaccessible) â nothing was observed, so don't record one.
     if (!doc) return null;
 
     await this.#authorize([collectionId], {
@@ -170,9 +170,16 @@ export class LibraryReadSession extends RpcTarget {
       description: `Read Context Library document \`${docId}\`.`,
     });
 
-    let content = isTextContentType(doc.contentType)
-      ? doc.body
-      : `data:${doc.contentType};base64,${doc.body}`;
+    let content: string;
+    if (isTextContentType(doc.contentType)) {
+      content = doc.body;
+    } else if (doc.extractedText) {
+      // Return extracted text for binary documents so agents get readable content
+      // instead of an opaque data: URI.
+      content = doc.extractedText;
+    } else {
+      content = `data:${doc.contentType};base64,${doc.body}`;
+    }
     return {
       docId,
       title: doc.name,

@@ -35,6 +35,11 @@
   ],
 
   // Optional: add an Artifacts binding named ARTIFACTS to enable Git-backed collections.
+  // Optional: Workers AI binding for OCR text extraction from images.
+  // In dev, run-dev-server.js injects this with --use-workers-ai-binding.
+  // In production, deploy.yml injects this for the gatekeeper-context worker.
+  // For self-hosted workerd without Workers AI, leave it unconfigured;
+  // the code degrades gracefully (image OCR skipped, PDF/Office extraction still works).
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,
