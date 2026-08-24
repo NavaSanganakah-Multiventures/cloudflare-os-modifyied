@@ -164,6 +164,24 @@ jobs:
             }
           }
           
+          // Inject Backend Secrets
+          const backendSecrets = ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"];
+          for (const key of backendSecrets) {
+            const secretValue = allSecrets[key];
+            if (secretValue) {
+              const serviceName = backendConfig.name || "cloudflareos-backend";
+              console.log(`Setting secret ${key} for ${serviceName}...`);
+              try {
+                execSync(`npx wrangler secret put ${key} --name ${serviceName}`, {
+                  input: secretValue,
+                  stdio: ['pipe', 'inherit', 'inherit']
+                });
+              } catch (err) {
+                console.error(`Failed to set secret ${key} for ${serviceName}: ${err.message}`);
+              }
+            }
+          }
+
           // Auto-connect KV for backend
           injectKvIds(backendConfig, "workshop-backend");
           fs.writeFileSync(backendPath, JSON.stringify(backendConfig, null, 2));
