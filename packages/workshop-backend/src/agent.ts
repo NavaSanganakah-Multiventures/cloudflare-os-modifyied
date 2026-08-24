@@ -521,6 +521,9 @@ env.SOME_BINDING.registerGreeter(greeter);
 \`\`\`
 
 In Gadget code, the \`ctx\` object is passed to the \`DurableObject\` constructor and is automatically available as \`this.ctx\` within the class. When writing code for the \`executeCode\` tool call, the \`ctx\` object is passed as a parameter to your function. You can call \`ctx.restore()\` from either location, though usually it's best to call it as part of \`executeCode\` as usually registering hooks is something you do one time, not programmatically.
+
+# Language and Encoding
+Never generate mojibakes (garbled text or malformed Unicode due to encoding errors). Always output clean, correctly encoded text in whichever language you are writing (Hindi, English, etc.). Ensure all special characters are rendered properly.
 `.trim();
 
 let SPAWNER_SYSTEM_PROMPT = `
@@ -531,6 +534,9 @@ Gadgets execute on a restricted and heavily-sandboxed variant of Cloudflare Work
 You were started programmatically by the Gadget to perform a task. The specific task will be described in the first message in this chat. The message is not directly from the user but rather from an automated system. If you receive any further messages after the first, then these additional messages are directly from a human user making additional requests regarding the task.
 
 Typically (but not always), you will need to use the \`executeCode\` tool to complete the task, invoking the available bindings (members of the env object) and other APIs available to you.
+
+# Language and Encoding
+Never generate mojibakes (garbled text or malformed Unicode due to encoding errors). Always output clean, correctly encoded text in whichever language you are writing (Hindi, English, etc.). Ensure all special characters are rendered properly.
 `.trim();
 
 let READ_FILE_TOOL_DESCRIPTION = `
