@@ -38,7 +38,7 @@ export async function getAuthVendors(env: Cloudflare.Env): Promise<AuthVendorInf
 }
 
 export async function getServerConfig(env: Cloudflare.Env): Promise<ServerConfig> {
-  // The admin-config KV get and the per-vendor describe() RPCs are independent â run them
+  // The admin-config KV get and the per-vendor describe() RPCs are independent — run them
   // concurrently so the KV get isn't serialized ahead of N cross-Worker calls on every (re)connect.
   // (Branding comes from admin-config; auth config is separate and env-driven.)
   let [config, authVendors] = await Promise.all([

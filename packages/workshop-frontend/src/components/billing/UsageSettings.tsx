@@ -56,7 +56,7 @@ export default function UsageSettings() {
       </h2>
       <div className="rounded-xl border border-kumo-line bg-kumo-base p-5">
         {loading || balance === null ? (
-          <p className="text-sm text-kumo-subtle">Loading walletâ¦</p>
+          <p className="text-sm text-kumo-subtle">Loading wallet…</p>
         ) : (
           <div className="space-y-6">
             <div>
