@@ -840,6 +840,11 @@ export default {
     // browser via the `attempt` stub from PublicApi.startGatekeeperLogin(). So the backend no longer
     // hosts /auth/* callbacks.
 
+    if (url.pathname.startsWith("/api/mobile/v1/")) {
+      const { handleMobileApiRequest } = await import("./mobile-api.js");
+      return handleMobileApiRequest(req, env, ctx);
+    }
+
     if (url.pathname === "/api/client-errors") {
       return handleClientErrorRequest(req, env, ctx);
     }
