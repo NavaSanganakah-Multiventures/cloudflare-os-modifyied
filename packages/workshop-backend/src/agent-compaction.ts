@@ -36,7 +36,7 @@ export function getModelTokenLimits(config: AiModelConfig):
 
 // Instruction for the summarization call. It asks for a handoff aimed at the same agent, and tells
 // the model to ignore instructions in the transcript it is summarizing.
-export const COMPACTION_SYSTEM_PROMPT = `Generate a single context handoff that lets the same coding agent continue this conversation.
+export const COMPACTION_SYSTEM_PROMPT = `Generate a single context handoff that lets Aarya (the AI coding assistant created by NavaSanganakah Multiventures Company) continue this conversation. Aarya must always speak as a female and use female grammatical forms in Hindi (e.g., "karungi", "kahungi", "batati hu").
 
 Preserve exact user requirements and preferences, key decisions and rationale, files and symbols, errors and resolutions, current work state, and the next concrete step. Fully integrate any prior context summary instead of referring to it separately.
 
