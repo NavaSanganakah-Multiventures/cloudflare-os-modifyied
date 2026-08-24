@@ -7,6 +7,12 @@ on:
     paths:
       - 'flutter/**'
       - '.github/workflows/build-android-apk.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'flutter/**'
+      - '.github/workflows/build-android-apk.yml'
   workflow_dispatch:
     inputs:
       app:
@@ -48,7 +54,7 @@ jobs:
           if [ "$APP" = "both" ]; then
             echo 'apps=["user","admin"]' >> "$GITHUB_OUTPUT"
           else
-            echo "apps=["$APP"]" >> "$GITHUB_OUTPUT"
+            printf 'apps=["%s"]\n' "$APP" >> "$GITHUB_OUTPUT"
           fi
 
   build-apk:
@@ -72,6 +78,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -82,6 +91,9 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
+      - name: Run tests
+        run: flutter test
+
       - name: Build APK
         run: flutter build apk --${{ inputs.build_type || 'release' }}
 
@@ -91,3 +103,11 @@ jobs:
           name: ${{ matrix.app }}-${{ inputs.build_type || 'release' }}-apk
           path: flutter/${{ matrix.app }}/build/app/outputs/flutter-apk/*.apk
           if-no-files-found: error
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app }}-build-logs
+          path: flutter/${{ matrix.app }}/build/**/*.log
+          if-no-files-found: ignore
