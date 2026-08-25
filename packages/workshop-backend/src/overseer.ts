@@ -944,6 +944,10 @@ type OverseerStorage = ReturnType<typeof makeOverseerStorage>;
 // Don't build a snapshot until we have at least 64k of logs since the last one.
 const MIN_SNAPSHOT_THRESHOLD: number = 65536;
 
+// Poll interval and max age for gatekeeper async action watches (e.g. GitHub Actions workflows).
+const WORKFLOW_WATCH_POLL_MS = 30_000;
+const WORKFLOW_WATCH_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 // Common internals that several interfaces implemented by the Overseer need to use. Can't just
 // declare private methods because some of the methods are needed by multiple classes.
 // Most format tokens one message may carry. Only formats picked from the composer menu become
@@ -2481,6 +2485,106 @@ class OverseerImpl implements AgentHooks {
     }
   }
 
+
+  // Begin watching an asynchronous gatekeeper action (e.g. a GitHub Actions workflow). The watch
+  // is stored in raw DO KV so it survives DO restarts, and the alarm handler polls it.
+  async trackAsyncActionOutcome(record: ActionRecord & { type: "action" }): Promise<void> {
+    if (!record.appliedAt) return;
+    const gatekeeper = this.getGatekeeperFacet(record.gatekeeperId);
+    if (typeof (gatekeeper as any).getActionStatus !== "function") return;
+
+    try {
+      const status = await (gatekeeper as any).getActionStatus(record.action);
+      if (!status || this.isTerminalActionStatus(status)) {
+        await this.handleWorkflowTerminalStatus(record, status);
+        return;
+      }
+    } catch (e) {
+      this.logger.warn("failed initial getActionStatus", { error: e });
+      return;
+    }
+
+    const watchKey = this.workflowWatchKey(record.action);
+    await this.ctx.storage.kv.put(watchKey, {
+      gatekeeperId: record.gatekeeperId,
+      actionId: record.action,
+      resourceTitle: record.resourceTitle,
+      appliedAt: record.appliedAt.toISOString(),
+    });
+    this.ctx.storage.setAlarm(Date.now() + WORKFLOW_WATCH_POLL_MS);
+  }
+
+  private workflowWatchKey(actionId: number): string {
+    return "workflowWatch:" + actionId;
+  }
+
+  private isTerminalActionStatus(status: any): boolean {
+    if (!status || typeof status !== "object") return false;
+    const state = status.state;
+    return state === "completed" || state === "success" || state === "failure" || state === "cancelled" || state === "error" || status.terminal === true;
+  }
+
+  // Poll all pending workflow watches. Called from OverseerDurableObject.alarm().
+  async pollWorkflowWatches(): Promise<void> {
+    const kv = this.ctx.storage.kv;
+    const watches = Array.from(await kv.list({ prefix: "workflowWatch:" }));
+    if (watches.length === 0) return;
+
+    const now = Date.now();
+    let hasPending = false;
+
+    for (const [key, rawWatch] of watches) {
+      const watch = rawWatch as { gatekeeperId: number; actionId: number; resourceTitle?: string; appliedAt: string };
+      if (now - new Date(watch.appliedAt).getTime() > WORKFLOW_WATCH_MAX_AGE_MS) {
+        await kv.delete(key);
+        continue;
+      }
+
+      const gatekeeper = this.getGatekeeperFacet(watch.gatekeeperId);
+      let status: any;
+      try {
+        status = await (gatekeeper as any).getActionStatus(watch.actionId);
+      } catch (e) {
+        this.logger.warn("getActionStatus poll failed", { error: e, actionId: watch.actionId });
+        hasPending = true;
+        continue;
+      }
+
+      if (!status || this.isTerminalActionStatus(status)) {
+        await this.handleWorkflowTerminalStatus(watch, status);
+        await kv.delete(key);
+      } else {
+        hasPending = true;
+      }
+    }
+
+    if (hasPending) {
+      this.ctx.storage.setAlarm(Date.now() + WORKFLOW_WATCH_POLL_MS);
+    }
+  }
+
+  private async handleWorkflowTerminalStatus(
+    recordOrWatch: { actionId: number; resourceTitle?: string; gatekeeperId?: number },
+    status: any,
+  ): Promise<void> {
+    if (!this.ownerId) return;
+    const title = recordOrWatch.resourceTitle ?? "Workflow";
+    let state = "completed";
+    let success = true;
+    if (status && typeof status === "object") {
+      state = status.state ?? state;
+      success = status.success !== false && state !== "failure" && state !== "error" && state !== "cancelled";
+    }
+
+    const user = this.users.get(this.users.idFromName(this.ownerId));
+    await user.sendPushNotification({
+      title: success ? "\u2705 " + title + " completed" : "\u274c " + title + " " + state,
+      body: success
+        ? "Your " + title + " workflow finished successfully.",
+        : "Your " + title + " workflow ended with status: " + state + ".",
+    });
+  }
+
   getGatekeeperFacet(id: number): Fetcher<Gatekeeper<any>> {
     return this.ctx.facets.get(`gatekeeper${id}`, async () => {
       let cls = this.storage.gatekeepers.get(id)?.class;
@@ -2893,7 +2997,7 @@ class OverseerImpl implements AgentHooks {
 
   // Record an observation that originated from a built-in agent tool (not a gatekeeper).
   // The `gatekeeperId` is set to the BUILTIN_TOOL_GATEKEEPER_ID sentinel so that downstream
-  // code (which expects a gatekeeper to dereference for approve/reject) never touches it — built-in
+  // code (which expects a gatekeeper to dereference for approve/reject) never touches it â built-in
   // observations bypass the approve/reject paths anyway.
   async recordAgentObservation(
       chatId: number,
@@ -5706,7 +5810,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
     }
     let lines = [`Resource types offered by "${vendorId}" (${vendor.description.displayName}):`];
     for (let r of vendor.supportedResources) {
-      lines.push(`* ${r.title} — ${r.urlPattern}`)
+      lines.push(`* ${r.title} â ${r.urlPattern}`)
     }
     lines.push(
         `\nTo request one, call requestConnection with vendorId="${vendorId}" and a resourceUrl ` +
@@ -5811,7 +5915,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
       seen.add(id);
       let lines = [
         `* blueprintId: ${id}`,
-        `  ${JSON.stringify(title)} — ${source}`,
+        `  ${JSON.stringify(title)} â ${source}`,
       ];
       let bindingNames = Object.entries(bindings ?? {});
       if (bindingNames.length > 0) {
@@ -5872,7 +5976,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
         `about already *is* one of these, work on that one instead: asking to change an existing ` +
         `output is not a request for a second one.\n\n` +
         formats.map(format =>
-            `* ${format.output.noun} (plural: ${format.output.plural}) — ` +
+            `* ${format.output.noun} (plural: ${format.output.plural}) â ` +
             `${format.blueprintId}` + (format.agentHint ? `; ${format.agentHint}` : ``)).join("\n");
   }
 
@@ -5965,7 +6069,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
             details = `unknown`;
             break;
         }
-        lines.push(`* ${name} — ${JSON.stringify(binding.title)} (${details})` +
+        lines.push(`* ${name} â ${JSON.stringify(binding.title)} (${details})` +
             (binding.description ? `: ${binding.description}` : ``));
       }
     }
@@ -6324,7 +6428,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
   }
 
   // Render the observer verification failures as one line per binding, naming the connection and the
-  // account that was refused: `<resourceTitle> (<account label>) — <reason>.` Cold path only (we're
+  // account that was refused: `<resourceTitle> (<account label>) â <reason>.` Cold path only (we're
   // about to deny the open), so the extra User DO round trip per failure is fine. Discloses nothing
   // new: the reason was either already thrown to this same user or authored by us, and the account is
   // their own.
@@ -6355,7 +6459,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
         });
       }
 
-      return `${observerBindingTitle(gk)} (${label}) — ${failure.reason}`;
+      return `${observerBindingTitle(gk)} (${label}) â ${failure.reason}`;
     }));
 
     return lines.join("\n");
@@ -6451,6 +6555,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
   async alarm() {
     await this.impl.waitForAllAgentsToComplete();
     await this.impl.deliverReadyExternalMessageResponses();
+    await this.impl.pollWorkflowWatches();
   }
 
   #initializeEmptyCodeSnapshot(): void {
