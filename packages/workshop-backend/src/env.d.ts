@@ -99,6 +99,11 @@ declare global {
       // Minimum wallet balance (USD) required to start a new System AI agent turn. Defaults to
       // DEFAULT_MIN_WALLET_BALANCE_USD.
       MIN_WALLET_BALANCE?: string;
+
+      // Firebase Cloud Messaging (web push).
+      FIREBASE_WEB_CONFIG?: string;      // Public Firebase web config JSON
+      FIREBASE_VAPID_PUBLIC_KEY?: string; // Web Push VAPID public key from Firebase Console
+      FIREBASE_SERVICE_ACCOUNT_JSON?: string; // Secret service account JSON for FCM HTTP v1
     }
   }
 }
