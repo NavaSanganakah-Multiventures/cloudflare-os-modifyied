@@ -23,6 +23,7 @@ minimumReleaseAgeExclude:
   - "@cloudflare/workerd-*"
 
 allowBuilds:
+  - firebase
   '@google/genai': true
   core-js-pure: true
   esbuild: true
