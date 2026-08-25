@@ -1793,7 +1793,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     let account = this.storage.connectedAccounts.get(accountId);
     if (!account) return null;
     if (account.vendorId !== expectedVendorId) {
-      // Details stay server-side: this error reaches the browser via ensureObserver —Â open.
+      // Details stay server-side: this error reaches the browser via ensureObserver → open.
       console.error(
           `getVerifier: account ${accountId} vendor "${account.vendorId}" ` +
           `!= expected "${expectedVendorId}"`);
