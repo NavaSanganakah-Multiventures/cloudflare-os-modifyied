@@ -9,6 +9,8 @@ import { useAvatar, invalidateAvatarCache } from './useAvatar'
 import { compressAvatar, avatarBlobUrl } from './avatarUtils'
 import UsageSettings from './components/billing/UsageSettings'
 import { useDocumentTitle } from './useDocumentTitle'
+import { useServerConfig } from './ServerConfigContext'
+import { usePushNotifications } from './usePushNotifications'
 
 // Shared, on-language control classes (match the rest of the app: Workspaces/Blueprints headers,
 // the gatekeepers toolbar, the command palette). Kept here so the profile page reads as part of the
@@ -81,6 +83,69 @@ function PasswordField({
         <p className="mt-1 text-[12px] tracking-[-0.1px] text-kumo-subtle">{description}</p>
       ) : null}
     </div>
+  )
+}
+
+
+function PushNotificationsSection() {
+  const serverConfig = useServerConfig()
+  const { authenticatedApi } = useAuthenticatedApi()
+  const { state, subscribe, unsubscribe } = usePushNotifications(
+    authenticatedApi,
+    serverConfig?.fcmConfig ?? null,
+  )
+
+  if (!serverConfig?.fcmConfig) return null
+  if (state.status === 'unsupported') return null
+
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionLabel>Notifications</SectionLabel>
+      <div className="rounded-xl border border-kumo-line bg-kumo-base p-5">
+        <div className="flex max-w-sm flex-col gap-4">
+          <div>
+            <FieldLabel>Web push notifications</FieldLabel>
+            <p className="mt-1 text-[12px] tracking-[-0.1px] text-kumo-subtle">
+              Get notified when your workflows complete, even when Aarya Smart is closed.
+            </p>
+          </div>
+
+          {state.status === 'denied' ? (
+            <p className="text-[12px] tracking-[-0.1px] text-kumo-danger">
+              Notifications are blocked by the browser. Enable them in your browser settings to receive alerts.
+            </p>
+          ) : state.status === 'subscribed' ? (
+            <div className="flex items-center gap-3">
+              <span className="text-[13px] tracking-[-0.1px] text-kumo-success">Notifications enabled</span>
+              <button
+                type="button"
+                onClick={() => void unsubscribe()}
+                className={PRIMARY_BTN + ' bg-kumo-inactive hover:bg-kumo-subtle'}
+              >
+                Disable
+              </button>
+            </div>
+          ) : state.status === 'subscribing' ? (
+            <button type="button" disabled className={PRIMARY_BTN}>
+              Enabling\u2026
+            </button>
+          ) : state.status === 'error' ? (
+            <div className="flex flex-col gap-2">
+              <button type="button" onClick={() => void subscribe()} className={PRIMARY_BTN}>
+                Enable notifications
+              </button>
+              <p className="text-[12px] tracking-[-0.1px] text-kumo-danger">
+                {state.message}
+              </p>
+            </div>
+          ) : (
+            <button type="button" onClick={() => void subscribe()} className={PRIMARY_BTN}>
+              Enable notifications
+            </button>
+          )}
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -240,7 +305,7 @@ export default function SettingsPage() {
   if (loading) {
     return (
       <div className="flex min-h-[60vh] flex-1 items-center justify-center">
-        <p className="text-[13px] tracking-[-0.25px] text-kumo-subtle">Loading profile…</p>
+        <p className="text-[13px] tracking-[-0.25px] text-kumo-subtle">Loading profileâ¦</p>
       </div>
     )
   }
@@ -377,10 +442,10 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        {/* Usage & billing — only when the Cloudflare limits flow is enabled server-side */}
+        {/* Usage & billing â only when the Cloudflare limits flow is enabled server-side */}
         <UsageSettings />
 
-        {/* Security — only for password accounts (hidden under CF Access or gatekeeper sign-in) */}
+        {/* Security â only for password accounts (hidden under CF Access or gatekeeper sign-in) */}
         {!CF_ACCESS_MODE && hasPassword === true && (
           <section className="flex flex-col gap-3">
             <SectionLabel>Security</SectionLabel>
@@ -420,7 +485,7 @@ export default function SettingsPage() {
                     className={PRIMARY_BTN}
                   >
                     <Lock size={14} weight="bold" />
-                    {passwordLoading ? 'Changing…' : 'Change password'}
+                    {passwordLoading ? 'Changingâ¦' : 'Change password'}
                   </button>
                 </div>
               </div>
