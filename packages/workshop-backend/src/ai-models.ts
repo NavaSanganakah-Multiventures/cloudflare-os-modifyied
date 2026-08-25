@@ -115,10 +115,10 @@ const API_STREAMS: Record<string, StreamFunction<Api, SimpleStreamOptions>> = {
 
 const ZERO_COST: ModelCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
-// The pi-ai 0.83.0 catalog does not yet include this model, so override its metadata until the
-// provider package is bumped. Reasoning is enabled; token limits match Cloudflare's published
-// specs (80k context, 32k response cap).
+// The pi-ai catalog does not yet include these models, so override their metadata until the
+// provider package is bumped. Token limits match Cloudflare's published specs.
 const CLOUDFLARE_WORKERS_AI_OVERRIDES: Record<string, Model<Api>> = {
+  // DeepSeek R1 Distill: reasoning on; 80k context, 32k response cap.
   "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": {
     id: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
     name: "DeepSeek R1 Distill Qwen 32B (Workers AI)",
@@ -129,6 +129,21 @@ const CLOUDFLARE_WORKERS_AI_OVERRIDES: Record<string, Model<Api>> = {
     input: ["text"],
     cost: ZERO_COST,
     contextWindow: 80_000,
+    maxTokens: WORKERS_AI_OUTPUT_LIMIT,
+  } as Model<Api>,
+  // DeepSeek V4 Pro: flagship reasoning model with a 1M-token context window, function calling,
+  // and vision input (per Cloudflare's catalog). Reached over the Workers AI OpenAI-compatible
+  // endpoint like every other Workers AI model.
+  "@cf/deepseek-ai/deepseek-v4-pro-0813": {
+    id: "@cf/deepseek-ai/deepseek-v4-pro-0813",
+    name: "DeepSeek V4 Pro (Workers AI)",
+    api: "openai-completions",
+    provider: "cloudflare-workers-ai",
+    baseUrl: "https://api.cloudflare.com/client/v4/ai/v1",
+    reasoning: true,
+    input: ["text", "image"],
+    cost: ZERO_COST,
+    contextWindow: 1_048_576,
     maxTokens: WORKERS_AI_OUTPUT_LIMIT,
   } as Model<Api>,
 };
