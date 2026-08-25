@@ -1,5 +1,12 @@
 This project is building a platform for "vibe coded" personal applications and AI agents that run inside a strong sandbox.
 
+## Encoding Requirement
+
+All text files, code, documentation, and records in this repository must be encoded and decoded using **UTF-8**.
+When reading or writing files, converting buffers, generating strings, serializing records, or serving text responses,
+always use UTF-8. Do not use Latin-1, Windows-1252, ASCII-only fallbacks, or any other single-byte encoding.
+This prevents mojibake / garbage characters for symbols, em-dashes, Unicode arrows, and non-English text.
+
 The following files are commonly important to reference:
 
 * packages/workshop-shared/node_modules/capnweb/README.md: Explains how to use Cap'n Web RPC, which is used extensively for client-server communications.
