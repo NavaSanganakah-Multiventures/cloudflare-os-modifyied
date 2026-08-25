@@ -133,6 +133,14 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     return this.user.whoami();
   }
 
+  registerPushSubscription(token: string): Promise<void> {
+    return this.user.registerPushSubscription(token);
+  }
+
+  unregisterPushSubscription(token: string): Promise<void> {
+    return this.user.unregisterPushSubscription(token);
+  }
+
   setOwnDisplayName(name: string): Promise<void> {
     return this.user.setOwnDisplayName(name);
   }
@@ -594,7 +602,7 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   // accounts are auto-provisioned singletons (one per vendor), so the vendor id identifies them.
   async listGatekeeperApps(): Promise<GatekeeperAppInfo[]> {
     // listProvidedAccounts provisions auto-provisioned accounts first (idempotent), so their apps
-    // appear in the nav even before the user opens a gadget — in a single round trip.
+    // appear in the nav even before the user opens a gadget â in a single round trip.
     let accounts = await this.user.listProvidedAccounts();
     return accounts
         .filter(account => account.description.providesUi)
@@ -650,7 +658,7 @@ async function serveBlueprintScreenshot(env: Env, blueprintId: string): Promise<
 }
 
 // Returned by startGatekeeperLogin(). Wraps the PendingLogin DO so the client awaits the login
-// result through a capability (this stub) rather than a guessable id — no login id is ever exposed
+// result through a capability (this stub) rather than a guessable id â no login id is ever exposed
 // to the client. Disposing the stub (e.g. when the pop-up closes or the component unmounts) cancels
 // the in-flight wait and lets the DO be evicted.
 @validateRpc()
@@ -689,7 +697,7 @@ class PublicApiImpl extends RpcTarget implements PublicApi {
     if (!desc.providesAuth) throw new Error(`"${vendorId}" does not provide authentication.`);
 
     // The PendingLogin DO is the rendezvous between this request and the (separate) OAuth-callback
-    // invocation. The client never sees its id — we hand back an `attempt` stub instead.
+    // invocation. The client never sees its id â we hand back an `attempt` stub instead.
     const pendingId = this.ctx.exports.PendingLogin.newUniqueId();
     const pending = this.ctx.exports.PendingLogin.get(pendingId);
     const callback = this.ctx.exports.LoginConnectCallbackImpl(
