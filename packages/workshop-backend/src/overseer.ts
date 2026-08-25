@@ -2578,7 +2578,7 @@ class OverseerImpl implements AgentHooks {
 
     const user = this.users.get(this.users.idFromName(this.ownerId));
     await user.sendPushNotification({
-      title: success ? "\u2705 " + title + " completed" : "\u274c " + title + " " + state,
+      title: success ? "✅ " + title + " completed" : "❌ " + title + " " + state,
       body: success
         ? "Your " + title + " workflow finished successfully.",
         : "Your " + title + " workflow ended with status: " + state + ".",
@@ -2997,7 +2997,7 @@ class OverseerImpl implements AgentHooks {
 
   // Record an observation that originated from a built-in agent tool (not a gatekeeper).
   // The `gatekeeperId` is set to the BUILTIN_TOOL_GATEKEEPER_ID sentinel so that downstream
-  // code (which expects a gatekeeper to dereference for approve/reject) never touches it â built-in
+  // code (which expects a gatekeeper to dereference for approve/reject) never touches it Ã¢ÂÂ built-in
   // observations bypass the approve/reject paths anyway.
   async recordAgentObservation(
       chatId: number,
@@ -5810,7 +5810,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
     }
     let lines = [`Resource types offered by "${vendorId}" (${vendor.description.displayName}):`];
     for (let r of vendor.supportedResources) {
-      lines.push(`* ${r.title} â ${r.urlPattern}`)
+      lines.push(`* ${r.title} Ã¢ÂÂ ${r.urlPattern}`)
     }
     lines.push(
         `\nTo request one, call requestConnection with vendorId="${vendorId}" and a resourceUrl ` +
@@ -5915,7 +5915,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
       seen.add(id);
       let lines = [
         `* blueprintId: ${id}`,
-        `  ${JSON.stringify(title)} â ${source}`,
+        `  ${JSON.stringify(title)} Ã¢ÂÂ ${source}`,
       ];
       let bindingNames = Object.entries(bindings ?? {});
       if (bindingNames.length > 0) {
@@ -5976,7 +5976,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
         `about already *is* one of these, work on that one instead: asking to change an existing ` +
         `output is not a request for a second one.\n\n` +
         formats.map(format =>
-            `* ${format.output.noun} (plural: ${format.output.plural}) â ` +
+            `* ${format.output.noun} (plural: ${format.output.plural}) Ã¢ÂÂ ` +
             `${format.blueprintId}` + (format.agentHint ? `; ${format.agentHint}` : ``)).join("\n");
   }
 
@@ -6069,7 +6069,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
             details = `unknown`;
             break;
         }
-        lines.push(`* ${name} â ${JSON.stringify(binding.title)} (${details})` +
+        lines.push(`* ${name} Ã¢ÂÂ ${JSON.stringify(binding.title)} (${details})` +
             (binding.description ? `: ${binding.description}` : ``));
       }
     }
@@ -6428,7 +6428,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
   }
 
   // Render the observer verification failures as one line per binding, naming the connection and the
-  // account that was refused: `<resourceTitle> (<account label>) â <reason>.` Cold path only (we're
+  // account that was refused: `<resourceTitle> (<account label>) Ã¢ÂÂ <reason>.` Cold path only (we're
   // about to deny the open), so the extra User DO round trip per failure is fine. Discloses nothing
   // new: the reason was either already thrown to this same user or authored by us, and the account is
   // their own.
@@ -6459,7 +6459,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
         });
       }
 
-      return `${observerBindingTitle(gk)} (${label}) â ${failure.reason}`;
+      return `${observerBindingTitle(gk)} (${label}) Ã¢ÂÂ ${failure.reason}`;
     }));
 
     return lines.join("\n");
