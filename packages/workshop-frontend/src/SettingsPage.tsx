@@ -127,7 +127,7 @@ function PushNotificationsSection() {
             </div>
           ) : state.status === 'subscribing' ? (
             <button type="button" disabled className={PRIMARY_BTN}>
-              Enabling\u2026
+              Enabling…
             </button>
           ) : state.status === 'error' ? (
             <div className="flex flex-col gap-2">
@@ -305,7 +305,7 @@ export default function SettingsPage() {
   if (loading) {
     return (
       <div className="flex min-h-[60vh] flex-1 items-center justify-center">
-        <p className="text-[13px] tracking-[-0.25px] text-kumo-subtle">Loading profileâ¦</p>
+        <p className="text-[13px] tracking-[-0.25px] text-kumo-subtle">Loading profileÃ¢ÂÂ¦</p>
       </div>
     )
   }
@@ -442,10 +442,10 @@ export default function SettingsPage() {
           </div>
         </section>
 
-        {/* Usage & billing â only when the Cloudflare limits flow is enabled server-side */}
+        {/* Usage & billing Ã¢ÂÂ only when the Cloudflare limits flow is enabled server-side */}
         <UsageSettings />
 
-        {/* Security â only for password accounts (hidden under CF Access or gatekeeper sign-in) */}
+        {/* Security Ã¢ÂÂ only for password accounts (hidden under CF Access or gatekeeper sign-in) */}
         {!CF_ACCESS_MODE && hasPassword === true && (
           <section className="flex flex-col gap-3">
             <SectionLabel>Security</SectionLabel>
@@ -485,7 +485,7 @@ export default function SettingsPage() {
                     className={PRIMARY_BTN}
                   >
                     <Lock size={14} weight="bold" />
-                    {passwordLoading ? 'Changingâ¦' : 'Change password'}
+                    {passwordLoading ? 'ChangingÃ¢ÂÂ¦' : 'Change password'}
                   </button>
                 </div>
               </div>
