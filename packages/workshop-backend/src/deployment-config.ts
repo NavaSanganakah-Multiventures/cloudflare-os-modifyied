@@ -2,7 +2,7 @@
 // AI Gateway billing (ai-gateway-billing/), and the admin-configured branding (admin-config.ts).
 // Contains no secrets.
 
-import { AuthVendorInfo, ServerConfig } from "@gadgets/workshop-shared/api";
+import { AuthVendorInfo, ServerConfig, FcmConfig } from "@gadgets/workshop-shared/api";
 import { createWorkshopLogger } from "./observability";
 import { getAuthGatekeeperAllowlist, isPasswordAuthEnabled } from "./auth/config.js";
 import { isCloudflareLimitsEnabled, getUsdToInrRate } from "./ai-gateway-billing/config.js";
@@ -37,8 +37,28 @@ export async function getAuthVendors(env: Cloudflare.Env): Promise<AuthVendorInf
   return results.filter((v): v is AuthVendorInfo => v !== null);
 }
 
+function buildFcmConfig(env: Cloudflare.Env): FcmConfig | null {
+  const webConfigRaw = env.FIREBASE_WEB_CONFIG;
+  const vapidKey = env.FIREBASE_VAPID_PUBLIC_KEY;
+  if (!webConfigRaw || !vapidKey) return null;
+  try {
+    const parsed = JSON.parse(webConfigRaw) as { apiKey: string; authDomain: string; projectId: string; storageBucket: string; messagingSenderId: string; appId: string };
+    return {
+      apiKey: parsed.apiKey,
+      authDomain: parsed.authDomain,
+      projectId: parsed.projectId,
+      storageBucket: parsed.storageBucket,
+      messagingSenderId: parsed.messagingSenderId,
+      appId: parsed.appId,
+      vapidKey,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function getServerConfig(env: Cloudflare.Env): Promise<ServerConfig> {
-  // The admin-config KV get and the per-vendor describe() RPCs are independent — run them
+  // The admin-config KV get and the per-vendor describe() RPCs are independent âÂÂ run them
   // concurrently so the KV get isn't serialized ahead of N cross-Worker calls on every (re)connect.
   // (Branding comes from admin-config; auth config is separate and env-driven.)
   let [config, authVendors] = await Promise.all([
@@ -57,5 +77,6 @@ export async function getServerConfig(env: Cloudflare.Env): Promise<ServerConfig
     banner: config.banner.text,
     bannerColor: config.banner.color,
     accentColor: config.accentColor,
+    fcmConfig: buildFcmConfig(env),
   };
 }
