@@ -182,6 +182,12 @@ jobs:
             }
           }
 
+          // Add the Workers AI binding (needed by webFetch for document-to-Markdown
+          // conversion via env.WORKERS_AI.toMarkdown()). Without this, the AI agent crashes
+          // with "Cannot read properties of undefined (reading 'toMarkdown')" when it tries
+          // to fetch a web page.
+          backendConfig.ai = { binding: "WORKERS_AI" };
+
           // Auto-connect KV for backend
           injectKvIds(backendConfig, "workshop-backend");
           fs.writeFileSync(backendPath, JSON.stringify(backendConfig, null, 2));
