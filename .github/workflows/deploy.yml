@@ -1,0 +1,238 @@
+name: Deploy Cloudflare-OS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      # These secrets must be added in your GitHub repository settings
+      # Settings -> Secrets and variables -> Actions -> New repository secret
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 11.17.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build project
+        run: pnpm run build
+
+      - name: Inject Gatekeeper Bindings, Vars, KV IDs, and Secrets
+        env:
+          ALL_SECRETS: ${{ toJSON(secrets) }}
+        run: |
+          # We write a small Node.js script to dynamically add all Gatekeepers to the Backend and Router configs.
+          # It also auto-connects KV namespaces by fetching them from Cloudflare and sets Secrets.
+          cat << 'EOF' > inject-bindings.mjs
+          import fs from "node:fs";
+          import { join } from "node:path";
+          import { parse } from "jsonc-parser";
+          import { execSync } from "node:child_process";
+
+          const gatekeepers = fs.readdirSync("packages")
+            .filter(n => n.startsWith("gatekeeper-") && fs.existsSync(join("packages", n, "wrangler.jsonc")));
+
+          function bindingName(gk) {
+            return gk.toUpperCase().replaceAll("-", "_");
+          }
+
+          console.log("Fetching KV namespaces from Cloudflare...");
+          let kvNamespaces = [];
+          try {
+            const kvOutput = execSync("npx wrangler kv:namespace list", { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] });
+            kvNamespaces = JSON.parse(kvOutput);
+          } catch (e) {
+            console.warn("Could not fetch KV namespaces (maybe none exist yet).");
+          }
+
+          function injectKvIds(config, name) {
+            if (!config.kv_namespaces) return;
+            for (const kv of config.kv_namespaces) {
+              if (kv.id) continue;
+              const searchStr1 = (kv.preview_id || "").toLowerCase();
+              const searchStr2 = (kv.binding || "").toLowerCase();
+              const match = kvNamespaces.find(n => 
+                (searchStr1 && n.title.toLowerCase().includes(searchStr1)) || 
+                (searchStr2 && n.title.toLowerCase().includes(searchStr2))
+              );
+              if (match) {
+                console.log(`[${name}] Auto-connected KV ${kv.binding} -> ${match.id} (${match.title})`);
+                kv.id = match.id;
+              } else {
+                console.warn(`[${name}] WARNING: Could not find existing KV namespace for binding ${kv.binding}`);
+              }
+            }
+          }
+
+          console.log("Injecting bindings for:", gatekeepers);
+
+          // Parse All GitHub Secrets
+          let allSecrets = {};
+          if (process.env.ALL_SECRETS) {
+            try {
+              allSecrets = JSON.parse(process.env.ALL_SECRETS);
+            } catch (e) {
+              console.error("Failed to parse ALL_SECRETS as JSON:", e.message);
+            }
+          }
+
+          // 1. Update Backend
+          const backendPath = join("packages", "workshop-backend", "wrangler.jsonc");
+          const backendConfig = parse(fs.readFileSync(backendPath, "utf8"));
+          
+          backendConfig.vars = backendConfig.vars || {};
+          
+          // Inject standard Backend Vars from separate GitHub Secrets
+          const backendVarsList = [
+            "ADMINS", "PUBLIC_BASE_URL", "AUTH_GATEKEEPERS", "DISABLE_PASSWORD_AUTH",
+            "CF_AI_GATEWAY", "CF_AI_GATEWAY_ACCOUNT_ID", "CF_AI_GATEWAY_API_TOKEN", "CF_AI_GATEWAY_PROVIDERS",
+            "DAILY_LLM_CALL_LIMIT", "ENABLE_CLOUDFLARE_LIMITS", "MINIMUM_CLOUDFLARE_BALANCE", "CF_ACCESS_AUD", "CF_ACCESS_ISS"
+          ];
+          for (const key of backendVarsList) {
+            if (allSecrets[key]) {
+              backendConfig.vars[key] = allSecrets[key];
+              console.log(`Injected backend var: ${key}`);
+            }
+          }
+          
+          const publicBaseUrl = backendConfig.vars.PUBLIC_BASE_URL || "https://agent.navasanganakah.com";
+          backendConfig.vars.PUBLIC_BASE_URL = publicBaseUrl;
+
+          backendConfig.services = backendConfig.services || [];
+
+          for (const gk of gatekeepers) {
+            const gkConfigPath = join("packages", gk, "wrangler.jsonc");
+            const gkConfig = parse(fs.readFileSync(gkConfigPath, "utf8"));
+            const serviceName = gkConfig.name || gk;
+            
+            // Inject BASE_URL for gatekeeper
+            gkConfig.vars = gkConfig.vars || {};
+            const shortName = gk.replace("gatekeeper-", "");
+            gkConfig.vars.BASE_URL = `${publicBaseUrl}/gatekeeper/${shortName}`;
+            
+            const binding = {
+              binding: bindingName(gk),
+              service: serviceName,
+              entrypoint: "GatekeeperVendor",
+            };
+            if (gk === "gatekeeper-context") {
+              binding.props = { sharingDomain: publicBaseUrl };
+            }
+            backendConfig.services.push(binding);
+
+            // Auto-connect KV for gatekeepers
+            injectKvIds(gkConfig, gk);
+            fs.writeFileSync(gkConfigPath, JSON.stringify(gkConfig, null, 2));
+
+            // Inject OAuth Secrets using individual GitHub Secrets (e.g. GITHUB_CLIENT_ID)
+            const prefix = shortName.toUpperCase().replace("-", "_"); // e.g. GITHUB, MCP_PORTAL
+            const secretsToCheck = ["CLIENT_ID", "CLIENT_SECRET", "SIGNING_SECRET", "WEBHOOK_SECRET"];
+            
+            for (const key of secretsToCheck) {
+              const secretName = `${prefix}_${key}`; // e.g. GITHUB_CLIENT_ID
+              const secretValue = allSecrets[secretName];
+              if (secretValue) {
+                console.log(`Setting secret ${key} for ${serviceName} (from ${secretName})...`);
+                try {
+                  execSync(`npx wrangler secret put ${key} --name ${serviceName}`, {
+                    input: secretValue,
+                    stdio: ['pipe', 'inherit', 'inherit']
+                  });
+                } catch (err) {
+                  console.error(`Failed to set secret ${key} for ${serviceName}: ${err.message}`);
+                }
+              }
+            }
+          }
+          
+          // Inject Backend Secrets
+          const backendSecrets = ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET"];
+          for (const key of backendSecrets) {
+            const secretValue = allSecrets[key];
+            if (secretValue) {
+              const serviceName = backendConfig.name || "cloudflareos-backend";
+              console.log(`Setting secret ${key} for ${serviceName}...`);
+              try {
+                execSync(`npx wrangler secret put ${key} --name ${serviceName}`, {
+                  input: secretValue,
+                  stdio: ['pipe', 'inherit', 'inherit']
+                });
+              } catch (err) {
+                console.error(`Failed to set secret ${key} for ${serviceName}: ${err.message}`);
+              }
+            }
+          }
+
+          // Add the Workers AI binding (needed by webFetch for document-to-Markdown
+          // conversion via env.WORKERS_AI.toMarkdown()). Without this, the AI agent crashes
+          // with "Cannot read properties of undefined (reading 'toMarkdown')" when it tries
+          // to fetch a web page.
+          backendConfig.ai = { binding: "WORKERS_AI" };
+
+          // Auto-connect KV for backend
+          injectKvIds(backendConfig, "workshop-backend");
+          fs.writeFileSync(backendPath, JSON.stringify(backendConfig, null, 2));
+
+          // 2. Update Router
+          const routerPath = join("packages", "router", "wrangler.jsonc");
+          const routerConfig = parse(fs.readFileSync(routerPath, "utf8"));
+          routerConfig.services = routerConfig.services || [];
+          for (const gk of gatekeepers) {
+            const gkConfigPath = join("packages", gk, "wrangler.jsonc");
+            const gkConfig = parse(fs.readFileSync(gkConfigPath, "utf8"));
+            const serviceName = gkConfig.name || gk;
+
+            routerConfig.services.push({
+              binding: bindingName(gk),
+              service: serviceName
+            });
+          }
+          fs.writeFileSync(routerPath, JSON.stringify(routerConfig, null, 2));
+          console.log("Bindings injected successfully!");
+          EOF
+
+          node inject-bindings.mjs
+
+      - name: Create Vectorize Index
+        run: |
+          cd packages/workshop-backend
+          npx wrangler vectorize create memory_index --dimensions 768 --metric cosine || echo "Index 'memory_index' already exists or could not be created; continuing..."
+      
+      - name: Deploy All Gatekeepers
+        run: |
+          # Find all gatekeepers with a wrangler.jsonc and deploy them FIRST
+          for gk in packages/gatekeeper-*/; do
+            if [ -f "$gk/wrangler.jsonc" ]; then
+              echo "Deploying $gk..."
+              (cd "$gk" && npx wrangler deploy)
+            fi
+          done
+
+      - name: Deploy Backend
+        run: |
+          cd packages/workshop-backend
+          npx wrangler deploy
+
+      - name: Deploy Router (Frontend)
+        run: |
+          cd packages/router
+          npx wrangler deploy
