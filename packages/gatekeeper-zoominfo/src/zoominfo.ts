@@ -227,7 +227,14 @@ function parseIdTokenClaims(idToken: string | null): StoredIdentity {
   if (parts.length < 2) return {};
   try {
     const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const json = JSON.parse(atob(payload)) as {
+    // The ID token payload is base64url-encoded UTF-8 JSON. Decode the bytes and then the UTF-8
+    // text; JSON.parse(atob(payload)) decodes the bytes as Latin-1 and mangles non-ASCII claims
+    // (for example a Hindi display name) into mojibake.
+    const payloadBytes = Uint8Array.from(
+      atob(payload.padEnd(Math.ceil(payload.length / 4) * 4, "=")),
+      (character) => character.charCodeAt(0),
+    );
+    const json = JSON.parse(new TextDecoder().decode(payloadBytes)) as {
       name?: string;
       email?: string;
       preferred_username?: string;
