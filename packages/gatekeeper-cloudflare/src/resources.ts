@@ -154,7 +154,9 @@ export function parseResourceUrl(url: string): ParsedResourceUrl | null {
   if (segments.length === 1) return { kind: "account", accountId, resourceId: null };
 
   const kind = SEGMENT_TO_KIND[segments[1]];
-  if (!kind || segments.length < 3) return null;
+  if (!kind) return null;
+  if (kind === "ai") return { kind, accountId, resourceId: null };
+  if (segments.length < 3) return null;
   return { kind, accountId, resourceId: decodeURIComponent(segments[2]) };
 }
 
