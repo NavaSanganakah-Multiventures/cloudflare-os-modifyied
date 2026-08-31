@@ -7,24 +7,60 @@
 const CF_OAUTH_AUTH_URL = "https://dash.cloudflare.com/oauth2/auth";
 const CF_OAUTH_TOKEN_URL = "https://dash.cloudflare.com/oauth2/token";
 
-// Scopes for sign-in + the AI Gateway billing/BYOK flow: read account details and route inference
-// through the user's own AI Gateway. We deliberately do NOT request "openid" — the dashboard OAuth
-// client isn't permitted it; identity comes from user-details.read (the /user API). offline_access
-// yields a refresh token; account-settings.read is required to enumerate the user's account(s).
-export const FULL_SCOPES = [
-  "offline_access",
-  "aig.read",
-  "aig.run",
-  "user-details.read",
-  "account-settings.read",
-];
+// ---------------------------------------------------------------------------
+// OAuth scopes.
+//
+// Cloudflare dashboard OAuth scopes correspond to Cloudflare API token permission names
+// (https://developers.cloudflare.com/fundamentals/api/reference/permissions/), expressed as
+// kebab-case "<permission-group>.<action>" strings. We request read + write for every capability
+// the gatekeeper can grant, and keep the pre-existing billing scopes (AI Gateway) for BYOK billing.
+//
+// NOTE: Cloudflare validates the full scope list at authorize time. If a scope string is wrong the
+// whole authorization fails, so keep these in sync with the live /oauth/scopes catalog.
+// ---------------------------------------------------------------------------
+
+// Always requested: identity + account discovery.
+export const BASE_SCOPES = ["offline_access", "user-details.read", "account-settings.read"];
+
+// Pre-existing AI Gateway billing scopes (BYOK credit-balance + inference routing).
+export const BILLING_SCOPES = ["aig.read", "aig.run"];
 
 // Minimal scopes for sign-in only: a refresh token + the /user identity read. Used in "auth" mode
 // (the resulting grant is transient).
-export const AUTH_SCOPES = [
-  "offline_access",
-  "user-details.read",
+export const AUTH_SCOPES = ["offline_access", "user-details.read"];
+
+// Per-capability scopes (read + write). These are requested when the user connects the resource
+// type (or the full set when they connect with "full" access).
+export const D1_SCOPES = ["d1.read", "d1.write"];
+export const R2_SCOPES = ["workers-r2-storage.read", "workers-r2-storage.write"];
+export const ZONE_SCOPES = ["zone.read", "zone.write", "dns.read", "dns.write"];
+export const WORKERS_SCOPES = ["workers-scripts.read", "workers-scripts.write"];
+export const PAGES_SCOPES = ["pages.read", "pages.write"];
+export const AI_SCOPES = ["workers-ai.read", "workers-ai.write"];
+export const VECTORIZE_SCOPES = ["vectorize.read", "vectorize.write"];
+export const EMAIL_SCOPES = [
+  "email-routing-addresses.read",
+  "email-routing-addresses.write",
+  "email-routing-rules.read",
+  "email-routing-rules.write",
 ];
+export const TUNNEL_SCOPES = ["cloudflare-tunnel.read", "cloudflare-tunnel.write"];
+
+// Full capability set requested for a persisted "full" connection. The billing scopes remain so a
+// single connection can serve both BYOK billing and gadget/agent resources.
+export const FULL_SCOPES = [...new Set([
+  ...BASE_SCOPES,
+  ...BILLING_SCOPES,
+  ...D1_SCOPES,
+  ...R2_SCOPES,
+  ...ZONE_SCOPES,
+  ...WORKERS_SCOPES,
+  ...PAGES_SCOPES,
+  ...AI_SCOPES,
+  ...VECTORIZE_SCOPES,
+  ...EMAIL_SCOPES,
+  ...TUNNEL_SCOPES,
+])];
 
 export interface CloudflareOAuthConfig {
   clientId: string;
