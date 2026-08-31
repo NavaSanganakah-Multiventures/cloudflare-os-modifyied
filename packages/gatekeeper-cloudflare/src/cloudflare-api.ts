@@ -131,16 +131,6 @@ export class CloudflareApi {
     return this.#request<T>("DELETE", path);
   }
 
-  async #list<T>(path: string, page: number, extra?: Record<string, string | number | boolean | undefined>): Promise<CfList<T>> {
-    const envelope = await this.#request<CfList<T> & { result_info?: CfResultInfo }>("GET", path, {
-      query: { page, per_page: 50, ...extra },
-    });
-    // The envelope result is the array itself; result_info is attached to the envelope by
-    // Cloudflare, not nested inside result.
-    const data = await this.#requestEnvelope<T>(path, page, extra);
-    return data;
-  }
-
   async #requestEnvelope<T>(path: string, page: number, extra?: Record<string, string | number | boolean | undefined>): Promise<CfList<T>> {
     const token = await this.#getToken();
     const url = new URL(API_BASE + path);
