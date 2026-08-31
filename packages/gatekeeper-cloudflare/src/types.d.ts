@@ -3,17 +3,17 @@
 // Cloudflare is an account-scoped platform; every resource lives under an account. The gatekeeper
 // exposes a broad CloudflareAccount session plus focused sessions for each grantable service:
 //
-//   - CloudflareAccount       â€” one account: zones, D1, R2, Workers, Pages, AI, Vectorize,
+//   - CloudflareAccount       -- one account: zones, D1, R2, Workers, Pages, AI, Vectorize,
 //                              Tunnels and email routing.
-//   - CloudflareZone          â€” a DNS zone and its records.
-//   - CloudflareD1Database    â€” a serverless SQLite database.
-//   - CloudflareR2Bucket      â€” an object storage bucket.
-//   - CloudflareWorker        â€” a Workers script.
-//   - CloudflarePagesProject  â€” a Pages project and its deployments.
-//   - CloudflareAi            â€” Workers AI inference.
-//   - CloudflareVectorIndex   â€” a Vectorize index.
-//   - CloudflareEmailRouting  â€” email routing for a zone.
-//   - CloudflareTunnel        â€” a Cloudflare Tunnel.
+//   - CloudflareZone          -- a DNS zone and its records.
+//   - CloudflareD1Database    -- a serverless SQLite database.
+//   - CloudflareR2Bucket      -- an object storage bucket.
+//   - CloudflareWorker        -- a Workers script.
+//   - CloudflarePagesProject  -- a Pages project and its deployments.
+//   - CloudflareAi            -- Workers AI inference.
+//   - CloudflareVectorIndex   -- a Vectorize index.
+//   - CloudflareEmailRouting  -- email routing for a zone.
+//   - CloudflareTunnel        -- a Cloudflare Tunnel.
 //
 // Read-only methods are authorized as observations before data is returned. Mutations are
 // submitted to the approval queue and applied when approved.
