@@ -445,6 +445,7 @@ export interface ZoneRecord {
   status: string;
   paused: boolean;
   type: string;
+  account?: { id?: string; name?: string };
   development_mode?: number;
   name_servers?: string[];
   original_name_servers?: string[] | null;
