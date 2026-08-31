@@ -1,7 +1,7 @@
 // Resource catalog for the Cloudflare gatekeeper: the URL patterns it can resolve, the OAuth
 // scopes needed for each capability, and helpers to parse canonical dashboard URLs.
 
-import type { SupportedResource } from "@gadgets/workshop-shared";
+import type { SupportedResource } from "@gadgets/workshop-shared/gatekeeper";
 import {
   AI_SCOPES,
   BASE_SCOPES,
