@@ -275,6 +275,20 @@ export class CloudflareApi {
     });
   }
 
+  // Returns the deployed script's source. The content endpoint returns the script body as text.
+  async getWorkerScriptContent(accountId: string, scriptName: string): Promise<string> {
+    const token = await this.#getToken();
+    const url = `${API_BASE}/accounts/${accountId}/workers/scripts/${encodeURIComponent(scriptName)}/content/v2`;
+    const resp = await fetch(url, { headers: { "Authorization": `Bearer ${token}`, "Accept": "text/plain" } });
+    if (resp.status === 401 || resp.status === 403) {
+      throw new CloudflareApiError(resp.status, await safeStatusText(resp), true);
+    }
+    if (!resp.ok) {
+      throw new CloudflareApiError(resp.status, await safeStatusText(resp));
+    }
+    return await resp.text();
+  }
+
   async deleteWorkerScript(accountId: string, scriptName: string): Promise<unknown> {
     return await this.#delete(`/accounts/${accountId}/workers/scripts/${encodeURIComponent(scriptName)}`);
   }
