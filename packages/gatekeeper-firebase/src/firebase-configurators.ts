@@ -10,11 +10,6 @@ const OPTION_LIMIT = 100;
 const tokenGetters = new WeakMap<object, () => Promise<string>>();
 const projectListCache = new WeakMap<object, Promise<FirebaseProjectResponse[]>>();
 
-function api(target: object): FirebaseManagementApi {
-  const getToken = tokenGetters.get(target);
-  if (!getToken) throw new Error("Firebase configurator is not initialized.");
-  return new FirebaseManagementApi("");  // token is set per-request
-}
 
 function matches(parts: (string | undefined)[], query: string): boolean {
   const lower = query.trim().toLowerCase();
