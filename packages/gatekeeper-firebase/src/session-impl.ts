@@ -37,19 +37,16 @@ type Env = Cloudflare.Env;
 export class FirebaseProjectSessionImpl extends RpcTarget implements FirebaseProject {
   #approvalQueue: RpcStub<ApprovalQueue>;
   #ctx: DurableObjectState<FirebaseGatekeeperImplProps>;
-  #token: string;
   #getToken: () => Promise<string>;
 
   constructor(
     approvalQueue: RpcStub<ApprovalQueue>,
     ctx: DurableObjectState<FirebaseGatekeeperImplProps>,
-    token: string,
     getToken: () => Promise<string>,
   ) {
     super();
     this.#approvalQueue = approvalQueue;
     this.#ctx = ctx;
-    this.#token = token;
     this.#getToken = getToken;
   }
 
@@ -58,7 +55,7 @@ export class FirebaseProjectSessionImpl extends RpcTarget implements FirebasePro
   }
 
   async getInfo(): Promise<FirebaseProjectInfo> {
-    let mgmt = new FirebaseManagementApi(this.#token);
+    let mgmt = new FirebaseManagementApi(await this.#getToken());
     let project = await mgmt.getProject(this.#ctx.props.projectId!);
     await this.#approvalQueue.authorizeObservation({
       title: "Read Firebase project info",
@@ -67,13 +64,13 @@ export class FirebaseProjectSessionImpl extends RpcTarget implements FirebasePro
     return {
       projectId: project.projectId,
       displayName: project.displayName,
-      region: project.resources?.hosting ?? "unknown",
+      region: "unknown",
       url: `https://console.firebase.google.com/project/${project.projectId}`,
     };
   }
 
   async listFirestoreDatabases(): Promise<FirestoreDatabaseInfo[]> {
-    let admin = new FirestoreAdminApi(this.#token, this.#ctx.props.projectId!);
+    let admin = new FirestoreAdminApi(await this.#getToken(), this.#ctx.props.projectId!);
     let databases = await admin.listDatabases();
     await this.#approvalQueue.authorizeObservation({
       title: "List Firestore databases",
@@ -126,7 +123,7 @@ export class FirebaseProjectSessionImpl extends RpcTarget implements FirebasePro
   }
 
   async listAuthUsers(maxResults?: number): Promise<AuthUser[]> {
-    let auth = new FirebaseAuthApi(this.#token, this.#ctx.props.projectId!);
+    let auth = new FirebaseAuthApi(await this.#getToken(), this.#ctx.props.projectId!);
     let users = await auth.listUsers(maxResults ?? 100);
     await this.#approvalQueue.authorizeObservation({
       title: "List Auth users",
@@ -149,19 +146,16 @@ export class FirebaseProjectSessionImpl extends RpcTarget implements FirebasePro
 export class FirestoreDatabaseSessionImpl extends RpcTarget implements FirestoreDatabase {
   #approvalQueue: RpcStub<ApprovalQueue>;
   #ctx: DurableObjectState<FirebaseGatekeeperImplProps>;
-  #token: string;
   #getToken: () => Promise<string>;
 
   constructor(
     approvalQueue: RpcStub<ApprovalQueue>,
     ctx: DurableObjectState<FirebaseGatekeeperImplProps>,
-    token: string,
     getToken: () => Promise<string>,
   ) {
     super();
     this.#approvalQueue = approvalQueue;
     this.#ctx = ctx;
-    this.#token = token;
     this.#getToken = getToken;
   }
 
@@ -169,9 +163,9 @@ export class FirestoreDatabaseSessionImpl extends RpcTarget implements Firestore
     this.#approvalQueue[Symbol.dispose]();
   }
 
-  private api(): FirestoreApi {
+  private async api(): Promise<FirestoreApi> {
     return new FirestoreApi(
-      this.#token,
+      await this.#getToken(),
       this.#ctx.props.projectId!,
       this.#ctx.props.databaseId ?? "(default)",
     );
@@ -179,7 +173,8 @@ export class FirestoreDatabaseSessionImpl extends RpcTarget implements Firestore
 
   async listDocuments(collectionPath: string, limit?: number): Promise<FirestoreDocument[]> {
     let maxResults = limit ?? 100;
-    let docs = await this.api().listDocuments(collectionPath, maxResults);
+    let api = await this.api();
+    let docs = await api.listDocuments(collectionPath, maxResults);
     await this.#approvalQueue.authorizeObservation({
       title: "List Firestore documents",
       description: `Listed ${docs.length} documents from ${collectionPath}.`,
@@ -188,7 +183,8 @@ export class FirestoreDatabaseSessionImpl extends RpcTarget implements Firestore
   }
 
   async getDocument(path: string): Promise<FirestoreDocument> {
-    let doc = await this.api().getDocument(path);
+    let api = await this.api();
+    let doc = await api.getDocument(path);
     await this.#approvalQueue.authorizeObservation({
       title: "Read Firestore document",
       description: `Read document at ${path}.`,
@@ -253,7 +249,8 @@ export class FirestoreDatabaseSessionImpl extends RpcTarget implements Firestore
   }
 
   async runQuery(collectionPath: string, query: FirestoreQueryType): Promise<FirestoreDocument[]> {
-    let docs = await this.api().runQuery(collectionPath, query);
+    let api = await this.api();
+    let docs = await api.runQuery(collectionPath, query);
     await this.#approvalQueue.authorizeObservation({
       title: "Run Firestore query",
       description: `Queried ${collectionPath}, returned ${docs.length} documents.`,
@@ -274,19 +271,16 @@ export class FirestoreDatabaseSessionImpl extends RpcTarget implements Firestore
 export class RealtimeDatabaseSessionImpl extends RpcTarget implements RealtimeDatabase {
   #approvalQueue: RpcStub<ApprovalQueue>;
   #ctx: DurableObjectState<FirebaseGatekeeperImplProps>;
-  #token: string;
   #getToken: () => Promise<string>;
 
   constructor(
     approvalQueue: RpcStub<ApprovalQueue>,
     ctx: DurableObjectState<FirebaseGatekeeperImplProps>,
-    token: string,
     getToken: () => Promise<string>,
   ) {
     super();
     this.#approvalQueue = approvalQueue;
     this.#ctx = ctx;
-    this.#token = token;
     this.#getToken = getToken;
   }
 
@@ -294,12 +288,13 @@ export class RealtimeDatabaseSessionImpl extends RpcTarget implements RealtimeDa
     this.#approvalQueue[Symbol.dispose]();
   }
 
-  private api(): RealtimeDatabaseApi {
-    return new RealtimeDatabaseApi(this.#token, this.#ctx.props.instanceUrl!);
+  private async api(): Promise<RealtimeDatabaseApi> {
+    return new RealtimeDatabaseApi(await this.#getToken(), this.#ctx.props.instanceUrl!);
   }
 
   async get(path: string): Promise<FirebaseValue> {
-    let value = await this.api().get(path);
+    let api = await this.api();
+    let value = await api.get(path);
     await this.#approvalQueue.authorizeObservation({
       title: "Read Realtime Database",
       description: `Read JSON at path ${path || "(root)"}.`,
