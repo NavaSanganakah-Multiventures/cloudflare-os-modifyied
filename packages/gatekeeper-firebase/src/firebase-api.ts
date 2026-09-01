@@ -543,12 +543,13 @@ export class FirestoreApi {
     const collectionPath = documentPath.split("/").slice(0, -1).join("/");
     const params = new URLSearchParams();
     if (merge) {
-      const fieldPaths = Object.keys(data).map(encodeURIComponent).join(",");
-      params.set("updateMask.fieldPaths", fieldPaths);
+      for (const key of Object.keys(data)) {
+        params.append("updateMask.fieldPaths", key);
+      }
     }
     const url = `${this.documentsBase}/${documentPath}${params.toString() ? "?" + params : ""}`;
     const doc = await this.request(url, {
-      method: merge ? "PATCH" : "PUT",
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fields }),
     }) as FirestoreDocumentResponse;
@@ -567,8 +568,16 @@ export class FirestoreApi {
     collectionPath: string,
     query: FirestoreQuery,
   ): Promise<FirestoreDocumentData[]> {
+    const segments = collectionPath.split("/").filter(s => s.length > 0);
+    if (segments.length === 0) {
+      throw new Error("runQuery requires a non-empty collection path.");
+    }
+    const collectionId = segments[segments.length - 1];
+    const parentPath = segments.slice(0, -1).join("/");
+    const parent = parentPath ? `${this.documentsBase}/${parentPath}` : this.documentsBase;
+
     const structuredQuery: Record<string, unknown> = {
-      from: [{ collectionId: collectionPath.split("/").pop() }],
+      from: [{ collectionId }],
     };
 
     if (query.where && query.where.length > 0) {
@@ -596,7 +605,7 @@ export class FirestoreApi {
     }
 
     const result = await this.request(
-      `${this.documentsBase}:runQuery`,
+      `${parent}:runQuery`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
