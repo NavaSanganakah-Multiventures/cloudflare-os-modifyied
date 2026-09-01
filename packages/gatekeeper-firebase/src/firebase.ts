@@ -196,7 +196,7 @@ const FIREBASE_PROJECT_RESOURCE: SupportedResource = {
   urlPattern: "https://console.firebase.google.com/project/:projectId/*",
   title: "Firebase Project",
   description:
-    "Discover and manage a Firebase project â its Firestore databases, Realtime Database instances, and Auth users.",
+    "Discover and manage a Firebase project — its Firestore databases, Realtime Database instances, and Auth users.",
   icon: { url: FIREBASE_LOGO_URL },
 };
 
@@ -254,7 +254,7 @@ const NOT_CONFIGURED_HTML = `<!DOCTYPE html>
 </html>`;
 
 // ---------------------------------------------------------------------------
-// fetch handler â serves the OAuth browser flow
+// fetch handler — serves the OAuth browser flow
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext) {
@@ -329,7 +329,7 @@ export default {
 };
 
 // ---------------------------------------------------------------------------
-// GatekeeperVendor â top-level API exposed to the Workshop
+// GatekeeperVendor — top-level API exposed to the Workshop
 
 @validateRpc()
 export class GatekeeperVendor extends WorkerEntrypoint<Env> implements GatekeeperVendorIface {
@@ -378,7 +378,7 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> implements Gatekeepe
 }
 
 // ---------------------------------------------------------------------------
-// UserAccount DO â stores OAuth credentials
+// UserAccount DO — stores OAuth credentials
 
 export class UserAccount extends DurableObject<Env> {
   #credentialUpdate: Promise<void> = Promise.resolve();
@@ -550,7 +550,7 @@ export class UserAccount extends DurableObject<Env> {
 }
 
 // ---------------------------------------------------------------------------
-// FirebaseUserImpl â maps resource URLs to gatekeeper DO classes
+// FirebaseUserImpl — maps resource URLs to gatekeeper DO classes
 
 type FirebaseUserImplProps = {
   userObjectId: string;
@@ -671,7 +671,7 @@ export class FirebaseUserImpl extends WorkerEntrypoint<Env, FirebaseUserImplProp
 }
 
 // ---------------------------------------------------------------------------
-// Verifier â answers "can this observer access X?"
+// Verifier — answers "can this observer access X?"
 
 export interface FirebaseVerifierApi extends GatekeeperUserVerifier {
   hasProjectAccess(projectId: string): Promise<boolean>;
@@ -702,11 +702,10 @@ export class FirebaseVerifier extends WorkerEntrypoint<Env, FirebaseVerifierProp
 }
 
 // ---------------------------------------------------------------------------
-// FirebaseGatekeeperImpl DO â per-resource instance
+// FirebaseGatekeeperImpl DO — per-resource instance
 
 export class FirebaseGatekeeperImpl extends DurableObject<Env, FirebaseGatekeeperImplProps>
   implements Gatekeeper<any> {
-  #nextActionId = 1;
 
   async describe(): Promise<ResourceDescription> {
     if (this.ctx.props.resourceKind === "project") {
@@ -740,23 +739,26 @@ export class FirebaseGatekeeperImpl extends DurableObject<Env, FirebaseGatekeepe
     return TYPES_CODE;
   }
 
+  async getAutoApprovableActions() {
+    return [];
+  }
+
   async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<any> {
-    let token = await this.getToken();
     let tokenGetter = () => this.getToken();
     let dup = approvalQueue.dup();
 
     if (this.ctx.props.resourceKind === "project") {
       return new FirebaseProjectSessionImpl(
-        dup, this.ctx, token, tokenGetter,
+        dup, this.ctx, tokenGetter,
       );
     }
     if (this.ctx.props.resourceKind === "firestore") {
       return new FirestoreDatabaseSessionImpl(
-        dup, this.ctx, token, tokenGetter,
+        dup, this.ctx, tokenGetter,
       );
     }
     return new RealtimeDatabaseSessionImpl(
-      dup, this.ctx, token, tokenGetter,
+      dup, this.ctx, tokenGetter,
     );
   }
 
@@ -810,7 +812,7 @@ export class FirebaseGatekeeperImpl extends DurableObject<Env, FirebaseGatekeepe
     return { message: "Revert not supported for Firebase operations.", canRetry: false };
   }
 
-  // Observer verification â Strategy B.
+  // Observer verification — Strategy B.
   async addObserver(_id: string, user: Fetcher<GatekeeperUserVerifier>): Promise<void> {
     let verifier = user as unknown as Fetcher<FirebaseVerifierApi>;
     if (!(await verifier.hasProjectAccess(this.ctx.props.projectId ?? ""))) {
