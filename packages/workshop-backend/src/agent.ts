@@ -28,6 +28,27 @@ import {
 
 const logger = createWorkshopLogger("workshop.agent");
 
+// Decode a text attachment without assuming UTF-8. Files can carry a byte-order mark or a
+// legacy encoding; decoding as plain UTF-8 would mangle those into mojibake. Sniff a BOM
+// first, then try a strict UTF-8 decode so legacy single-byte files (e.g. old English text in
+// Windows-1252) fall back to a safe Latin decoder instead of a wall of U+FFFD.
+function decodeTextAttachment(data: Uint8Array): string {
+  if (data.length >= 3 && data[0] === 0xef && data[1] === 0xbb && data[2] === 0xbf) {
+    return new TextDecoder("utf-8").decode(data.subarray(3));
+  }
+  if (data.length >= 2 && data[0] === 0xff && data[1] === 0xfe) {
+    return new TextDecoder("utf-16le").decode(data.subarray(2));
+  }
+  if (data.length >= 2 && data[0] === 0xfe && data[1] === 0xff) {
+    return new TextDecoder("utf-16be").decode(data.subarray(2));
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(data);
+  } catch {
+    return new TextDecoder("windows-1252").decode(data);
+  }
+}
+
 // Additional per-chat-thread info needed by the AI agent but not by the client.
 export type AiChatAgentContext = {
   // Chat ID, corresponds to `chatMeta`.
@@ -1516,7 +1537,7 @@ export async function runAgent(
                 } else if (isTextLikeAttachmentMimeType(attachment.mimeType)) {
                   return [{
                     type: "text",
-                    text: `\n\n[Attached text file${filename}]\n${new TextDecoder().decode(data)}`,
+                    text: `\n\n[Attached text file${filename}]\n${decodeTextAttachment(data)}`,
                   }];
                 } else if (attachment.mimeType === PDF_MIME_TYPE &&
                            modelApiSupportsPdfAttachments(handle.model.api)) {
