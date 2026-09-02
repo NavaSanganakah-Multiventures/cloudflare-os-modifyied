@@ -6,7 +6,6 @@ import {
   RealtimeDatabaseApi,
   FirebaseManagementApi,
   FirebaseAuthApi,
-  FirebaseApiError,
 } from "./firebase-api";
 import type {
   FirebaseProject,
@@ -29,7 +28,6 @@ type FirebaseGatekeeperImplProps = {
   instanceUrl?: string;
 };
 
-type Env = Cloudflare.Env;
 
 // ---------------------------------------------------------------------------
 // FirebaseProjectSessionImpl
