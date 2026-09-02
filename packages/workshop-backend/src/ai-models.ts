@@ -47,7 +47,7 @@ type GatewayMetadataContext = {
   chatId?: number;
 };
 
-type ModelRoutingOptions = {
+export type ModelRoutingOptions = {
   sessionAffinity?: string;
   userGateway?: UserGatewayRouting;
   metadata?: GatewayMetadataContext;
@@ -378,6 +378,26 @@ export function getModel(env: Cloudflare.Env, config: AiModelConfig,
   }
 
   return getModelDirect(config, options.sessionAffinity);
+}
+
+// Same Workers AI title-generation model used as a fallback when the user's chosen model keeps
+// returning transient errors (503, 429, gateway 5xx). Requires AI Gateway because the direct path
+// expects provider credentials the user didn't supply.
+const FALLBACK_MODEL_ID = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+
+/**
+ * Build a ModelHandle for the deployment's fallback model, if one is available. Returns undefined
+ * when no platform AI Gateway is configured, because the fallback relies on gateway routing.
+ */
+export function getFallbackModelHandle(
+    env: Cloudflare.Env,
+    initiator: AiChatAuthorInfo,
+    options: ModelRoutingOptions = {}): ModelHandle | undefined {
+  let gwConfig = getAiGatewayConfig(env);
+  if (!gwConfig) return undefined;
+  let config = gwConfig.getQuickModelConfig();
+  if (!config || config.model === FALLBACK_MODEL_ID) return undefined;
+  return getModel(env, config, initiator, options);
 }
 
 // Route inference through the user's own account (unified billing) via their account's default AI
