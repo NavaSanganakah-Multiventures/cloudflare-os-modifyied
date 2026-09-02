@@ -55,6 +55,20 @@ const DEFAULT_MAX_BYTES = 1 * 1024 * 1024;  // 1 MiB default cap when caller did
 const FETCH_TIMEOUT_MS = 30_000;
 const USER_AGENT = "GadgetsWebFetch/1.0";
 
+// Retry policy for transient webFetch failures (timeouts, network resets, 5xx, 429, 408).
+const MAX_WEBFETCH_RETRIES = 2;
+const WEBFETCH_RETRY_DELAYS_MS = [500, 1500];
+
+function isRetryableFetchError(err: unknown): boolean {
+  return err instanceof Error &&
+      (err.name === "AbortError" ||
+       /\bECONNRESET\b|\bECONNREFUSED\b|\bETIMEDOUT\b|socket hang up|network error|timed out|timeout|unreachable/i.test(err.message));
+}
+
+async function sleepMs(ms: number): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // Validate a URL string for use with webFetch. Throws on bad input. Returns the parsed URL
 // on success.
 //
@@ -280,30 +294,54 @@ export async function webFetch(
     HARD_MAX_BYTES,
   );
 
-  const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), FETCH_TIMEOUT_MS);
+  let response: Response | undefined;
+  for (let attempt = 0; attempt <= MAX_WEBFETCH_RETRIES; attempt++) {
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), FETCH_TIMEOUT_MS);
+    try {
+      response = await fetch(parsed.toString(), {
+        method: "GET",
+        redirect: "follow",
+        headers: {
+          "user-agent": USER_AGENT,
+          "accept": "text/markdown,text/html;q=0.9,text/plain;q=0.9,application/json;q=0.9,application/xhtml+xml;q=0.9,*/*;q=0.8",
+        },
+        signal: abortController.signal,
+      });
 
-  let response: Response;
-  try {
-    response = await fetch(parsed.toString(), {
-      method: "GET",
-      redirect: "follow",
-      headers: {
-        "user-agent": USER_AGENT,
-        "accept": "text/markdown,text/html;q=0.9,text/plain;q=0.9,application/json;q=0.9,application/xhtml+xml;q=0.9,*/*;q=0.8",
-      },
-      signal: abortController.signal,
-    });
-  } catch (err) {
-    if (
-      err instanceof Error &&
-      (err.name === "AbortError" || /abort/i.test(err.message))
-    ) {
-      throw new Error(`Fetch timed out after ${FETCH_TIMEOUT_MS}ms`, { cause: err });
+      const retryableStatus = response.status >= 500 || response.status === 429 || response.status === 408;
+      if (retryableStatus) {
+        // Don't leak the retryable response body; cancel before backing off.
+        await response.body?.cancel().catch(() => {});
+        if (attempt < MAX_WEBFETCH_RETRIES) {
+          await sleepMs(WEBFETCH_RETRY_DELAYS_MS[attempt]);
+          continue;
+        }
+      }
+      break;
+    } catch (err) {
+      if (attempt < MAX_WEBFETCH_RETRIES && isRetryableFetchError(err)) {
+        await sleepMs(WEBFETCH_RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      if (
+        err instanceof Error &&
+        (err.name === "AbortError" || /abort/i.test(err.message))
+      ) {
+        throw new Error(`Fetch timed out after ${FETCH_TIMEOUT_MS}ms`, { cause: err });
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
     }
-    throw err;
-  } finally {
-    clearTimeout(timeoutId);
+  }
+
+  if (!response) {
+    throw new Error("webFetch failed without response");
+  }
+
+  if (response.status >= 500 || response.status === 429 || response.status === 408) {
+    throw new Error(`Fetch failed with status ${response.status}`);
   }
 
   // `response.url` is set by the runtime to the final URL after any redirects. Fall back
