@@ -20,7 +20,7 @@ import {
   getAiGatewayLogCost,
   type AiGatewayLogRoute,
 } from "./ai-gateway";
-import { AgentGadgetInfo, AgentHooks, AiChatAgentContext, ChatBindingEntry, SeedBindingInfo, runAgent, makeStorableArgs, summarizeArgs, type AiChatMessageBodyWithModelData, type CompactionCheckpoint, type StoredAssistantMessage } from "./agent";
+import { AgentGadgetInfo, AgentHooks, AiChatAgentContext, ChatBindingEntry, SeedBindingInfo, runAgent, makeStorableArgs, summarizeArgs, type AiChatMessageBodyWithModelData, type CompactionCheckpoint, type RunAgentResult, type StoredAssistantMessage } from "./agent";
 import { deploymentOutputForBlueprint, FormatOffer, listFormatOffers, readAdminConfig } from "./admin-config";
 import { foldProposedChanges, isCompactionTurn, type ChangeBatch } from "./agent-compaction";
 import { ambientGatekeeperMode } from "./provisioning-policy";
@@ -53,6 +53,10 @@ export const AGENT_RUNNING_ERROR_MESSAGE = "Agent is running, wait for it to fin
 // a transient provider error (503, 429, gateway 5xx, network failure) before surfacing the error
 // to the user. The initial run plus these retries bounds total spend on a failing model.
 const MAX_AGENT_PROVIDER_RETRIES = 4;
+
+// Maximum number of 30-turn chunks the agent is allowed to run automatically before surfacing a
+// "max turns" message. This keeps runaway spend bounded while still letting long tasks continue.
+const MAX_AGENT_CHUNKS = 3;
 
 let CODE_MODE_HARNESS =
 `import { WorkerEntrypoint, restore, RpcStub, RpcTarget } from "cloudflare:workers";
@@ -2916,7 +2920,7 @@ class OverseerImpl implements AgentHooks {
 
   // Record an observation that originated from a built-in agent tool (not a gatekeeper).
   // The `gatekeeperId` is set to the BUILTIN_TOOL_GATEKEEPER_ID sentinel so that downstream
-  // code (which expects a gatekeeper to dereference for approve/reject) never touches it Ã¢ÂÂ built-in
+  // code (which expects a gatekeeper to dereference for approve/reject) never touches it ÃÂ¢ÃÂÃÂ built-in
   // observations bypass the approve/reject paths anyway.
   async recordAgentObservation(
       chatId: number,
@@ -4053,17 +4057,18 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
       controller.signal.throwIfAborted();
 
       let hasBeenNudged = false;
-      let outcome: "ok" | "callbacks_stalled" = "ok";
+      let outcome: "ok" | "callbacks_stalled" | "max_turns" = "ok";
       let attempt = 0;
+      let chunksUsed = 0;
       while (true) {
         let checkpoint = this.getActiveChatCompaction(chatId);
         let chatMessages = this.#listChatTail(chatId, checkpoint);
         let callbackCountBefore = liveChat.activeAgentCallbacks.size;
 
         let compactionTurn = isCompactionTurn(chatMessages);
-        let newCheckpoint: CompactionCheckpoint | undefined;
+        let runResult: RunAgentResult;
         try {
-          newCheckpoint = await runAgent(
+          runResult = await runAgent(
               this, chosenModel, chatId, aiModel.profile, chatMessages, controller.signal,
               initiator, callbackInitiated, {
                 checkpoint,
@@ -4098,13 +4103,28 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
           throw err;
         }
         attempt = 0;
-        if (newCheckpoint) this.#commitChatCompaction(chatId, newCheckpoint);
+        if (runResult.checkpoint) this.#commitChatCompaction(chatId, runResult.checkpoint);
         // `/compact` is done once it has compacted. An automatic compaction returned before
         // prompting the model, so rerun the turn now that the history is shorter. Each compaction
         // moves the boundary strictly forward and can never pass the newest turn start, so this
         // reruns a bounded number of times.
         if (compactionTurn) break;
-        if (newCheckpoint) continue;
+        if (runResult.checkpoint) continue;
+
+        // If the agent hit the per-call turn cap, transparently continue with a fresh runAgent
+        // call (which resets its own turn counter). Cap total chunks to avoid runaway spend, then
+        // surface a clear message instead of stopping silently.
+        if (runResult.turnCapReached) {
+          if (chunksUsed >= MAX_AGENT_CHUNKS - 1) {
+            this.postAgentErrorMessage(chatId, aiModel.profile,
+                "Agent reached the maximum number of steps for this turn. Send a message to continue.",
+                "max_turns");
+            outcome = "max_turns";
+            break;
+          }
+          chunksUsed++;
+          continue;
+        }
 
         // If not callback-initiated, or all callbacks are resolved, we're done.
         if (!callbackInitiated || liveChat.activeAgentCallbacks.size === 0) {
@@ -5760,7 +5780,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
     }
     let lines = [`Resource types offered by "${vendorId}" (${vendor.description.displayName}):`];
     for (let r of vendor.supportedResources) {
-      lines.push(`* ${r.title} Ã¢ÂÂ ${r.urlPattern}`)
+      lines.push(`* ${r.title} ÃÂ¢ÃÂÃÂ ${r.urlPattern}`)
     }
     lines.push(
         `\nTo request one, call requestConnection with vendorId="${vendorId}" and a resourceUrl ` +
@@ -5865,7 +5885,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
       seen.add(id);
       let lines = [
         `* blueprintId: ${id}`,
-        `  ${JSON.stringify(title)} Ã¢ÂÂ ${source}`,
+        `  ${JSON.stringify(title)} ÃÂ¢ÃÂÃÂ ${source}`,
       ];
       let bindingNames = Object.entries(bindings ?? {});
       if (bindingNames.length > 0) {
@@ -5926,7 +5946,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
         `about already *is* one of these, work on that one instead: asking to change an existing ` +
         `output is not a request for a second one.\n\n` +
         formats.map(format =>
-            `* ${format.output.noun} (plural: ${format.output.plural}) Ã¢ÂÂ ` +
+            `* ${format.output.noun} (plural: ${format.output.plural}) ÃÂ¢ÃÂÃÂ ` +
             `${format.blueprintId}` + (format.agentHint ? `; ${format.agentHint}` : ``)).join("\n");
   }
 
@@ -6019,7 +6039,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
             details = `unknown`;
             break;
         }
-        lines.push(`* ${name} Ã¢ÂÂ ${JSON.stringify(binding.title)} (${details})` +
+        lines.push(`* ${name} ÃÂ¢ÃÂÃÂ ${JSON.stringify(binding.title)} (${details})` +
             (binding.description ? `: ${binding.description}` : ``));
       }
     }
@@ -6378,7 +6398,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
   }
 
   // Render the observer verification failures as one line per binding, naming the connection and the
-  // account that was refused: `<resourceTitle> (<account label>) Ã¢ÂÂ <reason>.` Cold path only (we're
+  // account that was refused: `<resourceTitle> (<account label>) ÃÂ¢ÃÂÃÂ <reason>.` Cold path only (we're
   // about to deny the open), so the extra User DO round trip per failure is fine. Discloses nothing
   // new: the reason was either already thrown to this same user or authored by us, and the account is
   // their own.
@@ -6409,7 +6429,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
         });
       }
 
-      return `${observerBindingTitle(gk)} (${label}) Ã¢ÂÂ ${failure.reason}`;
+      return `${observerBindingTitle(gk)} (${label}) ÃÂ¢ÃÂÃÂ ${failure.reason}`;
     }));
 
     return lines.join("\n");
