@@ -383,7 +383,7 @@ export function getModel(env: Cloudflare.Env, config: AiModelConfig,
 // Same Workers AI title-generation model used as a fallback when the user's chosen model keeps
 // returning transient errors (503, 429, gateway 5xx). Requires AI Gateway because the direct path
 // expects provider credentials the user didn't supply.
-const FALLBACK_MODEL_ID = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+export const FALLBACK_MODEL_ID = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 /**
  * Build a ModelHandle for the deployment's fallback model, if one is available. Returns undefined
