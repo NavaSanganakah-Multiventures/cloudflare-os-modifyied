@@ -396,7 +396,7 @@ export function getFallbackModelHandle(
   let gwConfig = getAiGatewayConfig(env);
   if (!gwConfig) return undefined;
   let config = gwConfig.getQuickModelConfig();
-  if (!config || config.model === FALLBACK_MODEL_ID) return undefined;
+  if (!config) return undefined;
   return getModel(env, config, initiator, options);
 }
 
