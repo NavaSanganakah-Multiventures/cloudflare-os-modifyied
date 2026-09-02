@@ -129,6 +129,9 @@ When working with a connected `GitHubRepo` binding, **never write or delete file
 default branch**. The gatekeeper rejects direct default-branch `writeFile()` and `deleteFile()`
 calls.
 
+Keep changes scoped: one task = one feature branch = one pull request. Do not mix unrelated
+changes in a single branch or PR; split them into separate branches.
+
 ### MANDATORY branch-first workflow
 
 You MUST follow this exact step-by-step workflow for every change. Do NOT use
@@ -139,18 +142,27 @@ pushed. Instead, drive each step yourself so you can verify each one succeeded b
 **Step 1 — Create a new feature branch (always, before any change).**
 
 - Get the default branch's current commit SHA: `const main = await repo.getBranch(defaultBranch);`
-  (use `getMetadata()` to learn `defaultBranch` if you don't know it).
+  (use `getMetadata()` to learn `defaultBranch` if you don't know it). Re-read this SHA
+  immediately before creating the branch so it is based on the latest default branch, not a stale
+  snapshot.
 - Choose a meaningful branch name that describes the change (for example `feature/add-login`,
   `fix/compile-error`, or `refactor/db-layer`). The name should reflect the user requirement,
   not a hard-coded issue-based template.
 - Create the branch from that SHA: `await repo.createBranch(name, main.sha);`
-- A branch that already exists is fine to reuse, but you must still confirm its SHA with
-  `getBranch(name)` before writing to it.
+  This makes the new branch an exact copy of the default branch at that commit — you do NOT need
+  to copy files manually.
+- A branch that already exists is fine to reuse ONLY when it is based on the latest default
+  branch. Confirm its SHA with `getBranch(name)` before writing to it; if it has fallen behind
+  the default branch, create a fresh branch from the latest default-branch SHA instead (or
+  merge/rebase first).
 
 **Step 2 — Make the change on that branch.**
 
-- For an existing file, first read it on the default branch to obtain its blob `sha`:
-  `const f = await repo.readFile(path, defaultBranch);`
+- For an existing file, first read it on the feature branch to obtain its current blob `sha`
+  and content: `const f = await repo.readFile(path, name);`
+  Only read it on the default branch if you specifically need the original pre-change copy — for
+  example to compare against a version that is no longer visible on the branch because you have
+  already edited it there.
 - Write the file to your feature branch (NOT the default branch) with
   `await repo.writeFile({ path, message, content, sha: f.sha, branch: name });`
   (omit `sha` only when creating a brand-new file).
@@ -167,6 +179,8 @@ pushed. Instead, drive each step yourself so you can verify each one succeeded b
   `const b = await repo.getBranch(name);` and check that `b.sha` changed from the pre-write SHA,
   i.e. the commit actually landed on the branch on GitHub. If `b.sha` is unchanged, the push did
   NOT happen — do not proceed to a PR; report the discrepancy and retry.
+- Re-read the changed file on the feature branch (`readFile(path, name)`) and confirm its content
+  is the intended content, not just that the branch SHA advanced.
 
 **Step 4 — Create the pull request, only after verification passes.**
 
@@ -177,6 +191,26 @@ pushed. Instead, drive each step yourself so you can verify each one succeeded b
 **Summary of the rule:** new branch → change on that branch → verify the commit landed on the
 branch (handle resolved AND branch SHA advanced) → only then open the PR. Never open a PR for an
 unverified push.
+
+### Read discipline: which ref to read from
+
+Once the feature branch exists, it is the source of truth for your task. Read and check files on
+the branch you are working on, by passing its name as `ref`:
+
+- `repo.readFile(path, name)`
+- `repo.listDirectory(path, name)`
+
+Read from the default branch (`main`) ONLY for these reasons:
+
+1. Getting the base commit SHA to create the branch (Step 1).
+2. Reading the original/pre-change version of a file that is no longer visible on the feature
+   branch because you have already edited it there.
+3. Verifying that a GitHub Actions workflow file exists on `main` before `dispatchWorkflow()`
+   (see below).
+
+Do not mix default-branch and feature-branch reads when deciding what to edit. If you read a file
+on `main`, re-read it on the feature branch before editing it, so you edit the branch's actual
+current state.
 
 ### Editing GitHub Actions workflow files is a distinct approval category
 
