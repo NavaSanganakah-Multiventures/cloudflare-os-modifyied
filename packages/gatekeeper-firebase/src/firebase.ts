@@ -1,5 +1,5 @@
-import { WorkerEntrypoint, DurableObject, RpcTarget, RpcStub } from "cloudflare:workers";
-import { skipRpcValidation, validateRpc } from "capnweb-validate";
+import { WorkerEntrypoint, DurableObject, RpcStub } from "cloudflare:workers";
+import { validateRpc } from "capnweb-validate";
 import {
   type AccountDescription,
   type Gatekeeper,
@@ -13,7 +13,6 @@ import {
   type SupportedResource,
   type VendorDescription,
   type ApprovalQueue,
-  type ObservationDescription,
   stripTrailingSlashes,
 } from "@gadgets/workshop-shared/gatekeeper";
 import {
@@ -24,16 +23,8 @@ import {
   getVerifiedEmail,
   FirebaseManagementApi,
   FirestoreApi,
-  FirestoreAdminApi,
   RealtimeDatabaseApi,
-  FirebaseAuthApi,
   FirebaseApiError,
-  type FirebaseOAuthGrant,
-  type FirestoreDocumentData,
-  type FirestoreQuery,
-  type FirestoreDatabaseResponse,
-  type FirebaseProjectResponse,
-  type AuthUserResponse,
 } from "./firebase-api";
 import {
   FirebaseProjectConfiguratorUI,
@@ -43,19 +34,6 @@ import {
   FirestoreDatabaseSessionImpl,
   RealtimeDatabaseSessionImpl,
 } from "./session-impl";
-import type {
-  FirebaseProject,
-  FirebaseProjectInfo,
-  FirebaseValue,
-  FirestoreDatabase,
-  FirestoreDatabaseInfo,
-  FirestoreDocument,
-  FirestoreFilter,
-  FirestoreQuery as FirestoreQueryType,
-  RealtimeDatabase,
-  RealtimeDatabaseInfo,
-  AuthUser,
-} from "./types";
 import TYPES_CODE from "./types.txt";
 import FIREBASE_LOGO_SVG from "./firebase-logo.svg";
 import FIREBASE_PROJECT_CONFIGURATOR_HTML from "./generated/firebase-project-configurator-ui.txt";
@@ -93,9 +71,6 @@ type StoredToken = {
   expiresAt: number;
 };
 
-// Cache TTLs.
-const METADATA_CACHE_TTL_MS = 60 * 1000;
-const SESSION_TOKEN_TTL_MS = 30 * 1000;
 
 // A pending Firestore action queued for human approval.
 type StoredFirestoreAction = {
