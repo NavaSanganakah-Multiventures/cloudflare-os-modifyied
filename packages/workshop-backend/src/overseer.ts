@@ -13,7 +13,7 @@ import {
   getModel,
   UserGatewayRouting,
 } from "./ai-models";
-import { AgentTurnError, completeText } from "./ai-invoke";
+import { AgentTurnError, completeText, isRetryableProviderFailure, providerRetryDelayMs } from "./ai-invoke";
 import {
   AiGatewayLogRetryableError,
   getAiGatewayConfig,
@@ -48,6 +48,11 @@ import { renderGadgetPdf } from "./browser-export";
 
 const logger = createWorkshopLogger("workshop.overseer");
 export const AGENT_RUNNING_ERROR_MESSAGE = "Agent is running, wait for it to finish.";
+
+// How many times the backend transparently re-runs an agent turn whose model request failed with
+// a transient provider error (503, 429, gateway 5xx, network failure) before surfacing the error
+// to the user. The initial run plus these retries bounds total spend on a failing model.
+const MAX_AGENT_PROVIDER_RETRIES = 4;
 
 let CODE_MODE_HARNESS =
 `import { WorkerEntrypoint, restore, RpcStub, RpcTarget } from "cloudflare:workers";
@@ -599,6 +604,24 @@ function stringifyError(err: unknown): string {
   } catch {
     return String(err);
   }
+}
+
+// Abort-aware sleep for retry backoff. Rejects with the signal's reason (typically the user's
+// "stop" abort) so a retry delay never outlives a cancellation.
+function sleepMs(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new Error("Aborted"));
+    };
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 // Compute a unique value to use as session affinity for a chat thread. Workers AI in particular
@@ -2893,7 +2916,7 @@ class OverseerImpl implements AgentHooks {
 
   // Record an observation that originated from a built-in agent tool (not a gatekeeper).
   // The `gatekeeperId` is set to the BUILTIN_TOOL_GATEKEEPER_ID sentinel so that downstream
-  // code (which expects a gatekeeper to dereference for approve/reject) never touches it — built-in
+  // code (which expects a gatekeeper to dereference for approve/reject) never touches it â built-in
   // observations bypass the approve/reject paths anyway.
   async recordAgentObservation(
       chatId: number,
@@ -4031,19 +4054,51 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
 
       let hasBeenNudged = false;
       let outcome: "ok" | "callbacks_stalled" = "ok";
+      let attempt = 0;
       while (true) {
         let checkpoint = this.getActiveChatCompaction(chatId);
         let chatMessages = this.#listChatTail(chatId, checkpoint);
         let callbackCountBefore = liveChat.activeAgentCallbacks.size;
 
         let compactionTurn = isCompactionTurn(chatMessages);
-        let newCheckpoint = await runAgent(
-            this, chosenModel, chatId, aiModel.profile, chatMessages, controller.signal,
-            initiator, callbackInitiated, {
-              checkpoint,
-              modelConfig: aiModel.config,
-              measuredTokens: this.getChatMetaOrThrow(chatId).totalTokens ?? 0,
+        let newCheckpoint: CompactionCheckpoint | undefined;
+        try {
+          newCheckpoint = await runAgent(
+              this, chosenModel, chatId, aiModel.profile, chatMessages, controller.signal,
+              initiator, callbackInitiated, {
+                checkpoint,
+                modelConfig: aiModel.config,
+                measuredTokens: this.getChatMetaOrThrow(chatId).totalTokens ?? 0,
+              });
+        } catch (err) {
+          // Transient provider failures (503, 429, gateway 5xx, network errors) are retried
+          // transparently with exponential backoff. Nothing from a failed turn was persisted, so
+          // re-entering the loop replays the same tail and resumes where the agent left off.
+          if (isRetryableProviderFailure(err) && attempt < MAX_AGENT_PROVIDER_RETRIES) {
+            const statusCode = err instanceof AgentTurnError ? err.statusCode : undefined;
+            const delayMs = providerRetryDelayMs(attempt);
+            this.emitChatStreamEvent(chatId, {
+              type: "agentRetry",
+              attempt: attempt + 1,
+              maxAttempts: MAX_AGENT_PROVIDER_RETRIES,
+              delayMs,
+              statusCode,
             });
+            turnLogger.warn("retrying agent turn after provider failure", {
+              event: "agent.run.retrying",
+              attempt: attempt + 1,
+              maxAttempts: MAX_AGENT_PROVIDER_RETRIES,
+              delayMs,
+              statusCode,
+              error: err,
+            });
+            await sleepMs(delayMs, controller.signal);
+            attempt++;
+            continue;
+          }
+          throw err;
+        }
+        attempt = 0;
         if (newCheckpoint) this.#commitChatCompaction(chatId, newCheckpoint);
         // `/compact` is done once it has compacted. An automatic compaction returned before
         // prompting the model, so rerun the turn now that the history is shorter. Each compaction
@@ -5706,7 +5761,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
     }
     let lines = [`Resource types offered by "${vendorId}" (${vendor.description.displayName}):`];
     for (let r of vendor.supportedResources) {
-      lines.push(`* ${r.title} — ${r.urlPattern}`)
+      lines.push(`* ${r.title} â ${r.urlPattern}`)
     }
     lines.push(
         `\nTo request one, call requestConnection with vendorId="${vendorId}" and a resourceUrl ` +
@@ -5811,7 +5866,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
       seen.add(id);
       let lines = [
         `* blueprintId: ${id}`,
-        `  ${JSON.stringify(title)} — ${source}`,
+        `  ${JSON.stringify(title)} â ${source}`,
       ];
       let bindingNames = Object.entries(bindings ?? {});
       if (bindingNames.length > 0) {
@@ -5872,7 +5927,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
         `about already *is* one of these, work on that one instead: asking to change an existing ` +
         `output is not a request for a second one.\n\n` +
         formats.map(format =>
-            `* ${format.output.noun} (plural: ${format.output.plural}) — ` +
+            `* ${format.output.noun} (plural: ${format.output.plural}) â ` +
             `${format.blueprintId}` + (format.agentHint ? `; ${format.agentHint}` : ``)).join("\n");
   }
 
@@ -5965,7 +6020,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
             details = `unknown`;
             break;
         }
-        lines.push(`* ${name} — ${JSON.stringify(binding.title)} (${details})` +
+        lines.push(`* ${name} â ${JSON.stringify(binding.title)} (${details})` +
             (binding.description ? `: ${binding.description}` : ``));
       }
     }
@@ -6324,7 +6379,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
   }
 
   // Render the observer verification failures as one line per binding, naming the connection and the
-  // account that was refused: `<resourceTitle> (<account label>) — <reason>.` Cold path only (we're
+  // account that was refused: `<resourceTitle> (<account label>) â <reason>.` Cold path only (we're
   // about to deny the open), so the extra User DO round trip per failure is fine. Discloses nothing
   // new: the reason was either already thrown to this same user or authored by us, and the account is
   // their own.
@@ -6355,7 +6410,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
         });
       }
 
-      return `${observerBindingTitle(gk)} (${label}) — ${failure.reason}`;
+      return `${observerBindingTitle(gk)} (${label}) â ${failure.reason}`;
     }));
 
     return lines.join("\n");
