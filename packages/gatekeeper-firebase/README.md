@@ -54,8 +54,11 @@ FIREBASE_CLIENT_SECRET=<oauth app client secret>
 
 - Reads (get/list documents, run queries, RTDB get, list auth users) are logged as observations.
 - Writes (create/update/delete documents, RTDB set/update/push/remove) are submitted to the
-  approval queue and only run once a human approves them.
-- Pending writes are **simulated** so subsequent reads reflect the pending change, allowing the
-  agent to continue without waiting for each approval.
+  approval queue and only run once a human approves them. Reads do not reflect pending writes;
+  a write becomes visible only after it is approved and applied.
+- RTDB `push()` returns a placeholder key (`pending-<actionId>`) at submission time because the
+  real child key is generated only when the action is applied after approval.
+- `listRealtimeDatabases()` reports a single `*-default-rtdb` instance derived from the project
+  ID; the Firebase Management API has no direct RTDB list endpoint.
 - `types.txt` should be a symlink to `types.d.ts`. When created via the GitHub API (which does
   not support symlinks), it is a copy; fix the symlink locally after cloning.
