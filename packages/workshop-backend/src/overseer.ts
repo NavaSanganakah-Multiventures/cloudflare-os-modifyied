@@ -11,6 +11,8 @@ import * as Y from "yjs";
 import {
   LanguageModelGatekeeperProps,
   getModel,
+  getFallbackModelHandle,
+  FALLBACK_MODEL_ID,
   UserGatewayRouting,
 } from "./ai-models";
 import { AgentTurnError, completeText, isRetryableProviderFailure, providerRetryDelayMs } from "./ai-invoke";
@@ -2920,7 +2922,7 @@ class OverseerImpl implements AgentHooks {
 
   // Record an observation that originated from a built-in agent tool (not a gatekeeper).
   // The `gatekeeperId` is set to the BUILTIN_TOOL_GATEKEEPER_ID sentinel so that downstream
-  // code (which expects a gatekeeper to dereference for approve/reject) never touches it ÃÂ¢ÃÂÃÂ built-in
+  // code (which expects a gatekeeper to dereference for approve/reject) never touches it ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ built-in
   // observations bypass the approve/reject paths anyway.
   async recordAgentObservation(
       chatId: number,
@@ -4060,6 +4062,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
       let outcome: "ok" | "callbacks_stalled" | "max_turns" = "ok";
       let attempt = 0;
       let chunksUsed = 0;
+      let usingFallbackModel = false;
       while (true) {
         let checkpoint = this.getActiveChatCompaction(chatId);
         let chatMessages = this.#listChatTail(chatId, checkpoint);
@@ -4099,6 +4102,34 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
             await sleepMs(delayMs, controller.signal);
             attempt++;
             continue;
+          }
+          // Primary retries exhausted. Try the deployment's fallback (cheap Workers AI model) to
+          // keep working instead of immediately failing. Only try once per session; if the fallback
+          // also runs out of retries, surface the final error.
+          if (!usingFallbackModel && aiModel.config.model !== FALLBACK_MODEL_ID) {
+            const fallbackHandle = getFallbackModelHandle(this.env, initiator, {
+              sessionAffinity,
+              userGateway: byokRouting,
+              metadata: { source: "chat", gadgetId: this.ctx.id.toString(), chatId },
+            });
+            if (fallbackHandle) {
+              const statusCode = err instanceof AgentTurnError ? err.statusCode : undefined;
+              turnLogger.warn(
+                  `switching to fallback model ${FALLBACK_MODEL_ID} after primary model ${aiModel.profile.id} exhausted retries`, {
+                event: "agent.run.fallback",
+                modelId: FALLBACK_MODEL_ID,
+                failureCount: attempt + 1,
+                error: err,
+              });
+              this.addChatMessages(chatId, aiModel.profile, [{
+                type: "message",
+                message: "The main model is temporarily unavailable. Using the fallback model to keep working.",
+              }]);
+              chosenModel = fallbackHandle;
+              usingFallbackModel = true;
+              attempt = 0;
+              continue;
+            }
           }
           throw err;
         }
@@ -5780,7 +5811,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
     }
     let lines = [`Resource types offered by "${vendorId}" (${vendor.description.displayName}):`];
     for (let r of vendor.supportedResources) {
-      lines.push(`* ${r.title} ÃÂ¢ÃÂÃÂ ${r.urlPattern}`)
+      lines.push(`* ${r.title} ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ ${r.urlPattern}`)
     }
     lines.push(
         `\nTo request one, call requestConnection with vendorId="${vendorId}" and a resourceUrl ` +
@@ -5885,7 +5916,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
       seen.add(id);
       let lines = [
         `* blueprintId: ${id}`,
-        `  ${JSON.stringify(title)} ÃÂ¢ÃÂÃÂ ${source}`,
+        `  ${JSON.stringify(title)} ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ ${source}`,
       ];
       let bindingNames = Object.entries(bindings ?? {});
       if (bindingNames.length > 0) {
@@ -5946,7 +5977,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
         `about already *is* one of these, work on that one instead: asking to change an existing ` +
         `output is not a request for a second one.\n\n` +
         formats.map(format =>
-            `* ${format.output.noun} (plural: ${format.output.plural}) ÃÂ¢ÃÂÃÂ ` +
+            `* ${format.output.noun} (plural: ${format.output.plural}) ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ ` +
             `${format.blueprintId}` + (format.agentHint ? `; ${format.agentHint}` : ``)).join("\n");
   }
 
@@ -6039,7 +6070,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
             details = `unknown`;
             break;
         }
-        lines.push(`* ${name} ÃÂ¢ÃÂÃÂ ${JSON.stringify(binding.title)} (${details})` +
+        lines.push(`* ${name} ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ ${JSON.stringify(binding.title)} (${details})` +
             (binding.description ? `: ${binding.description}` : ``));
       }
     }
@@ -6398,7 +6429,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
   }
 
   // Render the observer verification failures as one line per binding, naming the connection and the
-  // account that was refused: `<resourceTitle> (<account label>) ÃÂ¢ÃÂÃÂ <reason>.` Cold path only (we're
+  // account that was refused: `<resourceTitle> (<account label>) ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ <reason>.` Cold path only (we're
   // about to deny the open), so the extra User DO round trip per failure is fine. Discloses nothing
   // new: the reason was either already thrown to this same user or authored by us, and the account is
   // their own.
@@ -6429,7 +6460,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
         });
       }
 
-      return `${observerBindingTitle(gk)} (${label}) ÃÂ¢ÃÂÃÂ ${failure.reason}`;
+      return `${observerBindingTitle(gk)} (${label}) ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ ${failure.reason}`;
     }));
 
     return lines.join("\n");
