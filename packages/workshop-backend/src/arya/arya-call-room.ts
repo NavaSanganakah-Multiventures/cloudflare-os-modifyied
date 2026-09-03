@@ -402,7 +402,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     await user.setOwnDisplayName(name);
   }
 
-  private ownerUser(): Fetcher<UserDurableObject> | null {
+  private ownerUser(): DurableObjectStub<UserDurableObject> | null {
     const ownerId = this.ownerId;
     if (!ownerId) return null;
     const userNs: DurableObjectNamespace<UserDurableObject> | undefined =
