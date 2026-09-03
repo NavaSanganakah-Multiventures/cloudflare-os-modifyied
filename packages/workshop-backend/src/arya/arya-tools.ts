@@ -2,6 +2,8 @@
 // executed only after the room asks the user for confirmation (the confirmation gate).
 
 import type { AryaAiBackend, AryaAiState } from "./arya-types";
+import type { AryaNotification, AryaReminder } from "./arya-reminders";
+import { normalizeSetReminderArgs, summarizeReminder } from "./arya-reminders";
 
 /** A function call requested by the AI model. */
 export interface AryaToolCall {
@@ -21,6 +23,10 @@ export interface AryaToolResult {
 export interface AryaMutations {
   /** Update the room owner's display name. */
   setOwnerDisplayName(name: string): Promise<void>;
+  /** Store a new reminder for the room owner. */
+  setReminder(message: string, dueAt: number): Promise<AryaReminder>;
+  /** Cancel one of the room owner's reminders. Returns true when it existed. */
+  cancelReminder(id: string): Promise<boolean>;
 }
 
 /** Runtime hooks tools can touch. */
@@ -28,6 +34,10 @@ export interface AryaToolRuntime {
   now(): Date;
   voiceStatus(): { state: AryaAiState; backend?: AryaAiBackend };
   mutations: AryaMutations;
+  /** Read the owner's pending reminders, soonest first. */
+  readReminders(): Promise<AryaReminder[]>;
+  /** Read the owner's pending notifications. */
+  readNotifications(): Promise<AryaNotification[]>;
 }
 
 /** A tool the Arya assistant can execute. */
@@ -80,6 +90,59 @@ const DEFAULT_ARYA_TOOLS: AryaToolDefinition[] = [
     description: "Return the live state of the Arya voice assistant.",
     parameters: { type: "object", properties: {} },
     execute: (_args, runtime) => runtime.voiceStatus(),
+  },
+  {
+    name: "set_reminder",
+    description:
+      "Set a reminder to tell the user something later. Provide a short message and either dueAt (an ISO-8601 datetime) or delayMinutes (a relative delay from now).",
+    parameters: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "What to remind the user about." },
+        dueAt: { type: "string", description: "Absolute due time as an ISO-8601 datetime." },
+        delayMinutes: { type: "number", description: "Relative delay from now, in minutes." },
+      },
+      required: ["message"],
+    },
+    mutating: true,
+    summarize: summarizeReminder,
+    execute: async (args, runtime) => {
+      const input = normalizeSetReminderArgs(args, runtime.now().getTime());
+      const reminder = await runtime.mutations.setReminder(input.message, input.dueAt);
+      return { reminder };
+    },
+  },
+  {
+    name: "cancel_reminder",
+    description: "Cancel a pending reminder by its id.",
+    parameters: {
+      type: "object",
+      properties: { id: { type: "string", description: "The reminder id to cancel." } },
+      required: ["id"],
+    },
+    mutating: true,
+    summarize: (args) =>
+      typeof args.id === "string" && args.id.trim()
+        ? `Cancel the reminder "${args.id.trim()}"`
+        : "Cancel a reminder",
+    execute: async (args, runtime) => {
+      const id = typeof args.id === "string" ? args.id.trim() : "";
+      if (!id) throw new Error("A reminder id is required.");
+      const cancelled = await runtime.mutations.cancelReminder(id);
+      return { cancelled };
+    },
+  },
+  {
+    name: "list_reminders",
+    description: "List the user's pending reminders.",
+    parameters: { type: "object", properties: {} },
+    execute: async (_args, runtime) => ({ reminders: await runtime.readReminders() }),
+  },
+  {
+    name: "get_notifications",
+    description: "Return the user's pending notifications (for example, due reminders).",
+    parameters: { type: "object", properties: {} },
+    execute: async (_args, runtime) => ({ notifications: await runtime.readNotifications() }),
   },
   {
     name: "update_display_name",
