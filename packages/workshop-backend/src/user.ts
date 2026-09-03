@@ -224,6 +224,10 @@ function makeUserStorage(storage: DurableObjectStorage) {
       //
       // null = password disabled (e.g. because some other auth mechanism is used)
       passwordHashHash: <Uint8Array | null>null,
+
+      // User-scoped Gemini API key for the Arya voice assistant. Never returned to the client;
+      // only a masked hint is shown in the Settings page.
+      aryaGeminiKey: <string | null>null,
     }
   });
 }
@@ -515,6 +519,25 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     let profile = this.storage.profile.get();
     profile.name = name;
     this.storage.profile.put(profile);
+  }
+
+  getAryaGeminiKey(): Promise<string | null> {
+    return Promise.resolve(this.storage.aryaGeminiKey.get());
+  }
+
+  getAryaGeminiKeyStatus(): Promise<{ set: boolean; masked: string | null }> {
+    const key = this.storage.aryaGeminiKey.get();
+    if (!key) return Promise.resolve({ set: false, masked: null });
+    const masked = key.length > 8 ? key.slice(0, 4) + "..." + key.slice(-4) : "****";
+    return Promise.resolve({ set: true, masked });
+  }
+
+  async setAryaGeminiKey(key: string): Promise<void> {
+    this.storage.aryaGeminiKey.put(key.trim() || null);
+  }
+
+  async clearAryaGeminiKey(): Promise<void> {
+    this.storage.aryaGeminiKey.put(null);
   }
 
   async listModels(): Promise<AiChatAuthorInfo[]> {
