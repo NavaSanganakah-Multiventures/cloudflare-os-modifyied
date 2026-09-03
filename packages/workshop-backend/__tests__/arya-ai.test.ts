@@ -5,16 +5,16 @@ import {
   buildGeminiAudioInput,
   buildGeminiSetup,
   buildGeminiToolResponse,
-  DEFAULT_ARYA_GEMINI_MODEL,
+  DEFAULT_AARYA_GEMINI_MODEL,
   parseGeminiServerMessage,
   pcm16ToBase64,
-} from "../src/arya/arya-ai";
-import { detectUtteranceEnd, pcm16ToWavBytes, utteranceEnded } from "../src/arya/arya-fallback";
+} from "../src/aarya/aarya-ai";
+import { detectUtteranceEnd, pcm16ToWavBytes, utteranceEnded } from "../src/aarya/aarya-fallback";
 import {
-  AryaToolRegistry,
-  executeAryaTool,
+  AaryaToolRegistry,
+  executeAaryaTool,
   geminiFunctionDeclarations,
-} from "../src/arya/arya-tools";
+} from "../src/aarya/aarya-tools";
 
 function loudSamples(count: number): Int16Array {
   return Int16Array.from(
@@ -56,7 +56,7 @@ describe("gemini wire helpers", () => {
   it("defaults the model and persona when not provided", () => {
     const setup = buildGeminiSetup({});
     const body = setup["setup"] as Record<string, unknown>;
-    expect(body["model"]).toBe(DEFAULT_ARYA_GEMINI_MODEL);
+    expect(body["model"]).toBe(DEFAULT_AARYA_GEMINI_MODEL);
     const instruction = body["systemInstruction"] as { parts: Array<{ text: string }> };
     expect(instruction.parts[0].text.length).toBeGreaterThan(0);
     expect(body["tools"]).toBeUndefined();
@@ -86,7 +86,7 @@ describe("gemini wire helpers", () => {
         modelTurn: {
           parts: [{ inlineData: { data: pcm16ToBase64(Uint8Array.from([7, 8])) } }],
         },
-        inputTranscription: { text: "hello arya" },
+        inputTranscription: { text: "hello aarya" },
         outputTranscription: { text: "hi there" },
       },
       toolCall: {
@@ -96,7 +96,7 @@ describe("gemini wire helpers", () => {
     expect(withContent.setupComplete).toBe(false);
     expect(withContent.audio.length).toBe(1);
     expect(Array.from(new Uint8Array(withContent.audio[0]))).toEqual([7, 8]);
-    expect(withContent.userTranscripts).toEqual(["hello arya"]);
+    expect(withContent.userTranscripts).toEqual(["hello aarya"]);
     expect(withContent.assistantTranscripts).toEqual(["hi there"]);
     expect(withContent.toolCalls).toEqual([
       { id: "call-1", name: "get_current_time", args: {} },
@@ -177,7 +177,7 @@ describe("pcm16 to WAV", () => {
   });
 });
 
-describe("arya tool registry", () => {
+describe("aarya tool registry", () => {
   const makeRuntime = () => ({
     now: () => new Date("2026-01-01T00:00:00Z"),
     voiceStatus: () => ({ state: "listening" as const }),
@@ -196,7 +196,7 @@ describe("arya tool registry", () => {
   });
 
   it("exposes the read-only and mutating tools as gemini declarations", () => {
-    const registry = new AryaToolRegistry(makeRuntime());
+    const registry = new AaryaToolRegistry(makeRuntime());
     const names = registry.definitions().map((t) => t.name).toSorted();
     expect(names).toEqual([
       "cancel_reminder",
@@ -234,7 +234,7 @@ describe("arya tool registry", () => {
   });
 
   it("executes a known tool and returns an ok envelope", async () => {
-    const registry = new AryaToolRegistry(makeRuntime());
+    const registry = new AaryaToolRegistry(makeRuntime());
     const result = await registry.execute({ id: "c1", name: "get_current_time", args: {} });
     expect(result.id).toBe("c1");
     expect(result.name).toBe("get_current_time");
@@ -242,7 +242,7 @@ describe("arya tool registry", () => {
   });
 
   it("returns an error envelope for unknown tools", async () => {
-    const result = await executeAryaTool(
+    const result = await executeAaryaTool(
       { id: "c2", name: "delete_everything", args: {} },
       makeRuntime(),
     );
