@@ -1,11 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
 import { createWorkshopLogger } from "../observability";
 import { isAuthorizedMember, verifyAryaToken } from "./arya-auth";
-import { createAryaAiSession } from "./arya-ai";
+import { createAryaAiSession, DEFAULT_ARYA_PERSONA } from "./arya-ai";
 import { AryaToolRegistry, geminiFunctionDeclarations } from "./arya-tools";
 import type { AryaAiSession } from "./arya-ai";
 import type { AryaToolCall, AryaToolDefinition, AryaToolResult } from "./arya-tools";
 import type { AryaAiState, AryaClientMessage, AryaParticipantInfo, AryaServerMessage } from "./arya-types";
+import { buildNotificationsHint } from "./arya-reminders";
+import type { AryaNotification } from "./arya-reminders";
 import type { UserDurableObject } from "../user";
 
 const logger = createWorkshopLogger("workshop.arya.room");
@@ -38,6 +40,24 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     voiceStatus: () => ({ state: this.aiState, backend: this.ai?.backend }),
     mutations: {
       setOwnerDisplayName: (name: string) => this.setOwnerDisplayName(name),
+      setReminder: async (message: string, dueAt: number) => {
+        const user = this.ownerUser();
+        if (!user) throw new Error("No owner is connected for this voice call.");
+        return await user.addReminder(message, dueAt);
+      },
+      cancelReminder: async (id: string) => {
+        const user = this.ownerUser();
+        if (!user) throw new Error("No owner is connected for this voice call.");
+        return await user.cancelReminder(id);
+      },
+    },
+    readReminders: async () => {
+      const user = this.ownerUser();
+      return user ? await user.listReminders() : [];
+    },
+    readNotifications: async () => {
+      const user = this.ownerUser();
+      return user ? await user.listNotifications() : [];
     },
   });
 
@@ -207,22 +227,23 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
 
     // Fetch the user's Gemini key from the user DO (if available); fall back to env-level key.
     let geminiKey: string | undefined;
-    const ownerId = await this.ctx.storage.get<string>("ownerId");
-    if (ownerId) {
-      try {
-        const userNs: DurableObjectNamespace<UserDurableObject> | undefined =
-          this.ctx.exports.UserDurableObject;
-        if (userNs) {
-          const userStub = userNs.get(userNs.idFromName(ownerId));
-          geminiKey = (await userStub.getAryaGeminiKey()) ?? undefined;
-        }
-      } catch (error) {
-        logger.warn("failed to fetch user gemini key from user DO", {
-          event: "arya.room.ai.key.fetch.failed",
-          error,
-        });
+    try {
+      const user = this.ownerUser();
+      if (user) {
+        geminiKey = (await user.getAryaGeminiKey()) ?? undefined;
       }
+    } catch (error) {
+      logger.warn("failed to fetch user gemini key from user DO", {
+        event: "arya.room.ai.key.fetch.failed",
+        error,
+      });
     }
+
+    // Surface any due reminders in the AI's first reply. We only clear them from the inbox after
+    // the session actually starts, so a failed start doesn't silently drop the user's reminders.
+    const { hint, pending } = await this.collectNotificationHint();
+    const basePersona = this.env.ARYA_GEMINI_SYSTEM_PROMPT ?? DEFAULT_ARYA_PERSONA;
+    const systemPrompt = hint ? `${basePersona}\n\n${hint}` : undefined;
 
     const session = createAryaAiSession(
       this.env,
@@ -249,6 +270,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       },
       geminiFunctionDeclarations(this.tools.definitions()),
       geminiKey,
+      systemPrompt,
     );
     try {
       await session.start();
@@ -267,6 +289,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       return;
     }
     this.ai = session;
+    await this.clearNotifications(pending);
   }
 
   private async stopAi(): Promise<void> {
@@ -350,17 +373,49 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   }
 
   private async setOwnerDisplayName(name: string): Promise<void> {
-    const ownerId = this.ownerId;
-    if (!ownerId) {
+    const user = this.ownerUser();
+    if (!user) {
       throw new Error("No owner is connected for this voice call.");
     }
+    await user.setOwnDisplayName(name);
+  }
+
+  private ownerUser(): Fetcher<UserDurableObject> | null {
+    const ownerId = this.ownerId;
+    if (!ownerId) return null;
     const userNs: DurableObjectNamespace<UserDurableObject> | undefined =
       this.ctx.exports.UserDurableObject;
-    if (!userNs) {
-      throw new Error("User storage is not available to Arya.");
+    if (!userNs) return null;
+    return userNs.get(userNs.idFromName(ownerId));
+  }
+
+  private async collectNotificationHint(): Promise<{ hint: string; pending: AryaNotification[] }> {
+    const user = this.ownerUser();
+    if (!user) return { hint: "", pending: [] };
+    try {
+      await user.sweepDueReminders(Date.now());
+      const pending = await user.listNotifications();
+      return { hint: buildNotificationsHint(pending), pending };
+    } catch (error) {
+      logger.warn("failed to collect arya notifications", {
+        event: "arya.room.notifications.collect.failed",
+        error,
+      });
+      return { hint: "", pending: [] };
     }
-    const userStub = userNs.get(userNs.idFromName(ownerId));
-    await userStub.setOwnDisplayName(name);
+  }
+
+  private async clearNotifications(notifications: AryaNotification[]): Promise<void> {
+    const user = this.ownerUser();
+    if (!user || notifications.length === 0) return;
+    try {
+      await user.clearNotifications(notifications.map((n) => n.id));
+    } catch (error) {
+      logger.warn("failed to clear arya notifications", {
+        event: "arya.room.notifications.clear.failed",
+        error,
+      });
+    }
   }
 
   private peerInfo(participant: Participant): AryaParticipantInfo {

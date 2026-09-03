@@ -183,19 +183,40 @@ describe("arya tool registry", () => {
     voiceStatus: () => ({ state: "listening" as const }),
     mutations: {
       setOwnerDisplayName: async (_name: string) => {},
+      setReminder: async (_message: string, _dueAt: number) => ({
+        id: "r1",
+        message: "test",
+        dueAt: 0,
+        createdAt: 0,
+      }),
+      cancelReminder: async (_id: string) => true,
     },
+    readReminders: async () => [],
+    readNotifications: async () => [],
   });
 
   it("exposes the read-only and mutating tools as gemini declarations", () => {
     const registry = new AryaToolRegistry(makeRuntime());
     const names = registry.definitions().map((t) => t.name).toSorted();
-    expect(names).toEqual(["get_current_time", "get_voice_status", "update_display_name"]);
+    expect(names).toEqual([
+      "cancel_reminder",
+      "get_current_time",
+      "get_notifications",
+      "get_voice_status",
+      "list_reminders",
+      "set_reminder",
+      "update_display_name",
+    ]);
 
     const tools = geminiFunctionDeclarations(registry.definitions());
     const declarations = tools[0]["functionDeclarations"];
     expect(declarations?.map((d) => d.name).toSorted()).toEqual([
+      "cancel_reminder",
       "get_current_time",
+      "get_notifications",
       "get_voice_status",
+      "list_reminders",
+      "set_reminder",
       "update_display_name",
     ]);
   });

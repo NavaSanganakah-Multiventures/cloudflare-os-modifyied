@@ -14,6 +14,7 @@ import type { AdminSettings } from "./admin-settings.js";
 import { isReservedBlueprintKey, readBlueprintKvRecord } from "./blueprint-archive.js";
 import { filterEnabledResources, isResourceDisabled, readAdminConfig } from "./admin-config.js";
 import { buildGatekeeperVendorMap } from "./auth/auth-vendors.js";
+import type { AryaNotification, AryaReminder } from "./arya/arya-reminders";
 
 const logger = createWorkshopLogger("workshop.user");
 
@@ -180,6 +181,17 @@ function makeUserStorage(storage: DurableObjectStorage) {
         nonUniqueIndexes: {
           byWorkspace(record: OutputRecord) { return record.workspaceId; },
         },
+      }),
+      // Arya reminders + the notification inbox. Reminders are swept into the inbox when they
+      // become due and are surfaced the next time the user starts an Arya voice call.
+      reminders: collection<AryaReminder>()({
+        primaryKey: "id",
+        nonUniqueIndexes: {
+          byDueAt(record: AryaReminder) { return record.dueAt; },
+        },
+      }),
+      notifications: collection<AryaNotification>()({
+        primaryKey: "id",
       }),
     },
     singletons: {
@@ -519,6 +531,70 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     let profile = this.storage.profile.get();
     profile.name = name;
     this.storage.profile.put(profile);
+  }
+
+  // ---- Arya reminders & notification inbox ---------------------------------------------
+  // Stored per-user; Arya's call room sweeps due reminders into the inbox and surfaces the
+  // notifications in the assistant's system prompt at the start of each call.
+
+  async addReminder(message: string, dueAt: number): Promise<AryaReminder> {
+    const reminder: AryaReminder = {
+      id: crypto.randomUUID(),
+      message,
+      dueAt,
+      createdAt: Date.now(),
+    };
+    this.storage.reminders.put(reminder);
+    return reminder;
+  }
+
+  async listReminders(): Promise<AryaReminder[]> {
+    return Array.from(this.storage.reminders.byDueAt.list())
+      .toSorted((a, b) => a.dueAt - b.dueAt);
+  }
+
+  async cancelReminder(id: string): Promise<boolean> {
+    return this.storage.reminders.delete(id);
+  }
+
+  /** Move due reminders into the notification inbox; returns how many were swept. */
+  async sweepDueReminders(now: number = Date.now()): Promise<number> {
+    const due: AryaReminder[] = [];
+    for (const reminder of this.storage.reminders.byDueAt.list()) {
+      if (reminder.dueAt > now) break;
+      due.push(reminder);
+    }
+    for (const reminder of due) {
+      this.storage.reminders.delete(reminder.id);
+      this.storage.notifications.put({
+        id: crypto.randomUUID(),
+        kind: "reminder",
+        title: "Reminder",
+        detail: reminder.message,
+        createdAt: now,
+      });
+    }
+    return due.length;
+  }
+
+  async listNotifications(): Promise<AryaNotification[]> {
+    return Array.from(this.storage.notifications.list())
+      .toSorted((a, b) => a.createdAt - b.createdAt);
+  }
+
+  /** Clear notifications (all of them, or just the given ids); returns how many were removed. */
+  async clearNotifications(ids?: string[]): Promise<number> {
+    let removed = 0;
+    if (ids) {
+      for (const id of ids) {
+        if (this.storage.notifications.delete(id)) removed++;
+      }
+    } else {
+      for (const notification of Array.from(this.storage.notifications.list())) {
+        if (this.storage.notifications.delete(notification.id)) removed++;
+      }
+    }
+    return removed;
   }
 
   getAryaGeminiKey(): Promise<string | null> {

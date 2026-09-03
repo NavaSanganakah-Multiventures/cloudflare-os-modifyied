@@ -137,6 +137,7 @@ export class AryaWorkersAiFallback implements AryaAiSession {
   constructor(
     private readonly env: Cloudflare.Env,
     private readonly callbacks: AryaAiCallbacks,
+    private readonly systemPrompt?: string,
   ) {}
 
   async start(): Promise<void> {
@@ -203,7 +204,7 @@ export class AryaWorkersAiFallback implements AryaAiSession {
 
   private async complete(userText: string): Promise<string> {
     const model = this.env.ARYA_WORKERS_AI_LLM ?? DEFAULT_ARYA_FALLBACK_LLM;
-    const persona = this.env.ARYA_GEMINI_SYSTEM_PROMPT ?? FALLBACK_PERSONA;
+    const persona = this.systemPrompt ?? this.env.ARYA_GEMINI_SYSTEM_PROMPT ?? FALLBACK_PERSONA;
     const result = await this.env.WORKERS_AI.run(model, {
       messages: [
         { role: "system", content: persona },

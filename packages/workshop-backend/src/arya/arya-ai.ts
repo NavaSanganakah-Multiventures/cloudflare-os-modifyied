@@ -205,12 +205,13 @@ export function createAryaAiSession(
   callbacks: AryaAiCallbacks,
   tools: GeminiTool[] = [],
   geminiKey?: string,
+  systemPrompt?: string,
 ): AryaAiSession {
   const key = geminiKey ?? env.ARYA_GEMINI_API_KEY;
   if (key) {
-    return new AryaLiveBridge(env, callbacks, tools, key);
+    return new AryaLiveBridge(env, callbacks, tools, key, systemPrompt);
   }
-  return new AryaWorkersAiFallback(env, callbacks);
+  return new AryaWorkersAiFallback(env, callbacks, systemPrompt);
 }
 
 function errorMessage(error: unknown): string {
@@ -247,6 +248,7 @@ class AryaLiveBridge implements AryaAiSession {
     private readonly callbacks: AryaAiCallbacks,
     private readonly tools: GeminiTool[] = [],
     private readonly geminiKey: string,
+    private readonly systemPrompt?: string,
   ) {}
 
   async start(): Promise<void> {
@@ -299,7 +301,10 @@ class AryaLiveBridge implements AryaAiSession {
     ws.send(
       JSON.stringify(
         buildGeminiSetup(
-          { model: this.env.ARYA_GEMINI_MODEL, systemPrompt: this.env.ARYA_GEMINI_SYSTEM_PROMPT },
+          {
+            model: this.env.ARYA_GEMINI_MODEL,
+            systemPrompt: this.systemPrompt ?? this.env.ARYA_GEMINI_SYSTEM_PROMPT,
+          },
           this.tools,
         ),
       ),
