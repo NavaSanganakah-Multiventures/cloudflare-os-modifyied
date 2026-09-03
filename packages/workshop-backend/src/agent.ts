@@ -43,7 +43,7 @@ function decodeTextAttachment(data: Uint8Array): string {
     return new TextDecoder("utf-16be").decode(data.subarray(2));
   }
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(data);
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(data);
   } catch {
     return new TextDecoder("windows-1252").decode(data);
   }
