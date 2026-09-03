@@ -5,7 +5,9 @@ import type { AryaAiBackend, AryaAiState } from "./arya-types";
 import type { AryaNotification, AryaReminder } from "./arya-reminders";
 import { normalizeSetReminderArgs, summarizeReminder } from "./arya-reminders";
 import { normalizeSendEmailArgs } from "./arya-email";
+import { normalizeGithubPrNumberArg, normalizeGithubRepoArg, normalizeReviewPrArgs } from "./arya-github";
 import type { AryaEmailSummary } from "./arya-email";
+import type { AryaGithubPrReadResult, AryaGithubPrSummary, AryaReviewDecision } from "./arya-github";
 
 /** A function call requested by the AI model. */
 export interface AryaToolCall {
@@ -39,6 +41,14 @@ export interface AryaEmailRuntime {
   replyEmail(threadId: string, body: string): Promise<void>;
 }
 
+/** GitHub capabilities exposed to tools. Confirmation for reviews is provided by the GitHub
+ * gatekeeper's ApprovalQueue (AryaApprovalQueue), so these are not gated by the room's flow. */
+export interface AryaGithubRuntime {
+  listPrs(repo: string): Promise<AryaGithubPrSummary[]>;
+  readPr(repo: string, prNumber: number): Promise<AryaGithubPrReadResult>;
+  reviewPr(repo: string, prNumber: number, decision: AryaReviewDecision, body: string): Promise<void>;
+}
+
 /** Runtime hooks tools can touch. */
 export interface AryaToolRuntime {
   now(): Date;
@@ -50,6 +60,8 @@ export interface AryaToolRuntime {
   readNotifications(): Promise<AryaNotification[]>;
   /** Email capabilities, or absent when no Gmail account is connected. */
   email?: AryaEmailRuntime;
+  /** GitHub capabilities, or absent when no GitHub account is connected. */
+  github?: AryaGithubRuntime;
 }
 
 /** A tool the Arya assistant can execute. */
@@ -215,6 +227,64 @@ const DEFAULT_ARYA_TOOLS: AryaToolDefinition[] = [
       if (!body.trim()) throw new Error("A reply body is required.");
       await email.replyEmail(threadId, body);
       return { replied: true, threadId };
+    },
+  },
+  {
+    name: "list_prs",
+    description:
+      "List the most recent open pull requests in a GitHub repository the user can access. Returns PR numbers, titles, authors, and states. Use read_pr to review one, then review_pr to post a review.",
+    parameters: {
+      type: "object",
+      properties: { repo: { type: "string", description: 'Repository as "owner/repo".' } },
+      required: ["repo"],
+    },
+    execute: async (args, runtime) => {
+      const github = runtime.github;
+      if (!github) throw new Error("GitHub is not configured for this call.");
+      const repo = normalizeGithubRepoArg(args);
+      return { pullRequests: await github.listPrs(repo) };
+    },
+  },
+  {
+    name: "read_pr",
+    description:
+      "Read a pull request's details and diff so you can review it. Returns the title, state, author, body, and a summarized diff. Use review_pr afterwards to post your review.",
+    parameters: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: 'Repository as "owner/repo".' },
+        prNumber: { type: "number", description: "The pull request number." },
+      },
+      required: ["repo", "prNumber"],
+    },
+    execute: async (args, runtime) => {
+      const github = runtime.github;
+      if (!github) throw new Error("GitHub is not configured for this call.");
+      const repo = normalizeGithubRepoArg(args);
+      const prNumber = normalizeGithubPrNumberArg(args);
+      return await github.readPr(repo, prNumber);
+    },
+  },
+  {
+    name: "review_pr",
+    description:
+      "Post a pull request review (approve / comment / request changes) on the user's behalf. Ask the user which decision and what to write first; they must approve before it is posted. Use read_pr first to see the diff.",
+    parameters: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: 'Repository as "owner/repo".' },
+        prNumber: { type: "number", description: "The pull request number." },
+        decision: { type: "string", enum: ["approve", "comment", "requestChanges"], description: "The review decision." },
+        body: { type: "string", description: "The review body in Markdown." },
+      },
+      required: ["repo", "prNumber", "decision"],
+    },
+    execute: async (args, runtime) => {
+      const github = runtime.github;
+      if (!github) throw new Error("GitHub is not configured for this call.");
+      const input = normalizeReviewPrArgs(args);
+      await github.reviewPr(input.repo, input.prNumber, input.decision, input.body);
+      return { reviewed: true, repo: input.repo, prNumber: input.prNumber, decision: input.decision };
     },
   },
   {
