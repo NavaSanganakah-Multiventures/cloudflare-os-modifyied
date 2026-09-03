@@ -84,7 +84,7 @@ const DEFAULT_ARYA_TOOLS: AryaToolDefinition[] = [
   {
     name: "update_display_name",
     description:
-      "Change the caller's display name. Ask the caller what name they want before using this tool.",
+      "Change the room owner's display name. Ask the caller what name they want before using this tool.",
     parameters: {
       type: "object",
       properties: { name: { type: "string", description: "The new display name." } },
