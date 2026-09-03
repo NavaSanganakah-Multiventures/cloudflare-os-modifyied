@@ -4,7 +4,7 @@ import {
   buildNotificationsHint,
   normalizeSetReminderArgs,
   summarizeReminder,
-} from "../src/arya/arya-reminders";
+} from "../src/aarya/aarya-reminders";
 
 describe("normalizeSetReminderArgs", () => {
   const now = Date.parse("2026-01-01T00:00:00Z");
