@@ -1,0 +1,193 @@
+import { DurableObject } from "cloudflare:workers";
+import { createWorkshopLogger } from "../observability";
+import { isAuthorizedMember, verifyAryaToken } from "./arya-auth";
+import type { AryaClientMessage, AryaParticipantInfo, AryaServerMessage } from "./arya-types";
+
+const logger = createWorkshopLogger("workshop.arya.room");
+
+interface Participant {
+  id: string;
+  ws: WebSocket;
+  userId: string;
+  name: string;
+}
+
+/**
+ * One Arya voice call. Participants connect over /api/arya/ws; the room verifies each token, keeps
+ * the live participant set, relays JSON signaling, and relays binary audio frames to every other
+ * participant. PR 2 will join the Gemini Live / Workers AI bridge as a server-side participant
+ * behind this same relay.
+ */
+export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
+  private readonly participants = new Map<string, Participant>();
+
+  constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
+    super(ctx, env);
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    if (request.headers.get("Upgrade") !== "websocket") {
+      return new Response("Expected a WebSocket upgrade", { status: 426 });
+    }
+
+    const url = new URL(request.url);
+    const call = url.searchParams.get("call");
+    const token = url.searchParams.get("token");
+    const claims = await verifyAryaToken(token, this.env);
+
+    if (!claims?.sub || !claims.call || claims.call !== call) {
+      return new Response("Invalid or expired voice-call token", { status: 401 });
+    }
+    if (!isAuthorizedMember(claims.sub, this.env)) {
+      return new Response("Caller is not authorized for voice calls", { status: 403 });
+    }
+
+    const pair = new WebSocketPair();
+    const client = pair[0];
+    const server = pair[1];
+    server.accept();
+
+    const participant: Participant = {
+      id: crypto.randomUUID(),
+      ws: server,
+      userId: claims.sub,
+      name: claims.name ?? claims.sub,
+    };
+
+    await this.addParticipant(participant, call);
+
+    server.addEventListener("message", (event) => {
+      void this.handleMessage(participant, event.data).catch((err) => {
+        logger.warn("failed to handle arya voice message", {
+          event: "arya.room.message.failed",
+          error: err,
+        });
+      });
+    });
+    server.addEventListener("close", () => {
+      void this.removeParticipant(participant.id);
+    });
+    server.addEventListener("error", () => {
+      void this.removeParticipant(participant.id);
+    });
+
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  private async addParticipant(participant: Participant, roomId: string): Promise<void> {
+    this.participants.set(participant.id, participant);
+
+    // Remember the first joiner as the room owner so PR 2/PR 4 can anchor agent authorization and
+    // outbound-call routing to it.
+    const existingOwner = await this.ctx.storage.get<string>("ownerId");
+    if (!existingOwner) {
+      await this.ctx.storage.put("ownerId", participant.userId);
+    }
+
+    this.send(participant, {
+      type: "welcome",
+      roomId,
+      selfId: participant.id,
+      participants: this.peerList(participant.id),
+    });
+    this.broadcast({ type: "peer-joined", peer: this.peerInfo(participant) }, participant.id);
+
+    logger.info("arya voice participant joined", { event: "arya.room.join" });
+  }
+
+  private async removeParticipant(participantId: string): Promise<void> {
+    const participant = this.participants.get(participantId);
+    if (!participant) return;
+    this.participants.delete(participantId);
+    try {
+      participant.ws.close();
+    } catch {
+      // Already closed.
+    }
+    this.broadcast({ type: "peer-left", peerId: participantId });
+    logger.info("arya voice participant left", { event: "arya.room.leave" });
+  }
+
+  private async handleMessage(participant: Participant, data: unknown): Promise<void> {
+    if (data instanceof ArrayBuffer) {
+      // Binary audio frame: relay to every other participant. The Gemini / Workers AI bridge
+      // (PR 2) will receive these frames as a participant too.
+      this.broadcastBinary(data, participant.id);
+      return;
+    }
+
+    let message: AryaClientMessage;
+    try {
+      message = JSON.parse(String(data));
+    } catch {
+      this.send(participant, {
+        type: "error",
+        code: "bad_json",
+        message: "Message is not valid JSON",
+      });
+      return;
+    }
+
+    switch (message.type) {
+      case "ping":
+        this.send(participant, { type: "pong", ts: message.ts });
+        return;
+      case "signal":
+        this.sendTo(message.target, { type: "signal", from: participant.id, data: message.data });
+        return;
+      case "ring":
+        this.broadcast({ type: "ring", from: participant.id }, participant.id);
+        return;
+      case "accept":
+        this.broadcast({ type: "accepted", by: participant.id }, participant.id);
+        return;
+      case "reject":
+        this.broadcast({ type: "rejected", by: participant.id }, participant.id);
+        return;
+      case "hangup":
+        this.broadcast({ type: "hangup", by: participant.id }, participant.id);
+        return;
+    }
+  }
+
+  private peerInfo(participant: Participant): AryaParticipantInfo {
+    return { id: participant.id, userId: participant.userId, name: participant.name };
+  }
+
+  private peerList(exceptId?: string): AryaParticipantInfo[] {
+    return [...this.participants.values()]
+      .filter((p) => p.id !== exceptId)
+      .map((p) => this.peerInfo(p));
+  }
+
+  private send(participant: Participant, message: AryaServerMessage): void {
+    try {
+      participant.ws.send(JSON.stringify(message));
+    } catch {
+      void this.removeParticipant(participant.id);
+    }
+  }
+
+  private sendTo(participantId: string, message: AryaServerMessage): void {
+    const participant = this.participants.get(participantId);
+    if (participant) this.send(participant, message);
+  }
+
+  private broadcast(message: AryaServerMessage, exceptId?: string): void {
+    for (const participant of this.participants.values()) {
+      if (participant.id === exceptId) continue;
+      this.send(participant, message);
+    }
+  }
+
+  private broadcastBinary(data: ArrayBuffer, exceptId?: string): void {
+    for (const participant of this.participants.values()) {
+      if (participant.id === exceptId) continue;
+      try {
+        participant.ws.send(data);
+      } catch {
+        void this.removeParticipant(participant.id);
+      }
+    }
+  }
+}
