@@ -130,7 +130,7 @@ export function pcm16ToWavBytes(samples: Int16Array, sampleRate = FALLBACK_SAMPL
 export class AryaWorkersAiFallback implements AryaAiSession {
   readonly backend: AryaAiBackend = "workers-ai";
 
-  private buffer = new Int16Array(0);
+  private buffer: Int16Array<ArrayBufferLike> = new Int16Array(0);
   private processing = false;
   private stopped = false;
 
