@@ -603,6 +603,20 @@ export interface AuthenticatedApi extends RpcTarget {
   // managed here; it stays env-var driven.)
   getAdminApi(): Promise<RpcStub<AdminApi> | null>;
 
+  // --- Arya voice assistant ---
+
+  /** Mints a short-lived JWT authorizing the caller to join an Arya voice call. */
+  mintAryaVoiceToken(call: string): Promise<string>;
+
+  /** Returns whether the user has configured a Gemini API key, with a masked hint. */
+  getAryaGeminiKeyStatus(): Promise<{ set: boolean; masked: string | null }>;
+
+  /** Stores the user's Gemini API key for the Arya voice assistant (user-scoped, never returned). */
+  setAryaGeminiKey(key: string): Promise<void>;
+
+  /** Removes the user's Gemini API key. */
+  clearAryaGeminiKey(): Promise<void>;
+
   // TODO:
   // - Edit permissions on a connected account.
 }
