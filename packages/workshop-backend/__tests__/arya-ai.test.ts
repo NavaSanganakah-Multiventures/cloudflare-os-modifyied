@@ -185,12 +185,12 @@ describe("arya tool registry", () => {
 
   it("exposes the two read-only tools as gemini declarations", () => {
     const registry = new AryaToolRegistry(makeRuntime());
-    const names = registry.definitions().map((t) => t.name).sort();
+    const names = registry.definitions().map((t) => t.name).toSorted();
     expect(names).toEqual(["get_current_time", "get_voice_status"]);
 
     const tools = geminiFunctionDeclarations(registry.definitions());
     const declarations = tools[0]["functionDeclarations"];
-    expect(declarations?.map((d) => d.name).sort()).toEqual([
+    expect(declarations?.map((d) => d.name).toSorted()).toEqual([
       "get_current_time",
       "get_voice_status",
     ]);
