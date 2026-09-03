@@ -21,7 +21,7 @@ describe("normalizeGithubRepoArg", () => {
   });
   it("rejects missing or malformed repos", () => {
     expect(() => normalizeGithubRepoArg({ repo: "" })).toThrow(/repo/i);
-    expect(() => normalizeGithubRepoArg({ repo: "no-slash" })).toThrow(/owner/repo/i);
+    expect(() => normalizeGithubRepoArg({ repo: "no-slash" })).toThrow(/must be in/i);
     expect(() => normalizeGithubRepoArg({})).toThrow(/repo/i);
   });
 });
