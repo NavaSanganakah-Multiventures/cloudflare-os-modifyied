@@ -99,6 +99,18 @@ declare global {
       // Minimum wallet balance (USD) required to start a new System AI agent turn. Defaults to
       // DEFAULT_MIN_WALLET_BALANCE_USD.
       MIN_WALLET_BALANCE?: string;
+
+      // Arya voice assistant: signing secret for voice-call tokens (HS256). Voice calls are
+      // disabled until this is configured.
+      ARYA_SIGNING_SECRET?: string;
+
+      // Optional comma-separated list of user ids allowed to join Arya voice calls. Absent/empty
+      // means any caller with a validly-signed token (the token itself is the authority).
+      ARYA_AUTHORIZED_MEMBERS?: string;
+
+      // Dev-only: set to "true" to enable GET /api/arya/dev-token for local testing. Never set in
+      // production.
+      ARYA_ALLOW_DEV_TOKEN?: string;
     }
   }
 }
