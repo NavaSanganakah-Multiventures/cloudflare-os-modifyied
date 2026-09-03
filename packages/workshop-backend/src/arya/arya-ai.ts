@@ -204,9 +204,11 @@ export function createAryaAiSession(
   env: Cloudflare.Env,
   callbacks: AryaAiCallbacks,
   tools: GeminiTool[] = [],
+  geminiKey?: string,
 ): AryaAiSession {
-  if (env.ARYA_GEMINI_API_KEY) {
-    return new AryaLiveBridge(env, callbacks, tools);
+  const key = geminiKey ?? env.ARYA_GEMINI_API_KEY;
+  if (key) {
+    return new AryaLiveBridge(env, callbacks, tools, key);
   }
   return new AryaWorkersAiFallback(env, callbacks);
 }
@@ -244,11 +246,12 @@ class AryaLiveBridge implements AryaAiSession {
     private readonly env: Cloudflare.Env,
     private readonly callbacks: AryaAiCallbacks,
     private readonly tools: GeminiTool[] = [],
+    private readonly geminiKey: string,
   ) {}
 
   async start(): Promise<void> {
     if (this.ws) return;
-    const key = this.env.ARYA_GEMINI_API_KEY;
+    const key = this.geminiKey;
     if (!key) {
       throw new Error("ARYA_GEMINI_API_KEY is not configured");
     }
