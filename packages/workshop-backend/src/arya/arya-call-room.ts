@@ -6,6 +6,7 @@ import { AryaToolRegistry, geminiFunctionDeclarations } from "./arya-tools";
 import type { AryaAiSession } from "./arya-ai";
 import type { AryaToolCall, AryaToolResult } from "./arya-tools";
 import type { AryaAiState, AryaClientMessage, AryaParticipantInfo, AryaServerMessage } from "./arya-types";
+import type { UserDurableObject } from "../user";
 
 const logger = createWorkshopLogger("workshop.arya.room");
 
@@ -184,6 +185,26 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
 
   private async ensureAi(): Promise<void> {
     if (this.ai) return;
+
+    // Fetch the user's Gemini key from the user DO (if available); fall back to env-level key.
+    let geminiKey: string | undefined;
+    const ownerId = await this.ctx.storage.get<string>("ownerId");
+    if (ownerId) {
+      try {
+        const userNs: DurableObjectNamespace<UserDurableObject> | undefined =
+          this.ctx.exports.UserDurableObject;
+        if (userNs) {
+          const userStub = userNs.get(userNs.idFromName(ownerId));
+          geminiKey = (await userStub.getAryaGeminiKey()) ?? undefined;
+        }
+      } catch (error) {
+        logger.warn("failed to fetch user gemini key from user DO", {
+          event: "arya.room.ai.key.fetch.failed",
+          error,
+        });
+      }
+    }
+
     const session = createAryaAiSession(
       this.env,
       {
@@ -208,6 +229,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
         onToolCalls: (calls) => this.executeToolCalls(calls),
       },
       geminiFunctionDeclarations(this.tools.definitions()),
+      geminiKey,
     );
     try {
       await session.start();
