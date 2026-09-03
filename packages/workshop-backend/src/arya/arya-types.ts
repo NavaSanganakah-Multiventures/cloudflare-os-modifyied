@@ -16,6 +16,12 @@ export interface AryaParticipantInfo {
   name: string;
 }
 
+/** Lifecycle state of the server-side AI participant. */
+export type AryaAiState = "off" | "connecting" | "listening" | "error";
+
+/** Which AI engine is driving the voice session. */
+export type AryaAiBackend = "gemini" | "workers-ai";
+
 /** JSON messages the client sends to the server. */
 export type AryaClientMessage =
   | { type: "ping"; ts: number }
@@ -23,7 +29,8 @@ export type AryaClientMessage =
   | { type: "ring" }
   | { type: "accept" }
   | { type: "reject" }
-  | { type: "hangup" };
+  | { type: "hangup" }
+  | { type: "ai-command"; action: "start" | "stop" };
 
 /** JSON messages the server sends to the client. */
 export type AryaServerMessage =
@@ -36,4 +43,6 @@ export type AryaServerMessage =
   | { type: "rejected"; by: string }
   | { type: "hangup"; by: string }
   | { type: "pong"; ts: number }
+  | { type: "ai-status"; state: AryaAiState; backend?: AryaAiBackend; detail?: string }
+  | { type: "transcript"; role: "user" | "assistant"; text: string; final: boolean }
   | { type: "error"; code: string; message: string };

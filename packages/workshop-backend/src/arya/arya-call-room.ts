@@ -1,7 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 import { createWorkshopLogger } from "../observability";
 import { isAuthorizedMember, verifyAryaToken } from "./arya-auth";
-import type { AryaClientMessage, AryaParticipantInfo, AryaServerMessage } from "./arya-types";
+import { createAryaAiSession } from "./arya-ai";
+import { AryaToolRegistry, geminiFunctionDeclarations } from "./arya-tools";
+import type { AryaAiSession } from "./arya-ai";
+import type { AryaToolCall, AryaToolResult } from "./arya-tools";
+import type { AryaAiState, AryaClientMessage, AryaParticipantInfo, AryaServerMessage } from "./arya-types";
 
 const logger = createWorkshopLogger("workshop.arya.room");
 
@@ -15,11 +19,18 @@ interface Participant {
 /**
  * One Arya voice call. Participants connect over /api/arya/ws; the room verifies each token, keeps
  * the live participant set, relays JSON signaling, and relays binary audio frames to every other
- * participant. PR 2 will join the Gemini Live / Workers AI bridge as a server-side participant
- * behind this same relay.
+ * participant. The Gemini Live / Workers AI bridge joins as a server-side participant behind this
+ * same relay: human audio is forwarded to the AI, and AI audio is broadcast back to every human.
  */
 export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   private readonly participants = new Map<string, Participant>();
+
+  private ai: AryaAiSession | null = null;
+  private aiState: AryaAiState = "off";
+  private readonly tools = new AryaToolRegistry({
+    now: () => new Date(),
+    voiceStatus: () => ({ state: this.aiState, backend: this.ai?.backend }),
+  });
 
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get("Upgrade") !== "websocket") {
@@ -80,11 +91,18 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       await this.ctx.storage.put("ownerId", participant.userId);
     }
 
+    await this.ensureAi();
+
     this.send(participant, {
       type: "welcome",
       roomId,
       selfId: participant.id,
       participants: this.peerList(participant.id),
+    });
+    this.send(participant, {
+      type: "ai-status",
+      state: this.aiState,
+      backend: this.ai?.backend,
     });
     this.broadcast({ type: "peer-joined", peer: this.peerInfo(participant) }, participant.id);
 
@@ -102,13 +120,24 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     }
     this.broadcast({ type: "peer-left", peerId: participantId });
     logger.info("arya voice participant left", { event: "arya.room.leave" });
+
+    if (this.participants.size === 0) {
+      await this.stopAi();
+    }
   }
 
   private async handleMessage(participant: Participant, data: unknown): Promise<void> {
     if (data instanceof ArrayBuffer) {
-      // Binary audio frame: relay to every other participant. The Gemini / Workers AI bridge
-      // (PR 2) will receive these frames as a participant too.
+      // Binary audio frame: relay to every other participant and feed the AI bridge.
       this.broadcastBinary(data, participant.id);
+      if (this.ai) {
+        void this.ai.handleAudioChunk(data).catch((error) => {
+          logger.warn("failed to route audio to arya ai", {
+            event: "arya.room.ai.audio.failed",
+            error,
+          });
+        });
+      }
       return;
     }
 
@@ -143,7 +172,88 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       case "hangup":
         this.broadcast({ type: "hangup", by: participant.id }, participant.id);
         return;
+      case "ai-command":
+        if (message.action === "start") {
+          await this.ensureAi();
+        } else {
+          await this.stopAi();
+        }
+        return;
     }
+  }
+
+  private async ensureAi(): Promise<void> {
+    if (this.ai) return;
+    const session = createAryaAiSession(
+      this.env,
+      {
+        onAudio: (audio) => this.broadcastBinary(audio),
+        onTranscript: (transcript) => {
+          this.broadcast({
+            type: "transcript",
+            role: transcript.role,
+            text: transcript.text,
+            final: transcript.final,
+          });
+        },
+        onStatus: (status) => {
+          this.aiState = status.state;
+          this.broadcast({
+            type: "ai-status",
+            state: status.state,
+            backend: status.backend,
+            detail: status.detail,
+          });
+        },
+        onToolCalls: (calls) => this.executeToolCalls(calls),
+      },
+      geminiFunctionDeclarations(this.tools.definitions()),
+    );
+    try {
+      await session.start();
+    } catch (error) {
+      logger.warn("failed to start arya ai session", {
+        event: "arya.room.ai.start.failed",
+        error,
+      });
+      this.aiState = "error";
+      this.broadcast({
+        type: "ai-status",
+        state: "error",
+        backend: session.backend,
+        detail: errorMessage(error),
+      });
+      return;
+    }
+    this.ai = session;
+  }
+
+  private async stopAi(): Promise<void> {
+    const session = this.ai;
+    this.ai = null;
+    if (!session) {
+      this.aiState = "off";
+      this.broadcast({ type: "ai-status", state: "off" });
+      return;
+    }
+    try {
+      await session.stop();
+    } catch (error) {
+      logger.warn("failed to stop arya ai session", {
+        event: "arya.room.ai.stop.failed",
+        error,
+      });
+      this.aiState = "off";
+      this.broadcast({ type: "ai-status", state: "off" });
+    }
+  }
+
+  private async executeToolCalls(calls: AryaToolCall[]): Promise<AryaToolResult[]> {
+    const results: AryaToolResult[] = [];
+    for (const call of calls) {
+      results.push(await this.tools.execute(call));
+    }
+    return results;
   }
 
   private peerInfo(participant: Participant): AryaParticipantInfo {
@@ -186,4 +296,8 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       }
     }
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -111,6 +111,13 @@ declare global {
       // Dev-only: set to "true" to enable GET /api/arya/dev-token for local testing. Never set in
       // production.
       ARYA_ALLOW_DEV_TOKEN?: string;
+
+      // Gemini Live primary AI bridge.
+      ARYA_GEMINI_API_KEY?: string;
+      ARYA_GEMINI_MODEL?: string;          // default "models/gemini-3.1-flash-live-preview"
+      ARYA_GEMINI_SYSTEM_PROMPT?: string;
+      // Workers AI fallback LLM (default "@cf/meta/llama-3.1-8b-instruct-fast").
+      ARYA_WORKERS_AI_LLM?: string;
     }
   }
 }
