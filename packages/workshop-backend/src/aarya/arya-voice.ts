@@ -27,7 +27,7 @@ export async function handleAaryaVoiceRequest(
 
   if (url.pathname === "/api/aarya/ws") {
     if (!env.AARYA_SIGNING_SECRET) {
-      return new Response("Aarya voice is not configured (AARYA_SIGNING_SECRET missing)", {
+      return new Response("AARYA voice is not configured (AARYA_SIGNING_SECRET missing)", {
         status: 503,
       });
     }
