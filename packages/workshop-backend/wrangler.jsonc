@@ -56,6 +56,11 @@
       // login back to the waiting browser.
       "tag": "v2",
       "new_sqlite_classes": [ "PendingLogin" ]
+    },
+    {
+      // Arya voice calls: one room per call for WebSocket signaling and audio relay.
+      "tag": "v3",
+      "new_sqlite_classes": [ "AryaCallRoom" ]
     }
   ],
 
