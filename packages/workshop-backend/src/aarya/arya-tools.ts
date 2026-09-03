@@ -111,7 +111,7 @@ const DEFAULT_AARYA_TOOLS: AaryaToolDefinition[] = [
   },
   {
     name: "get_voice_status",
-    description: "Return the live state of the Aarya voice assistant.",
+    description: "Return the live state of the AARYA voice assistant.",
     parameters: { type: "object", properties: {} },
     execute: (_args, runtime) => runtime.voiceStatus(),
   },
