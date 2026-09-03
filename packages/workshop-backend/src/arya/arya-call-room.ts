@@ -42,7 +42,6 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   // routes send/reply confirmations through requestConfirmation(); cached thread stubs let
   // reply_email reuse a thread listed by list_emails without re-fetching.
   private gmailSession: AryaGmailSession | null = null;
-  private gmailGatekeeper: Fetcher<Gatekeeper<any>> | null = null;
   private readonly gmailThreads = new Map<string, AryaGmailThread>();
   private readonly tools = new AryaToolRegistry({
     now: () => new Date(),
@@ -457,7 +456,6 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       `arya-gmail-${this.ownerId}`,
       () => ({ class: gatekeeperClass }),
     );
-    this.gmailGatekeeper = gatekeeper;
 
     const approvalQueue = new AryaApprovalQueue(
       gatekeeper,
