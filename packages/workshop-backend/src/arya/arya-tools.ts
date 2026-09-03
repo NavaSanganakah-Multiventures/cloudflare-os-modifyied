@@ -5,6 +5,7 @@ import type { AryaAiBackend, AryaAiState } from "./arya-types";
 import type { AryaNotification, AryaReminder } from "./arya-reminders";
 import { normalizeSetReminderArgs, summarizeReminder } from "./arya-reminders";
 import { normalizeSendEmailArgs } from "./arya-email";
+import type { AryaEmailSummary } from "./arya-email";
 
 /** A function call requested by the AI model. */
 export interface AryaToolCall {
@@ -28,13 +29,6 @@ export interface AryaMutations {
   setReminder(message: string, dueAt: number): Promise<AryaReminder>;
   /** Cancel one of the room owner's reminders. Returns true when it existed. */
   cancelReminder(id: string): Promise<boolean>;
-}
-
-/** A recent email thread, for display to the model. */
-export interface AryaEmailSummary {
-  id: string;
-  subject: string;
-  snippet?: string;
 }
 
 /** Email capabilities exposed to tools. Confirmation for sends is provided by the Gmail gatekeeper's
