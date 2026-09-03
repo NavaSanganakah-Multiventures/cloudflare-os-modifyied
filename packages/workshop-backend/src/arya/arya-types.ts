@@ -30,7 +30,8 @@ export type AryaClientMessage =
   | { type: "accept" }
   | { type: "reject" }
   | { type: "hangup" }
-  | { type: "ai-command"; action: "start" | "stop" };
+  | { type: "ai-command"; action: "start" | "stop" }
+  | { type: "tool-confirmation-response"; requestId: string; approved: boolean };
 
 /** JSON messages the server sends to the client. */
 export type AryaServerMessage =
@@ -45,4 +46,5 @@ export type AryaServerMessage =
   | { type: "pong"; ts: number }
   | { type: "ai-status"; state: AryaAiState; backend?: AryaAiBackend; detail?: string }
   | { type: "transcript"; role: "user" | "assistant"; text: string; final: boolean }
-  | { type: "error"; code: string; message: string };
+  | { type: "error"; code: string; message: string }
+  | { type: "tool-confirmation-request"; requestId: string; tool: string; summary: string };
