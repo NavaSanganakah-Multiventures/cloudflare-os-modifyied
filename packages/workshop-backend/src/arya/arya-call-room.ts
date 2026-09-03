@@ -1,11 +1,11 @@
-import { DurableObject, RpcStub } from "cloudflare:workers";
+import { DurableObject } from "cloudflare:workers";
 import { createWorkshopLogger } from "../observability";
 import { isAuthorizedMember, verifyAryaToken } from "./arya-auth";
 import { createAryaAiSession, DEFAULT_ARYA_PERSONA } from "./arya-ai";
 import { AryaToolRegistry, geminiFunctionDeclarations } from "./arya-tools";
 import { AryaApprovalQueue } from "./arya-email";
 import type { AryaEmailSummary, AryaGmailSession, AryaGmailThread } from "./arya-email";
-import type { ApprovalQueue, Gatekeeper } from "@gadgets/workshop-shared/gatekeeper";
+import type { Gatekeeper } from "@gadgets/workshop-shared/gatekeeper";
 import type { AryaAiSession } from "./arya-ai";
 import type { AryaToolCall, AryaToolDefinition, AryaToolResult } from "./arya-tools";
 import type { AryaAiState, AryaClientMessage, AryaParticipantInfo, AryaServerMessage } from "./arya-types";
@@ -462,7 +462,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       (tool, summary) => this.requestConfirmation(tool, summary),
     );
     try {
-      this.gmailSession = (await gatekeeper.startSession(new RpcStub<ApprovalQueue>(approvalQueue))) as AryaGmailSession;
+      this.gmailSession = (await gatekeeper.startSession(approvalQueue)) as AryaGmailSession;
     } catch (error) {
       logger.warn("failed to start arya gmail session", {
         event: "arya.room.email.session.start.failed",
