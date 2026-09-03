@@ -203,7 +203,10 @@ describe("arya tool registry", () => {
       "get_current_time",
       "get_notifications",
       "get_voice_status",
+      "list_emails",
       "list_reminders",
+      "reply_email",
+      "send_email",
       "set_reminder",
       "update_display_name",
     ]);
@@ -215,7 +218,10 @@ describe("arya tool registry", () => {
       "get_current_time",
       "get_notifications",
       "get_voice_status",
+      "list_emails",
       "list_reminders",
+      "reply_email",
+      "send_email",
       "set_reminder",
       "update_display_name",
     ]);
