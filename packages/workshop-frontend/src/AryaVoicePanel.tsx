@@ -24,6 +24,7 @@ export function AryaVoicePanel() {
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([])
   const [talking, setTalking] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [confirmation, setConfirmation] = useState<{ requestId: string; tool: string; summary: string } | null>(null)
 
   const wsRef = useRef<WebSocket | null>(null)
   const micRef = useRef<{ stop: () => void } | null>(null)
@@ -55,8 +56,14 @@ export function AryaVoicePanel() {
             playPcm16Audio(audio, playbackRef.current)
           }
         },
-        onPeerEvent: (_msg) => {
-          // Ring/accept/reject/hangup handling reserved for future PRs.
+        onPeerEvent: (msg) => {
+          if (msg.type === 'tool-confirmation-request' && typeof msg.requestId === 'string') {
+            setConfirmation({
+              requestId: msg.requestId,
+              tool: typeof msg.tool === 'string' ? msg.tool : 'unknown',
+              summary: typeof msg.summary === 'string' ? msg.summary : '',
+            })
+          }
         },
       })
 
@@ -94,6 +101,7 @@ export function AryaVoicePanel() {
     setConnected(false)
     setAiState('off')
     setTranscripts([])
+    setConfirmation(null)
   }, [])
 
   const handleStartTalk = useCallback(async () => {
@@ -129,6 +137,16 @@ export function AryaVoicePanel() {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
     wsRef.current.send(JSON.stringify({ type: 'ai-command', action: 'stop' }))
   }, [])
+
+  const respondConfirmation = useCallback((approved: boolean) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !confirmation) return
+    wsRef.current.send(JSON.stringify({
+      type: 'tool-confirmation-response',
+      requestId: confirmation.requestId,
+      approved,
+    }))
+    setConfirmation(null)
+  }, [confirmation])
 
   useEffect(() => {
     return () => {
@@ -187,6 +205,27 @@ export function AryaVoicePanel() {
               </div>
             )}
           </div>
+
+          {confirmation && (
+            <div className="border-t border-kumo-warning/40 bg-kumo-warning-tint px-4 py-3">
+              <p className="text-[12px] font-medium text-kumo-warning">Arya wants to:</p>
+              <p className="mt-1 text-[13px] text-kumo-default">{confirmation.summary || confirmation.tool}</p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => respondConfirmation(true)}
+                  className="press inline-flex h-8 flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg bg-kumo-brand text-[12px] font-medium text-white transition-colors hover:bg-kumo-brand-hover"
+                >
+                  Allow
+                </button>
+                <button
+                  onClick={() => respondConfirmation(false)}
+                  className="press inline-flex h-8 flex-1 cursor-pointer items-center justify-center gap-1 rounded-lg border border-kumo-line text-[12px] font-medium text-kumo-subtle transition-colors hover:bg-kumo-tint"
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-col gap-2 border-t border-kumo-line px-4 py-3">
             {!connected ? (
