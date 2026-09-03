@@ -4,7 +4,7 @@
 // calls the gatekeeper's applyAction() to actually send the email. Reads (authorizeObservation)
 // are auto-approved — the owner is reading their own mailbox.
 
-import { RpcTarget } from "cloudflare:workers";
+import { RpcTarget, RpcStub } from "cloudflare:workers";
 import type {
   ApprovalQueue,
   ActionDescription,
@@ -97,6 +97,13 @@ export interface AryaGmailSession {
   send(to: string[], subject: string, body: string): Promise<void>;
   listThreads(): Promise<AryaGmailCursor>;
   search(query: string): Promise<AryaGmailCursor>;
+}
+
+/** A recent email thread, for display to the model and reuse by reply_email. */
+export interface AryaEmailSummary {
+  id: string;
+  subject: string;
+  snippet?: string;
 }
 
 // ---------------------------------------------------------------------------
