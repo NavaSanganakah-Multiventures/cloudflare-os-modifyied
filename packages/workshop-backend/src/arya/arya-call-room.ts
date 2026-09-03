@@ -5,6 +5,8 @@ import { createAryaAiSession, DEFAULT_ARYA_PERSONA } from "./arya-ai";
 import { AryaToolRegistry, geminiFunctionDeclarations } from "./arya-tools";
 import { AryaApprovalQueue } from "./arya-email";
 import type { AryaEmailSummary, AryaGmailSession, AryaGmailThread } from "./arya-email";
+import { summarizePrDiff } from "./arya-github";
+import type { AryaGithubPrReadResult, AryaGithubPrSummary, AryaGithubRepoSession, AryaReviewDecision } from "./arya-github";
 import type { Gatekeeper } from "@gadgets/workshop-shared/gatekeeper";
 import type { AryaAiSession } from "./arya-ai";
 import type { AryaToolCall, AryaToolDefinition, AryaToolResult } from "./arya-tools";
@@ -43,6 +45,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   // reply_email reuse a thread listed by list_emails without re-fetching.
   private gmailSession: AryaGmailSession | null = null;
   private readonly gmailThreads = new Map<string, AryaGmailThread>();
+  private readonly githubSessions = new Map<string, AryaGithubRepoSession>();
   private readonly tools = new AryaToolRegistry({
     now: () => new Date(),
     voiceStatus: () => ({ state: this.aiState, backend: this.ai?.backend }),
@@ -71,6 +74,12 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       sendEmail: (to: string[], subject: string, body: string) => this.sendEmail(to, subject, body),
       listEmails: (query?: string) => this.listEmails(query),
       replyEmail: (threadId: string, body: string) => this.replyEmail(threadId, body),
+    },
+    github: {
+      listPrs: (repo: string) => this.listPrs(repo),
+      readPr: (repo: string, prNumber: number) => this.readPr(repo, prNumber),
+      reviewPr: (repo: string, prNumber: number, decision: AryaReviewDecision, body: string) =>
+        this.reviewPr(repo, prNumber, decision, body),
     },
   });
 
@@ -434,17 +443,24 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   // ---------------------------------------------------------------------------
   // Email (Gmail gatekeeper). Lazy session creation + the three email tool operations.
 
-  private async ensureGmailSession(): Promise<AryaGmailSession | null> {
-    if (this.gmailSession) return this.gmailSession;
+  /** Generic gatekeeper session start for a connected vendor + resource URL. Routes mutating
+   * actions through Arya's confirmation gate via AryaApprovalQueue. Returns null when the owner
+   * has no usable connected account or the session fails to start. */
+  private async startAryaGatekeeperSession(
+    vendorId: string,
+    url: string,
+    facetKey: string,
+  ): Promise<AryaGmailSession | AryaGithubRepoSession | null> {
     const user = this.ownerUser();
     if (!user) return null;
 
     let resolved: { class: DurableObjectClass<Gatekeeper<any>>; accountId: number } | null;
     try {
-      resolved = await user.getAryaGmailGatekeeperClass();
+      resolved = await user.getAryaGatekeeperClass(vendorId, url);
     } catch (error) {
-      logger.warn("failed to resolve owner gmail gatekeeper class", {
-        event: "arya.room.email.class.failed",
+      logger.warn("failed to resolve owner gatekeeper class", {
+        event: "arya.room.gatekeeper.class.failed",
+        vendorId,
         error,
       });
       return null;
@@ -452,24 +468,31 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     if (!resolved) return null;
 
     const gatekeeperClass = resolved.class;
-    const gatekeeper = this.ctx.facets.get(
-      `arya-gmail-${this.ownerId}`,
-      () => ({ class: gatekeeperClass }),
-    );
-
+    const gatekeeper = this.ctx.facets.get(facetKey, () => ({ class: gatekeeperClass }));
     const approvalQueue = new AryaApprovalQueue(
       gatekeeper,
       (tool, summary) => this.requestConfirmation(tool, summary),
     );
     try {
-      this.gmailSession = (await gatekeeper.startSession(approvalQueue)) as AryaGmailSession;
+      return (await gatekeeper.startSession(approvalQueue)) as AryaGmailSession | AryaGithubRepoSession;
     } catch (error) {
-      logger.warn("failed to start arya gmail session", {
-        event: "arya.room.email.session.start.failed",
+      logger.warn("failed to start arya gatekeeper session", {
+        event: "arya.room.gatekeeper.session.start.failed",
+        vendorId,
         error,
       });
       return null;
     }
+  }
+
+  private async ensureGmailSession(): Promise<AryaGmailSession | null> {
+    if (this.gmailSession) return this.gmailSession;
+    const session = await this.startAryaGatekeeperSession(
+      "google",
+      "https://mail.google.com/mail/",
+      `arya-gmail-${this.ownerId}`,
+    );
+    this.gmailSession = session as AryaGmailSession | null;
     return this.gmailSession;
   }
 
@@ -517,6 +540,70 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     if (messages.length === 0) throw new Error("That email thread has no messages to reply to.");
     // Reply to the most recent message in the thread.
     await messages[messages.length - 1].reply(body);
+  }
+
+  // ---------------------------------------------------------------------------
+  // GitHub (gatekeeper). Per-repo lazy sessions + the three PR review tool operations.
+
+  private async ensureGithubRepoSession(ownerRepo: string): Promise<AryaGithubRepoSession | null> {
+    const cached = this.githubSessions.get(ownerRepo);
+    if (cached) return cached;
+    const session = await this.startAryaGatekeeperSession(
+      "github",
+      `https://github.com/${ownerRepo}`,
+      `arya-github-${ownerRepo.replaceAll("/", "-")}`,
+    );
+    if (!session) return null;
+    const repo = session as AryaGithubRepoSession;
+    this.githubSessions.set(ownerRepo, repo);
+    return repo;
+  }
+
+  private async listPrs(repo: string): Promise<AryaGithubPrSummary[]> {
+    const session = await this.ensureGithubRepoSession(repo);
+    if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
+    const cursor = await session.listPullRequests({ state: "open" });
+    const page = await cursor.next();
+    if (!page) return [];
+    return page.map((pr) => ({
+      number: Number(pr.id),
+      title: pr.title,
+      author: pr.author?.login ?? "",
+      state: pr.state,
+    }));
+  }
+
+  private async readPr(repo: string, prNumber: number): Promise<AryaGithubPrReadResult> {
+    const session = await this.ensureGithubRepoSession(repo);
+    if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
+    const pr = await session.getPullRequest(String(prNumber));
+    const details = await pr.getDetails();
+    const diff = await pr.readDiff();
+    return {
+      number: Number(details.id),
+      title: details.title,
+      state: details.state,
+      author: details.author?.login ?? "",
+      body: details.bodyMarkdown,
+      additions: details.additions,
+      deletions: details.deletions,
+      changedFiles: details.changedFiles,
+      mergeable: details.mergeable,
+      diff: await summarizePrDiff(diff),
+    };
+  }
+
+  private async reviewPr(
+    repo: string,
+    prNumber: number,
+    decision: AryaReviewDecision,
+    body: string,
+  ): Promise<void> {
+    const session = await this.ensureGithubRepoSession(repo);
+    if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
+    const pr = await session.getPullRequest(String(prNumber));
+    const diff = await pr.readDiff();
+    await pr.postReview({ revision: diff.revision, decision, bodyMarkdown: body });
   }
 
   private peerInfo(participant: Participant): AryaParticipantInfo {
