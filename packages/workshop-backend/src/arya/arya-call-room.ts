@@ -29,6 +29,9 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   private ai: AryaAiSession | null = null;
   private aiState: AryaAiState = "off";
   private ownerId: string | null = null;
+  // In-memory is safe here: a confirmation only exists during a live call, and the call's open
+  // WebSockets keep this Durable Object from hibernating. If the owner is not connected (or never
+  // responds), requestConfirmation resolves to "timeout" after CONFIRMATION_TIMEOUT_MS.
   private readonly pendingConfirmations = new Map<string, (decision: "approved" | "rejected" | "timeout") => void>();
   private readonly tools = new AryaToolRegistry({
     now: () => new Date(),
