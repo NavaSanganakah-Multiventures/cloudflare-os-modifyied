@@ -4,6 +4,7 @@
 import type { AryaAiBackend, AryaAiState } from "./arya-types";
 import type { AryaNotification, AryaReminder } from "./arya-reminders";
 import { normalizeSetReminderArgs, summarizeReminder } from "./arya-reminders";
+import { normalizeSendEmailArgs } from "./arya-email";
 
 /** A function call requested by the AI model. */
 export interface AryaToolCall {
@@ -29,6 +30,21 @@ export interface AryaMutations {
   cancelReminder(id: string): Promise<boolean>;
 }
 
+/** A recent email thread, for display to the model. */
+export interface AryaEmailSummary {
+  id: string;
+  subject: string;
+  snippet?: string;
+}
+
+/** Email capabilities exposed to tools. Confirmation for sends is provided by the Gmail gatekeeper's
+ * ApprovalQueue (AryaApprovalQueue), so these are not gated by the room's confirmation flow. */
+export interface AryaEmailRuntime {
+  sendEmail(to: string[], subject: string, body: string): Promise<void>;
+  listEmails(query?: string): Promise<AryaEmailSummary[]>;
+  replyEmail(threadId: string, body: string): Promise<void>;
+}
+
 /** Runtime hooks tools can touch. */
 export interface AryaToolRuntime {
   now(): Date;
@@ -38,6 +54,8 @@ export interface AryaToolRuntime {
   readReminders(): Promise<AryaReminder[]>;
   /** Read the owner's pending notifications. */
   readNotifications(): Promise<AryaNotification[]>;
+  /** Email capabilities, or absent when no Gmail account is connected. */
+  email?: AryaEmailRuntime;
 }
 
 /** A tool the Arya assistant can execute. */
@@ -143,6 +161,67 @@ const DEFAULT_ARYA_TOOLS: AryaToolDefinition[] = [
     description: "Return the user's pending notifications (for example, due reminders).",
     parameters: { type: "object", properties: {} },
     execute: async (_args, runtime) => ({ notifications: await runtime.readNotifications() }),
+  },
+  {
+    name: "send_email",
+    description:
+      "Send an email from the user's connected Gmail account. Ask the user for the recipients, subject, and body first. The user must approve before it is actually sent.",
+    parameters: {
+      type: "object",
+      properties: {
+        to: { type: "array", items: { type: "string" }, description: "Recipient email addresses." },
+        subject: { type: "string", description: "Email subject line." },
+        body: { type: "string", description: "Plain-text email body." },
+      },
+      required: ["to", "subject", "body"],
+    },
+    execute: async (args, runtime) => {
+      const email = runtime.email;
+      if (!email) throw new Error("Email is not configured for this call.");
+      const input = normalizeSendEmailArgs(args);
+      await email.sendEmail(input.to, input.subject, input.body);
+      return { sent: true, to: input.to, subject: input.subject };
+    },
+  },
+  {
+    name: "list_emails",
+    description:
+      "List the most recent emails from the user's connected Gmail inbox, or search them with a Gmail query. Returns thread ids, subjects, and snippets. Use reply_email to reply to a thread by its id.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Optional Gmail search query to narrow results (e.g. \"from:boss@company.com\")." },
+      },
+    },
+    execute: async (args, runtime) => {
+      const email = runtime.email;
+      if (!email) throw new Error("Email is not configured for this call.");
+      const query = typeof args.query === "string" ? args.query.trim() || undefined : undefined;
+      return { threads: await email.listEmails(query) };
+    },
+  },
+  {
+    name: "reply_email",
+    description:
+      "Reply to an email thread by its id. Ask the user what to say, then reply. The user must approve before it is actually sent. Use list_emails first to get a thread id.",
+    parameters: {
+      type: "object",
+      properties: {
+        threadId: { type: "string", description: "The id of the thread to reply to (from list_emails)." },
+        body: { type: "string", description: "The plain-text reply body." },
+      },
+      required: ["threadId", "body"],
+    },
+    execute: async (args, runtime) => {
+      const email = runtime.email;
+      if (!email) throw new Error("Email is not configured for this call.");
+      const threadId = typeof args.threadId === "string" ? args.threadId.trim() : "";
+      const body = typeof args.body === "string" ? args.body : "";
+      if (!threadId) throw new Error("A threadId is required to reply to an email.");
+      if (!body.trim()) throw new Error("A reply body is required.");
+      await email.replyEmail(threadId, body);
+      return { replied: true, threadId };
+    },
   },
   {
     name: "update_display_name",
