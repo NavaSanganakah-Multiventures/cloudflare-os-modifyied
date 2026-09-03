@@ -24,13 +24,13 @@ import { ExternalMessageGateway } from "./external-message-gateway";
 import { RpcStub as NativeRpcStub } from "cloudflare:workers";
 import { recordAnalytics } from "./analytics";
 import { handleClientErrorRequest } from "./client-errors.js";
-import { AryaCallRoom } from "./arya/arya-call-room";
-import { handleAryaVoiceRequest } from "./arya/arya-voice";
+import { AryaCallRoom } from "./aarya/aarya-call-room";
+import { handleAaryaVoiceRequest } from "./aarya/aarya-voice";
 import { verifyCfAccessJwt } from "./access.js";
 import { resolveUiFeatureFlags } from "./feature-flags";
 import { serveSiteLogo, SITE_LOGO_PATH } from "./site-logo.js";
 import { createWorkshopLogger } from "./observability";
-import { mintAryaToken } from "./arya/arya-auth";
+import { mintAaryaToken } from "./aarya/aarya-auth";
 
 const logger = createWorkshopLogger("workshop.server");
 
@@ -89,7 +89,7 @@ export { OverseerDurableObject, GatekeeperLoopback, GatekeeperHookLoopback,
 // Re-export service-binding entrypoint for external channel integrations.
 export { ExternalMessageGateway };
 
-// Re-export entrypoint type for Arya voice rooms.
+// Re-export entrypoint type for Aarya voice rooms.
 export { AryaCallRoom };
 
 // Declare optional environment variables here since they may be omitted from wrangler.jsonc.
@@ -149,21 +149,21 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
     return this.user.hasPasswordLogin();
   }
 
-  async mintAryaVoiceToken(call: string): Promise<string> {
+  async mintAaryaVoiceToken(call: string): Promise<string> {
     const profile = await this.user.whoami();
-    return mintAryaToken({ sub: profile.id, name: profile.name, call }, this.env);
+    return mintAaryaToken({ sub: profile.id, name: profile.name, call }, this.env);
   }
 
-  getAryaGeminiKeyStatus(): Promise<{ set: boolean; masked: string | null }> {
-    return this.user.getAryaGeminiKeyStatus();
+  getAaryaGeminiKeyStatus(): Promise<{ set: boolean; masked: string | null }> {
+    return this.user.getAaryaGeminiKeyStatus();
   }
 
-  setAryaGeminiKey(key: string): Promise<void> {
-    return this.user.setAryaGeminiKey(key);
+  setAaryaGeminiKey(key: string): Promise<void> {
+    return this.user.setAaryaGeminiKey(key);
   }
 
-  clearAryaGeminiKey(): Promise<void> {
-    return this.user.clearAryaGeminiKey();
+  clearAaryaGeminiKey(): Promise<void> {
+    return this.user.clearAaryaGeminiKey();
   }
   listModels(): Promise<AiChatAuthorInfo[]> {
     return this.user.listModels();
@@ -867,8 +867,8 @@ export default {
       return handleClientErrorRequest(req, env, ctx);
     }
 
-    if (url.pathname.startsWith("/api/arya/")) {
-      return handleAryaVoiceRequest(req, env, ctx);
+    if (url.pathname.startsWith("/api/aarya/")) {
+      return handleAaryaVoiceRequest(req, env, ctx);
     }
 
     if (url.pathname === "/api") {
