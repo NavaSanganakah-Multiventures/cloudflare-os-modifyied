@@ -24,6 +24,8 @@ import { ExternalMessageGateway } from "./external-message-gateway";
 import { RpcStub as NativeRpcStub } from "cloudflare:workers";
 import { recordAnalytics } from "./analytics";
 import { handleClientErrorRequest } from "./client-errors.js";
+import { AryaCallRoom } from "./arya/arya-call-room";
+import { handleAryaVoiceRequest } from "./arya/arya-voice";
 import { verifyCfAccessJwt } from "./access.js";
 import { resolveUiFeatureFlags } from "./feature-flags";
 import { serveSiteLogo, SITE_LOGO_PATH } from "./site-logo.js";
@@ -85,6 +87,9 @@ export { OverseerDurableObject, GatekeeperLoopback, GatekeeperHookLoopback,
 
 // Re-export service-binding entrypoint for external channel integrations.
 export { ExternalMessageGateway };
+
+// Re-export entrypoint type for Arya voice rooms.
+export { AryaCallRoom };
 
 // Declare optional environment variables here since they may be omitted from wrangler.jsonc.
 type Env = Cloudflare.Env & {
@@ -842,6 +847,10 @@ export default {
 
     if (url.pathname === "/api/client-errors") {
       return handleClientErrorRequest(req, env, ctx);
+    }
+
+    if (url.pathname.startsWith("/api/arya/")) {
+      return handleAryaVoiceRequest(req, env, ctx);
     }
 
     if (url.pathname === "/api") {

@@ -1109,6 +1109,12 @@
             "PendingLogin"
           ],
           "tag": "v2"
+        },
+        {
+          "new_sqlite_classes": [
+            "AryaCallRoom"
+          ],
+          "tag": "v3"
         }
       ],
       "modules": [
