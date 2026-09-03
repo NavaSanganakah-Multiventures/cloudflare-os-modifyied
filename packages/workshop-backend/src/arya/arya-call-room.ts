@@ -1,8 +1,11 @@
-import { DurableObject } from "cloudflare:workers";
+import { DurableObject, RpcStub } from "cloudflare:workers";
 import { createWorkshopLogger } from "../observability";
 import { isAuthorizedMember, verifyAryaToken } from "./arya-auth";
 import { createAryaAiSession, DEFAULT_ARYA_PERSONA } from "./arya-ai";
 import { AryaToolRegistry, geminiFunctionDeclarations } from "./arya-tools";
+import { AryaApprovalQueue } from "./arya-email";
+import type { AryaEmailSummary, AryaGmailSession, AryaGmailThread } from "./arya-email";
+import type { Gatekeeper } from "@gadgets/workshop-shared/gatekeeper";
 import type { AryaAiSession } from "./arya-ai";
 import type { AryaToolCall, AryaToolDefinition, AryaToolResult } from "./arya-tools";
 import type { AryaAiState, AryaClientMessage, AryaParticipantInfo, AryaServerMessage } from "./arya-types";
@@ -35,6 +38,12 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   // WebSockets keep this Durable Object from hibernating. If the owner is not connected (or never
   // responds), requestConfirmation resolves to "timeout" after CONFIRMATION_TIMEOUT_MS.
   private readonly pendingConfirmations = new Map<string, (decision: "approved" | "rejected" | "timeout") => void>();
+  // Lazy Gmail session for the owner, created on first email tool use. The session's ApprovalQueue
+  // routes send/reply confirmations through requestConfirmation(); cached thread stubs let
+  // reply_email reuse a thread listed by list_emails without re-fetching.
+  private gmailSession: AryaGmailSession | null = null;
+  private gmailGatekeeper: Fetcher<Gatekeeper<any>> | null = null;
+  private readonly gmailThreads = new Map<string, AryaGmailThread>();
   private readonly tools = new AryaToolRegistry({
     now: () => new Date(),
     voiceStatus: () => ({ state: this.aiState, backend: this.ai?.backend }),
@@ -58,6 +67,11 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     readNotifications: async () => {
       const user = this.ownerUser();
       return user ? await user.listNotifications() : [];
+    },
+    email: {
+      sendEmail: (to: string[], subject: string, body: string) => this.sendEmail(to, subject, body),
+      listEmails: (query?: string) => this.listEmails(query),
+      replyEmail: (threadId: string, body: string) => this.replyEmail(threadId, body),
     },
   });
 
@@ -416,6 +430,95 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
         error,
       });
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Email (Gmail gatekeeper). Lazy session creation + the three email tool operations.
+
+  private async ensureGmailSession(): Promise<AryaGmailSession | null> {
+    if (this.gmailSession) return this.gmailSession;
+    const user = this.ownerUser();
+    if (!user) return null;
+
+    let resolved: { class: DurableObjectClass<Gatekeeper<any>>; accountId: number } | null;
+    try {
+      resolved = await user.getAryaGmailGatekeeperClass();
+    } catch (error) {
+      logger.warn("failed to resolve owner gmail gatekeeper class", {
+        event: "arya.room.email.class.failed",
+        error,
+      });
+      return null;
+    }
+    if (!resolved) return null;
+
+    const gatekeeperClass = resolved.class;
+    const gatekeeper = this.ctx.facets.get(
+      `arya-gmail-${this.ownerId}`,
+      () => ({ class: gatekeeperClass }),
+    );
+    this.gmailGatekeeper = gatekeeper;
+
+    const approvalQueue = new AryaApprovalQueue(
+      gatekeeper,
+      (tool, summary) => this.requestConfirmation(tool, summary),
+    );
+    try {
+      this.gmailSession = (await gatekeeper.startSession(new RpcStub(approvalQueue))) as AryaGmailSession;
+    } catch (error) {
+      logger.warn("failed to start arya gmail session", {
+        event: "arya.room.email.session.start.failed",
+        error,
+      });
+      return null;
+    }
+    return this.gmailSession;
+  }
+
+  private async sendEmail(to: string[], subject: string, body: string): Promise<void> {
+    const session = await this.ensureGmailSession();
+    if (!session) throw new Error("You haven't connected a Gmail account. Connect Gmail in Settings first.");
+    await session.send(to, subject, body);
+  }
+
+  private async listEmails(query?: string): Promise<AryaEmailSummary[]> {
+    const session = await this.ensureGmailSession();
+    if (!session) throw new Error("You haven't connected a Gmail account. Connect Gmail in Settings first.");
+    const cursor = await (query ? session.search(query) : session.listThreads());
+    const page = await cursor.next();
+    if (!page) return [];
+    const summaries: AryaEmailSummary[] = [];
+    for (const entry of page) {
+      this.gmailThreads.set(entry.info.id, entry.thread);
+      summaries.push({ id: entry.info.id, subject: entry.info.subject, snippet: entry.info.snippet });
+    }
+    return summaries;
+  }
+
+  private async replyEmail(threadId: string, body: string): Promise<void> {
+    const session = await this.ensureGmailSession();
+    if (!session) throw new Error("You haven't connected a Gmail account. Connect Gmail in Settings first.");
+
+    let thread = this.gmailThreads.get(threadId) ?? null;
+    if (!thread) {
+      // Resolve a thread not seen in this call by paging the inbox.
+      const cursor = await session.listThreads();
+      let page = await cursor.next();
+      while (page) {
+        for (const entry of page) {
+          this.gmailThreads.set(entry.info.id, entry.thread);
+          if (entry.info.id === threadId) thread = entry.thread;
+        }
+        if (thread) break;
+        page = await cursor.next();
+      }
+    }
+    if (!thread) throw new Error("Couldn't find that email thread. Use list_emails first.");
+
+    const messages = await thread.messages();
+    if (messages.length === 0) throw new Error("That email thread has no messages to reply to.");
+    // Reply to the most recent message in the thread.
+    await messages[messages.length - 1].reply(body);
   }
 
   private peerInfo(participant: Participant): AryaParticipantInfo {
