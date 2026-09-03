@@ -181,18 +181,22 @@ describe("arya tool registry", () => {
   const makeRuntime = () => ({
     now: () => new Date("2026-01-01T00:00:00Z"),
     voiceStatus: () => ({ state: "listening" as const }),
+    mutations: {
+      setOwnerDisplayName: async (_name: string) => {},
+    },
   });
 
-  it("exposes the two read-only tools as gemini declarations", () => {
+  it("exposes the read-only and mutating tools as gemini declarations", () => {
     const registry = new AryaToolRegistry(makeRuntime());
     const names = registry.definitions().map((t) => t.name).toSorted();
-    expect(names).toEqual(["get_current_time", "get_voice_status"]);
+    expect(names).toEqual(["get_current_time", "get_voice_status", "update_display_name"]);
 
     const tools = geminiFunctionDeclarations(registry.definitions());
     const declarations = tools[0]["functionDeclarations"];
     expect(declarations?.map((d) => d.name).toSorted()).toEqual([
       "get_current_time",
       "get_voice_status",
+      "update_display_name",
     ]);
   });
 
