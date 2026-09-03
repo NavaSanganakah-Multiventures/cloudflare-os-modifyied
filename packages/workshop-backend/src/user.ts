@@ -298,6 +298,16 @@ async function checkGatekeeperVendorFilter(
 }
 
 // Durable Object that stores information about a user.
+/** Soonest due time (ms epoch) among reminders, or null when there are none. Used to arm the
+ * per-user reminder alarm so due reminders become notifications without a live voice call. */
+function nextReminderAlarmTime(reminders: Iterable<AryaReminder>): number | null {
+  let soonest: number | null = null;
+  for (const reminder of reminders) {
+    if (soonest === null || reminder.dueAt < soonest) soonest = reminder.dueAt;
+  }
+  return soonest;
+}
+
 export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   private storage: UserStorage;
   private vendors: Map<string, Service<GatekeeperVendor>>;
@@ -545,6 +555,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
       createdAt: Date.now(),
     };
     this.storage.reminders.put(reminder);
+    await this.scheduleNextReminderAlarm();
     return reminder;
   }
 
@@ -554,7 +565,9 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   async cancelReminder(id: string): Promise<boolean> {
-    return this.storage.reminders.delete(id);
+    const removed = this.storage.reminders.delete(id);
+    await this.scheduleNextReminderAlarm();
+    return removed;
   }
 
   /** Move due reminders into the notification inbox; returns how many were swept. */
@@ -595,6 +608,24 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
       }
     }
     return removed;
+  }
+
+  /** Schedule (or clear) the per-user reminder alarm for the soonest pending reminder. Background
+   * delivery relies on this alarm rather than a global cron sweep: each user DO wakes itself. */
+  private async scheduleNextReminderAlarm(): Promise<void> {
+    const soonest = nextReminderAlarmTime(this.storage.reminders.byDueAt.list());
+    if (soonest === null) {
+      await this.ctx.storage.deleteAlarm();
+    } else {
+      await this.ctx.storage.setAlarm(soonest);
+    }
+  }
+
+  /** Background reminder delivery: move due reminders into the notification inbox, then arm the
+   * next alarm for the soonest remaining reminder (or clear it when none remain). */
+  async alarm(): Promise<void> {
+    await this.sweepDueReminders(Date.now());
+    await this.scheduleNextReminderAlarm();
   }
 
   getAryaGeminiKey(): Promise<string | null> {
@@ -1914,16 +1945,22 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
    * account (with Gmail) is connected, or when an administrator has disabled Gmail. The first
    * Google account is used; multiple Google accounts are not currently distinguished.
    */
-  async getAryaGmailGatekeeperClass()
+  /**
+   * Resolve one of the owner's connected accounts to a gatekeeper DO class for the given resource
+   * URL, so the Arya voice assistant can act on the owner's behalf (Gmail, GitHub, ...). Uses the
+   * first connected account for the vendor. Returns null when no usable account is connected, or
+   * when an administrator has disabled the resource.
+   */
+  async getAryaGatekeeperClass(vendorId: string, url: string)
       : Promise<{ class: DurableObjectClass<Gatekeeper<any>>, accountId: number } | null> {
     for (const rec of this.#connectedAccountRecords()) {
-      if (rec.vendorId !== "google") continue;
+      if (rec.vendorId !== vendorId) continue;
       try {
-        const { class: cls } = await this.getGatekeeperClassFor(rec.id, "https://mail.google.com/mail/");
+        const { class: cls } = await this.getGatekeeperClassFor(rec.id, url);
         return { class: cls, accountId: rec.id };
       } catch (error) {
-        logger.warn("arya gmail: failed to resolve gatekeeper class for account", {
-          event: "arya.gmail.class.resolve.failed", accountId: rec.id, error,
+        logger.warn("arya: failed to resolve gatekeeper class for account", {
+          event: "arya.gatekeeper.class.resolve.failed", vendorId, accountId: rec.id, error,
         });
       }
     }
