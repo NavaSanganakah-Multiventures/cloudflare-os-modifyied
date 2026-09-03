@@ -12,7 +12,7 @@ interface __BaseEnv_Env {
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./.wrangler/validate/src/server");
-		durableNamespaces: "UserDurableObject" | "OverseerDurableObject" | "AdminSettings" | "PendingLogin";
+		durableNamespaces: "UserDurableObject" | "OverseerDurableObject" | "AdminSettings" | "PendingLogin" | "AryaCallRoom";
 	}
 	interface Env extends __BaseEnv_Env {}
 }
