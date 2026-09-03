@@ -30,6 +30,7 @@ import { verifyCfAccessJwt } from "./access.js";
 import { resolveUiFeatureFlags } from "./feature-flags";
 import { serveSiteLogo, SITE_LOGO_PATH } from "./site-logo.js";
 import { createWorkshopLogger } from "./observability";
+import { mintAryaToken } from "./arya/arya-auth";
 
 const logger = createWorkshopLogger("workshop.server");
 
@@ -146,6 +147,23 @@ class AuthenticatedApiImpl extends RpcTarget implements AuthenticatedApi {
   }
   hasPasswordLogin(): Promise<boolean> {
     return this.user.hasPasswordLogin();
+  }
+
+  async mintAryaVoiceToken(call: string): Promise<string> {
+    const profile = await this.user.whoami();
+    return mintAryaToken({ sub: profile.id, name: profile.name, call }, this.env);
+  }
+
+  getAryaGeminiKeyStatus(): Promise<{ set: boolean; masked: string | null }> {
+    return this.user.getAryaGeminiKeyStatus();
+  }
+
+  setAryaGeminiKey(key: string): Promise<void> {
+    return this.user.setAryaGeminiKey(key);
+  }
+
+  clearAryaGeminiKey(): Promise<void> {
+    return this.user.clearAryaGeminiKey();
   }
   listModels(): Promise<AiChatAuthorInfo[]> {
     return this.user.listModels();
