@@ -9,7 +9,7 @@ import { useAvatar, invalidateAvatarCache } from './useAvatar'
 import { compressAvatar, avatarBlobUrl } from './avatarUtils'
 import UsageSettings from './components/billing/UsageSettings'
 import { useDocumentTitle } from './useDocumentTitle'
-import AryaVoiceSection from './components/AryaVoiceSection'
+import AaryaVoiceSection from './components/AaryaVoiceSection'
 
 // Shared, on-language control classes (match the rest of the app: Workspaces/Blueprints headers,
 // the gatekeepers toolbar, the command palette). Kept here so the profile page reads as part of the
@@ -429,8 +429,8 @@ export default function SettingsPage() {
           </section>
         )}
 
-        {/* Arya Voice — Gemini API key for the voice assistant */}
-        <AryaVoiceSection />
+        {/* AARYA Voice — Gemini API key for the voice assistant */}
+        <AaryaVoiceSection />
       </div>
     </div>
   )
