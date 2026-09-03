@@ -21,10 +21,6 @@ interface Participant {
 export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   private readonly participants = new Map<string, Participant>();
 
-  constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
-    super(ctx, env);
-  }
-
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("Expected a WebSocket upgrade", { status: 426 });
