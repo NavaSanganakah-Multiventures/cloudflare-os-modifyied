@@ -14,7 +14,7 @@ import AppShell from '../components/AppShell/AppShell'
 import LoginPage from '../LoginPage'
 import OnboardingWizard from '../OnboardingWizard'
 import AccountSelectionModal from '../components/billing/AccountSelectionModal'
-import { AryaVoicePanel } from '../AryaVoicePanel'
+import { AaryaVoicePanel } from '../AaryaVoicePanel'
 
 export const Route = createRootRoute({
   component: RootComponent,
@@ -193,7 +193,7 @@ function AuthenticatedShell({
           <Outlet />
         </AppShell>
       )}
-      <AryaVoicePanel />
+      <AaryaVoicePanel />
     </>
   )
 }
