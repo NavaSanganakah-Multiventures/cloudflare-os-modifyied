@@ -116,6 +116,21 @@ function getBasePath(env: Env): string {
   return path === "/" ? "" : path;
 }
 
+// Extract the Firebase project ID from a Realtime Database instance hostname. Firebase serves
+// RTDB on the legacy `<projectId>-default-rtdb.firebaseio.com` form and the modern
+// `<projectId>-default-rtdb.<region>.firebasedatabase.app` form. Custom instance names are also
+// accepted; in that case the project ID cannot be derived, but the instance URL itself is what
+// the RTDB REST API uses.
+function firebaseProjectIdFromRtdbHostname(hostname: string): string {
+  let withoutTld = hostname.replace(/\.(firebaseio\.com|firebasedatabase\.app)$/, "");
+  let first = withoutTld.split(".")[0];
+  let projectId = first.replace(/-default-rtdb$/, "").replace(/-rtdb$/, "");
+  if (!projectId) {
+    throw new Error("Invalid Realtime Database URL: no project ID found");
+  }
+  return projectId;
+}
+
 // ---------------------------------------------------------------------------
 // OAuth scopes
 
@@ -146,6 +161,15 @@ function resourceUrlPatternsToScopes(
 ): string[] {
   if (!patterns || patterns.length === 0) {
     return ALL_SCOPES;
+  }
+  const knownPatterns = new Set([
+    FIREBASE_PROJECT_RESOURCE.urlPattern,
+    FIRESTORE_RESOURCE.urlPattern,
+    RTDB_RESOURCE.urlPattern,
+  ]);
+  const unknown = patterns.filter(p => !knownPatterns.has(p));
+  if (unknown.length > 0) {
+    throw new Error(`Unknown grantable resource URL pattern(s): ${unknown.join(", ")}`);
   }
   const scopes = new Set<string>(IDENTITY_SCOPES);
   for (const pattern of patterns) {
@@ -318,6 +342,7 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> implements Gatekeepe
       url: "https://firebase.google.com",
       logo: { url: FIREBASE_LOGO_URL },
       color: "#fff8e1",
+      providesAuth: true,
       tagline: "Query Firestore, read/write Realtime Database, and manage Firebase projects",
       description:
         "Connect your Google account to give Cloudflare OS access to Firebase. Build agents " +
@@ -391,6 +416,18 @@ export class UserAccount extends DurableObject<Env> {
     });
   }
 
+  // Prepare this account for a reconnect flow. The next acceptAuthCode() call replaces the
+  // existing credentials and notifies via credentialsRestored() instead of complete().
+  async prepareReconnect(initiationNonce: string, requestedScopes: string[]) {
+    this.ctx.storage.kv.put<boolean>("reconnecting", true);
+    this.ctx.storage.kv.put<string[]>("requestedScopes", requestedScopes);
+    this.ctx.storage.kv.put<StoredNonce>("nonce", {
+      value: initiationNonce,
+      expiresAt: Date.now() + INITIATION_NONCE_LIFETIME_MS,
+      stage: "initiation",
+    });
+  }
+
   // Begin the OAuth flow: consume the initiation nonce and generate the OAuth nonce + scopes.
   async beginOAuthFlow(
     initiationNonce: string,
@@ -421,36 +458,39 @@ export class UserAccount extends DurableObject<Env> {
     let env = this.env;
     if (!env.CLIENT_ID || !env.CLIENT_SECRET) return false;
 
-    try {
-      let grant = await this.#updateCredentials(() =>
-        exchangeAuthCode(code, env.CLIENT_ID!, env.CLIENT_SECRET!, getBaseUrl(env) + "/oauth"),
-      );
-      this.ctx.storage.kv.delete("nonce");
-      this.ctx.storage.kv.put<string>("refreshToken", grant.refreshToken);
-      this.ctx.storage.kv.put<string[]>("grantedScopes", grant.grantedScopes);
-      this.ctx.storage.deleteAlarm();
-
-      let ephemeral = this.ctx.storage.kv.get<boolean>("ephemeral") ?? false;
+    // Exchange the code and persist credentials under the credential mutex. The callbacks below
+    // are outbound RPCs that can re-enter this object, so they run after the mutex releases.
+    let completion = await this.#updateCredentials(async () => {
       let callback = this.ctx.storage.kv.get<Fetcher<GatekeeperConnectCallback>>("callback");
       if (!callback) {
         throw new Error("Authorization timed out. Please try again.");
       }
 
-      if (ephemeral) {
-        // Auth-only: extract email, then clean up.
-        try {
-          let email = await getVerifiedEmail(grant.accessToken);
-          if (email) {
-            await callback.complete(undefined, email);
-          }
-        } finally {
-          this.ctx.storage.deleteAll();
-        }
-        return true;
-      }
+      let grant = await exchangeAuthCode(code, env.CLIENT_ID!, env.CLIENT_SECRET!, getBaseUrl(env) + "/oauth");
+      this.ctx.storage.kv.delete("nonce");
+      this.ctx.storage.kv.put<string>("refreshToken", grant.refreshToken);
+      this.ctx.storage.kv.put<string[]>("grantedScopes", grant.grantedScopes);
+      this.ctx.storage.deleteAlarm();
 
+      let reconnecting = this.ctx.storage.kv.get<boolean>("reconnecting") ?? false;
+      if (reconnecting) this.ctx.storage.kv.delete("reconnecting");
+      return { callback, reconnecting };
+    });
+
+    let { callback, reconnecting } = completion;
+    if (reconnecting) {
+      await callback.credentialsRestored();
+      return true;
+    }
+
+    try {
       let props: FirebaseUserImplProps = { userObjectId: this.ctx.id.toString() };
       await callback.complete(this.ctx.exports.FirebaseUserImpl({ props }));
+      // Auth-only sign-in grants are transient: the caller reads the email through the returned
+      // user, so schedule a prompt self-destruct rather than wiping the credentials here.
+      if (this.ctx.storage.kv.get<boolean>("ephemeral")) {
+        this.ctx.storage.setAlarm(Date.now() + 2 * 60 * 1000);
+      }
       return true;
     } catch (err) {
       logger.error("failed to complete Firebase auth", { event: "auth.complete.failed", error: err });
@@ -518,9 +558,12 @@ export class UserAccount extends DurableObject<Env> {
   }
 
   async alarm() {
-    if (!this.ctx.storage.kv.get<string>("refreshToken")) {
-      this.ctx.storage.deleteAll();
-    }
+    await this.#updateCredentials(async () => {
+      if (!this.ctx.storage.kv.get<string>("refreshToken")
+          || this.ctx.storage.kv.get<boolean>("ephemeral")) {
+        this.ctx.storage.deleteAll();
+      }
+    });
   }
 }
 
@@ -548,6 +591,30 @@ export class FirebaseUserImpl extends WorkerEntrypoint<Env, FirebaseUserImplProp
     let id = this.ctx.exports.UserAccount.idFromString(this.ctx.props.userObjectId);
     let token = await this.ctx.exports.UserAccount.get(id).getAccessToken();
     return await getAccountDescription(token);
+  }
+
+  async getAuthenticatedEmail(): Promise<string | null> {
+    // Contract is Promise<string | null>: never throw. The access token fetch can fail if the
+    // (possibly transient sign-in) grant has been cleaned up, and the userinfo call can fail on
+    // a non-2xx response; treat any failure as "no email available".
+    try {
+      let id = this.ctx.exports.UserAccount.idFromString(this.ctx.props.userObjectId);
+      let token = await this.ctx.exports.UserAccount.get(id).getAccessToken();
+      if (!token) return null;
+      return await getVerifiedEmail(token);
+    } catch {
+      return null;
+    }
+  }
+
+  async reconnect(): Promise<{ url: string }> {
+    let id = this.ctx.exports.UserAccount.idFromString(this.ctx.props.userObjectId);
+    let account = this.ctx.exports.UserAccount.get(id);
+    let initiationNonce = generateNonce();
+    let grantedScopes = await account.getGrantedScopes();
+    let requestedScopes = grantedScopes.length > 0 ? grantedScopes : ALL_SCOPES;
+    await account.prepareReconnect(initiationNonce, requestedScopes);
+    return { url: `${getBaseUrl(this.env)}/${this.ctx.props.userObjectId}/${initiationNonce}` };
   }
 
   async getSupportedResources(): Promise<SupportedResource[]> {
@@ -612,8 +679,9 @@ export class FirebaseUserImpl extends WorkerEntrypoint<Env, FirebaseUserImplProp
       };
     }
 
-    if (parsed.hostname.endsWith(".firebaseio.com")) {
-      let projectId = parsed.hostname.replace(/\.firebaseio\.com$/, "").replace(/-default-rtdb$/, "");
+    if (parsed.hostname.endsWith(".firebaseio.com")
+        || parsed.hostname.endsWith(".firebasedatabase.app")) {
+      let projectId = firebaseProjectIdFromRtdbHostname(parsed.hostname);
       let instanceUrl = `${parsed.protocol}//${parsed.host}`;
       let props: FirebaseGatekeeperImplProps = {
         userObjectId: this.ctx.props.userObjectId,
@@ -772,9 +840,6 @@ export class FirebaseGatekeeperImpl extends DurableObject<Env, FirebaseGatekeepe
     }
 
     this.ctx.storage.kv.delete(`action:${actionId}`);
-    // Invalidate cache after action.
-    this.ctx.storage.kv.delete("firestoreCache");
-    this.ctx.storage.kv.delete("rtdbCache");
   }
 
   async rejectAction(actionId: number): Promise<void | { restart?: boolean }> {
