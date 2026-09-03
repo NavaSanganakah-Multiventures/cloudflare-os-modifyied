@@ -1908,6 +1908,28 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return account ? account.description : null;
   }
 
+  /**
+   * Resolve the owner's connected Google account to a full-mailbox Gmail gatekeeper DO class, so the
+   * Arya voice assistant can send email on the owner's behalf. Returns null when no usable Google
+   * account (with Gmail) is connected, or when an administrator has disabled Gmail. The first
+   * Google account is used; multiple Google accounts are not currently distinguished.
+   */
+  async getAryaGmailGatekeeperClass()
+      : Promise<{ class: DurableObjectClass<Gatekeeper<any>>, accountId: number } | null> {
+    for (const rec of this.#connectedAccountRecords()) {
+      if (rec.vendorId !== "google") continue;
+      try {
+        const { class: cls } = await this.getGatekeeperClassFor(rec.id, "https://mail.google.com/mail/");
+        return { class: cls, accountId: rec.id };
+      } catch (error) {
+        logger.warn("arya gmail: failed to resolve gatekeeper class for account", {
+          event: "arya.gmail.class.resolve.failed", accountId: rec.id, error,
+        });
+      }
+    }
+    return null;
+  }
+
 }
 
 type GatekeeperConnectCallbackProps = {
