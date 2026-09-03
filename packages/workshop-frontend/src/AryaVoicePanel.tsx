@@ -126,7 +126,7 @@ export function AryaVoicePanel() {
   }, [])
 
   const handleStopAi = useCallback(() => {
-    if (wsRef.current && wsRef.current.readyState !== WebSocket.OPEN) return
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
     wsRef.current.send(JSON.stringify({ type: 'ai-command', action: 'stop' }))
   }, [])
 
