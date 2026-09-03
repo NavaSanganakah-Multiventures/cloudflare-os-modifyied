@@ -4,7 +4,7 @@ import { isAuthorizedMember, verifyAryaToken } from "./arya-auth";
 import { createAryaAiSession } from "./arya-ai";
 import { AryaToolRegistry, geminiFunctionDeclarations } from "./arya-tools";
 import type { AryaAiSession } from "./arya-ai";
-import type { AryaToolCall, AryaToolResult } from "./arya-tools";
+import type { AryaToolCall, AryaToolDefinition, AryaToolResult } from "./arya-tools";
 import type { AryaAiState, AryaClientMessage, AryaParticipantInfo, AryaServerMessage } from "./arya-types";
 import type { UserDurableObject } from "../user";
 
@@ -28,9 +28,14 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
 
   private ai: AryaAiSession | null = null;
   private aiState: AryaAiState = "off";
+  private ownerId: string | null = null;
+  private readonly pendingConfirmations = new Map<string, (decision: "approved" | "rejected" | "timeout") => void>();
   private readonly tools = new AryaToolRegistry({
     now: () => new Date(),
     voiceStatus: () => ({ state: this.aiState, backend: this.ai?.backend }),
+    mutations: {
+      setOwnerDisplayName: (name: string) => this.setOwnerDisplayName(name),
+    },
   });
 
   async fetch(request: Request): Promise<Response> {
@@ -90,6 +95,9 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     const existingOwner = await this.ctx.storage.get<string>("ownerId");
     if (!existingOwner) {
       await this.ctx.storage.put("ownerId", participant.userId);
+      this.ownerId = participant.userId;
+    } else {
+      this.ownerId = existingOwner;
     }
 
     await this.ensureAi();
@@ -180,6 +188,14 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
           await this.stopAi();
         }
         return;
+      case "tool-confirmation-response": {
+        const resolve = this.pendingConfirmations.get(message.requestId);
+        if (resolve) {
+          this.pendingConfirmations.delete(message.requestId);
+          resolve(message.approved ? "approved" : "rejected");
+        }
+        return;
+      }
     }
   }
 
@@ -273,9 +289,75 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   private async executeToolCalls(calls: AryaToolCall[]): Promise<AryaToolResult[]> {
     const results: AryaToolResult[] = [];
     for (const call of calls) {
+      const tool = this.tools.find(call.name);
+      if (tool?.mutating) {
+        const decision = await this.requestConfirmation(call.name, this.summarizeToolCall(call, tool));
+        if (decision !== "approved") {
+          results.push({
+            id: call.id,
+            name: call.name,
+            response: {
+              ok: false,
+              error: decision === "timeout" ? "Confirmation timed out" : "User rejected the action",
+            },
+          });
+          continue;
+        }
+      }
       results.push(await this.tools.execute(call));
     }
     return results;
+  }
+
+  private summarizeToolCall(call: AryaToolCall, tool: AryaToolDefinition): string {
+    try {
+      return tool.summarize?.(call.args) ?? describeToolCall(call);
+    } catch {
+      return describeToolCall(call);
+    }
+  }
+
+  private requestConfirmation(tool: string, summary: string): Promise<"approved" | "rejected" | "timeout"> {
+    return new Promise((resolve) => {
+      const requestId = crypto.randomUUID();
+      const timer = setTimeout(() => {
+        if (this.pendingConfirmations.delete(requestId)) {
+          resolve("timeout");
+        }
+      }, CONFIRMATION_TIMEOUT_MS);
+      this.pendingConfirmations.set(requestId, (decision) => {
+        clearTimeout(timer);
+        resolve(decision);
+      });
+      this.sendToOwner({ type: "tool-confirmation-request", requestId, tool, summary });
+    });
+  }
+
+  private sendToOwner(message: AryaServerMessage): void {
+    const ownerId = this.ownerId;
+    if (!ownerId) {
+      this.broadcast(message);
+      return;
+    }
+    for (const participant of this.participants.values()) {
+      if (participant.userId === ownerId) {
+        this.send(participant, message);
+      }
+    }
+  }
+
+  private async setOwnerDisplayName(name: string): Promise<void> {
+    const ownerId = this.ownerId;
+    if (!ownerId) {
+      throw new Error("No owner is connected for this voice call.");
+    }
+    const userNs: DurableObjectNamespace<UserDurableObject> | undefined =
+      this.ctx.exports.UserDurableObject;
+    if (!userNs) {
+      throw new Error("User storage is not available to Arya.");
+    }
+    const userStub = userNs.get(userNs.idFromName(ownerId));
+    await userStub.setOwnDisplayName(name);
   }
 
   private peerInfo(participant: Participant): AryaParticipantInfo {
@@ -320,6 +402,12 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   }
 }
 
+const CONFIRMATION_TIMEOUT_MS = 30000;
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function describeToolCall(call: AryaToolCall): string {
+  return call.name + " " + JSON.stringify(call.args);
 }
