@@ -1,6 +1,5 @@
-// Read-only tool registry for the Arya voice assistant. PR 2 ships only side-effect-free tools so
-// the Gemini Live function-calling seam can be proven before mutating tools land behind a
-// confirmation gate in PR 4.
+// Tool registry for the Arya voice assistant. Read-only tools execute directly; mutating tools are
+// executed only after the room asks the user for confirmation (the confirmation gate).
 
 import type { AryaAiBackend, AryaAiState } from "./arya-types";
 
@@ -18,10 +17,17 @@ export interface AryaToolResult {
   response: unknown;
 }
 
-/** Runtime hooks the read-only tools are allowed to touch. */
+/** Mutating capabilities exposed to gated tools. Each call is user-confirmed before execution. */
+export interface AryaMutations {
+  /** Update the room owner's display name. */
+  setOwnerDisplayName(name: string): Promise<void>;
+}
+
+/** Runtime hooks tools can touch. */
 export interface AryaToolRuntime {
   now(): Date;
   voiceStatus(): { state: AryaAiState; backend?: AryaAiBackend };
+  mutations: AryaMutations;
 }
 
 /** A tool the Arya assistant can execute. */
@@ -29,6 +35,10 @@ export interface AryaToolDefinition {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
+  /** True when executing the tool changes external state and requires user confirmation. */
+  mutating?: boolean;
+  /** Human-readable summary of a pending call, shown in the confirmation prompt. */
+  summarize?: (args: Record<string, unknown>) => string;
   execute(args: Record<string, unknown>, runtime: AryaToolRuntime): unknown | Promise<unknown>;
 }
 
@@ -71,6 +81,27 @@ const DEFAULT_ARYA_TOOLS: AryaToolDefinition[] = [
     parameters: { type: "object", properties: {} },
     execute: (_args, runtime) => runtime.voiceStatus(),
   },
+  {
+    name: "update_display_name",
+    description:
+      "Change the caller's display name. Ask the caller what name they want before using this tool.",
+    parameters: {
+      type: "object",
+      properties: { name: { type: "string", description: "The new display name." } },
+      required: ["name"],
+    },
+    mutating: true,
+    summarize: (args) =>
+      typeof args.name === "string" && args.name.trim()
+        ? `Update your display name to "${args.name.trim()}"`
+        : "Update your display name",
+    execute: async (args, runtime) => {
+      const name = typeof args.name === "string" ? args.name.trim() : "";
+      if (!name) throw new Error("A non-empty display name is required.");
+      await runtime.mutations.setOwnerDisplayName(name);
+      return { name };
+    },
+  },
 ];
 
 function errorMessage(error: unknown): string {
@@ -98,12 +129,16 @@ export async function executeAryaTool(
   }
 }
 
-/** Registry that owns the built-in read-only tool set. */
+/** Registry that owns the built-in tool set. */
 export class AryaToolRegistry {
   constructor(private readonly runtime: AryaToolRuntime) {}
 
   definitions(): AryaToolDefinition[] {
     return DEFAULT_ARYA_TOOLS;
+  }
+
+  find(name: string): AryaToolDefinition | undefined {
+    return DEFAULT_ARYA_TOOLS.find((candidate) => candidate.name === name);
   }
 
   execute(call: AryaToolCall): Promise<AryaToolResult> {
