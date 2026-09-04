@@ -18,12 +18,19 @@ const FALLBACK_PERSONA =
   "You are AARYA, a friendly voice assistant for the user's workspace. " +
   "Answer concisely and conversationally, in the same language the user speaks.";
 
-/** Options for the simple energy-based voice-activity detector. */
+export const DEFAULT_AARYA_FALLBACK_STT = "@cf/openai/whisper-large-v3-turbo";
+export const LEGACY_AARYA_FALLBACK_STT = "@cf/openai/whisper";
+export const DEFAULT_AARYA_FALLBACK_TTS = "@cf/deepgram/aura-1";
+export const LEGACY_AARYA_FALLBACK_TTS = "@cf/myshell-ai/melotts";
+
+/** Options for the voice-activity detector. */
 export interface AaryaVadOptions {
   threshold?: number;
   silenceMs?: number;
   sampleRate?: number;
   frameMs?: number;
+  minSpeechMs?: number;
+  maxUtteranceMs?: number;
 }
 
 /** Result of running VAD over a buffer of PCM16 samples. */
@@ -38,20 +45,26 @@ export interface AaryaVadResult {
  * Detect whether an utterance has ended within the given samples.
  *
  * Frames the audio into fixed-size windows, computes per-frame RMS, and treats any frame at or
- * above `threshold` as speech. An utterance has ended when there is at least `silenceMs` of
- * trailing silence after the last speech frame.
+ * above `threshold` as speech. Filters out transients shorter than `minSpeechMs`. An utterance has
+ * ended when there is at least `silenceMs` of trailing silence after the last speech frame or
+ * when the utterance exceeds `maxUtteranceMs`.
  */
 export function detectUtteranceEnd(samples: Int16Array, options: AaryaVadOptions = {}): AaryaVadResult {
   const threshold = options.threshold ?? 0.01;
   const silenceMs = options.silenceMs ?? 700;
   const sampleRate = options.sampleRate ?? FALLBACK_SAMPLE_RATE;
   const frameMs = options.frameMs ?? 20;
+  const minSpeechMs = options.minSpeechMs ?? 100;
+  const maxUtteranceMs = options.maxUtteranceMs ?? 15000;
 
   const frameSamples = Math.max(1, Math.floor((sampleRate * frameMs) / 1000));
   const silenceSamples = Math.floor((sampleRate * silenceMs) / 1000);
+  const minSpeechSamples = Math.floor((sampleRate * minSpeechMs) / 1000);
+  const maxUtteranceSamples = Math.floor((sampleRate * maxUtteranceMs) / 1000);
 
   let peakRms = 0;
   let lastSpeechEndSample = -1;
+  let speechSamplesCount = 0;
 
   for (let start = 0; start < samples.length; start += frameSamples) {
     const end = Math.min(samples.length, start + frameSamples);
@@ -62,16 +75,22 @@ export function detectUtteranceEnd(samples: Int16Array, options: AaryaVadOptions
     }
     const rms = Math.sqrt(sumSquares / (end - start));
     if (rms > peakRms) peakRms = rms;
-    if (rms >= threshold) lastSpeechEndSample = end;
+    if (rms >= threshold) {
+      lastSpeechEndSample = end;
+      speechSamplesCount += end - start;
+    }
   }
 
-  if (lastSpeechEndSample < 0) {
+  if (lastSpeechEndSample < 0 || speechSamplesCount < minSpeechSamples) {
     return { hasSpeech: false, ended: false, speechEndSample: 0, peakRms };
   }
 
+  const trailingSilence = samples.length - lastSpeechEndSample;
+  const reachedMaxDuration = samples.length >= maxUtteranceSamples;
+
   return {
     hasSpeech: true,
-    ended: samples.length - lastSpeechEndSample >= silenceSamples,
+    ended: trailingSilence >= silenceSamples || reachedMaxDuration,
     speechEndSample: lastSpeechEndSample,
     peakRms,
   };
@@ -126,7 +145,7 @@ export function pcm16ToWavBytes(samples: Int16Array, sampleRate = FALLBACK_SAMPL
   return new Uint8Array(buffer);
 }
 
-/** Workers AI fallback session: STT -> LLM -> TTS pipeline driven by a simple VAD. */
+/** Workers AI fallback session: STT -> LLM -> TTS pipeline driven by an enhanced VAD. */
 export class AaryaWorkersAiFallback implements AaryaAiSession {
   readonly backend: AaryaAiBackend = "workers-ai";
 
@@ -157,6 +176,12 @@ export class AaryaWorkersAiFallback implements AaryaAiSession {
     const samples = int16FromBytes(new Uint8Array(chunk));
     if (samples.length === 0) return;
     this.buffer = concatInt16(this.buffer, samples);
+
+    // Bound buffer size to max 30s of audio to prevent unbounded memory growth during continuous noise.
+    const maxBufferSamples = 30 * FALLBACK_SAMPLE_RATE;
+    if (this.buffer.length > maxBufferSamples) {
+      this.buffer = this.buffer.slice(this.buffer.length - maxBufferSamples);
+    }
 
     const vad = detectUtteranceEnd(this.buffer);
     if (!vad.hasSpeech || !vad.ended || this.processing) return;
@@ -196,10 +221,31 @@ export class AaryaWorkersAiFallback implements AaryaAiSession {
 
   private async transcribe(samples: Int16Array): Promise<string> {
     const wav = pcm16ToWavBytes(samples);
-    const result = await this.env.WORKERS_AI.run("@cf/openai/whisper", {
-      audio: Array.from(wav),
-    });
-    return result.text.trim();
+    const sttModel = this.env.AARYA_WORKERS_AI_STT ?? DEFAULT_AARYA_FALLBACK_STT;
+    const audioData = Array.from(wav);
+
+    let result: Record<string, unknown> | null = null;
+    try {
+      result = (await this.env.WORKERS_AI.run(sttModel as any, {
+        audio: audioData,
+        vad_filter: true,
+      })) as Record<string, unknown>;
+    } catch (err) {
+      if (sttModel !== LEGACY_AARYA_FALLBACK_STT) {
+        logger.warn("primary STT failed, falling back to legacy whisper", {
+          event: "aarya.ai.fallback.stt.retry",
+          error: err,
+        });
+        result = (await this.env.WORKERS_AI.run(LEGACY_AARYA_FALLBACK_STT, {
+          audio: audioData,
+        })) as Record<string, unknown>;
+      } else {
+        throw err;
+      }
+    }
+
+    const text = result?.["text"];
+    return typeof text === "string" ? text.trim() : "";
   }
 
   private async complete(userText: string): Promise<string> {
@@ -217,14 +263,66 @@ export class AaryaWorkersAiFallback implements AaryaAiSession {
   }
 
   private async synthesize(text: string): Promise<ArrayBuffer | null> {
-    const result = await this.env.WORKERS_AI.run("@cf/myshell-ai/melotts", {
-      prompt: text,
-      lang: "en",
-    });
-    if (result instanceof Uint8Array) {
-      return toArrayBuffer(result);
+    const ttsModel = this.env.AARYA_WORKERS_AI_TTS ?? DEFAULT_AARYA_FALLBACK_TTS;
+    try {
+      if (ttsModel.includes("aura")) {
+        const result = (await this.env.WORKERS_AI.run(ttsModel as any, {
+          text,
+          sample_rate: 16000,
+        })) as unknown;
+
+        if (result instanceof Uint8Array) {
+          return toArrayBuffer(result);
+        }
+        if (result instanceof ArrayBuffer) {
+          return result;
+        }
+        if (result && typeof result === "object" && "audio" in result) {
+          const audio = (result as Record<string, unknown>).audio;
+          return typeof audio === "string"
+            ? base64ToBytes(audio)
+            : toArrayBuffer(audio as Uint8Array);
+        }
+      } else {
+        const result = (await this.env.WORKERS_AI.run(ttsModel as any, {
+          prompt: text,
+          lang: "en",
+        })) as unknown;
+
+        if (result instanceof Uint8Array) {
+          return toArrayBuffer(result);
+        }
+        if (result && typeof result === "object" && "audio" in result) {
+          const audio = (result as Record<string, unknown>).audio;
+          return typeof audio === "string" ? base64ToBytes(audio) : null;
+        }
+      }
+    } catch (error) {
+      logger.warn("primary TTS failed, attempting fallback to melotts", {
+        event: "aarya.ai.fallback.tts.retry",
+        error,
+      });
+      try {
+        const fallbackResult = (await this.env.WORKERS_AI.run(LEGACY_AARYA_FALLBACK_TTS, {
+          prompt: text,
+          lang: "en",
+        })) as unknown;
+        if (fallbackResult instanceof Uint8Array) {
+          return toArrayBuffer(fallbackResult);
+        }
+        if (fallbackResult && typeof fallbackResult === "object" && "audio" in fallbackResult) {
+          const audio = (fallbackResult as Record<string, unknown>).audio;
+          return typeof audio === "string" ? base64ToBytes(audio) : null;
+        }
+      } catch (fallbackError) {
+        logger.warn("all fallback TTS attempts failed", {
+          event: "aarya.ai.fallback.tts.failed",
+          error: fallbackError,
+        });
+        return null;
+      }
     }
-    return base64ToBytes(result.audio);
+    return null;
   }
 
   private emitStatus(state: AaryaAiState, detail?: string): void {

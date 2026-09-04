@@ -85,8 +85,6 @@ export function buildGeminiSetup(options: GeminiSetupOptions, tools: GeminiTool[
     systemInstruction: {
       parts: [{ text: options.systemPrompt ?? DEFAULT_AARYA_PERSONA }],
     },
-    inputAudioTranscription: {},
-    outputAudioTranscription: {},
   };
   if (tools.length > 0) {
     setup["tools"] = tools;
@@ -232,7 +230,7 @@ export function buildGeminiToolResponse(results: AaryaToolResult[]): Record<stri
   };
 }
 
-/** Factory: pick Gemini Live when a key is configured, else Workers AI fallback. */
+/** Factory: pick Gemini Live with automatic Workers AI fallback when a key is configured, else Workers AI fallback directly. */
 export function createAaryaAiSession(
   env: Cloudflare.Env,
   callbacks: AaryaAiCallbacks,
@@ -242,7 +240,7 @@ export function createAaryaAiSession(
 ): AaryaAiSession {
   const key = geminiKey ?? env.AARYA_GEMINI_API_KEY;
   if (key) {
-    return new AaryaLiveBridge(env, callbacks, tools, key, systemPrompt);
+    return new AaryaResilientAiSession(env, callbacks, tools, key, systemPrompt);
   }
   return new AaryaWorkersAiFallback(env, callbacks, systemPrompt);
 }
@@ -291,7 +289,7 @@ async function connectGeminiLiveSocket(url: string): Promise<WebSocket> {
 }
 
 /** Gemini Live bridge: bidirectional WebSocket to Google's BidiGenerateContent endpoint. */
-class AaryaLiveBridge implements AaryaAiSession {
+export class AaryaLiveBridge implements AaryaAiSession {
   readonly backend: AaryaAiBackend = "gemini";
   private ws: WebSocket | null = null;
   private intentionallyStopped = false;
@@ -472,3 +470,97 @@ class AaryaLiveBridge implements AaryaAiSession {
     this.callbacks.onStatus({ state, backend: this.backend, detail });
   }
 }
+
+/** Resilient AI session: attempts Gemini Live first, automatically falling back to Workers AI on failure. */
+export class AaryaResilientAiSession implements AaryaAiSession {
+  private activeSession: AaryaAiSession;
+  private hasFallenBack = false;
+
+  constructor(
+    private readonly env: Cloudflare.Env,
+    private readonly callbacks: AaryaAiCallbacks,
+    private readonly tools: GeminiTool[] = [],
+    private readonly geminiKey: string,
+    private readonly systemPrompt?: string,
+  ) {
+    this.activeSession = new AaryaLiveBridge(
+      env,
+      {
+        ...callbacks,
+        onStatus: (status) => {
+          if (status.state === "error" && !this.hasFallenBack) {
+            logger.warn("Gemini Live session reported error, initiating Workers AI fallback", {
+              event: "aarya.ai.resilient.fallback_on_error",
+              detail: status.detail,
+            });
+            void this.switchToFallback(status.detail);
+            return;
+          }
+          callbacks.onStatus(status);
+        },
+      },
+      tools,
+      geminiKey,
+      systemPrompt,
+    );
+  }
+
+  get backend(): AaryaAiBackend {
+    return this.activeSession.backend;
+  }
+
+  async start(): Promise<void> {
+    try {
+      await this.activeSession.start();
+    } catch (error) {
+      logger.warn("Gemini Live start failed, falling back to Workers AI", {
+        event: "aarya.ai.resilient.start_failed_fallback",
+        error,
+      });
+      await this.switchToFallback(errorMessage(error));
+    }
+  }
+
+  async stop(): Promise<void> {
+    await this.activeSession.stop();
+  }
+
+  async handleAudioChunk(chunk: ArrayBuffer): Promise<void> {
+    await this.activeSession.handleAudioChunk(chunk);
+  }
+
+  private async switchToFallback(reason?: string): Promise<void> {
+    if (this.hasFallenBack) return;
+    this.hasFallenBack = true;
+
+    try {
+      await this.activeSession.stop();
+    } catch {
+      // Ignore stop errors on failed session.
+    }
+
+    const fallback = new AaryaWorkersAiFallback(this.env, this.callbacks, this.systemPrompt);
+    this.activeSession = fallback;
+
+    this.callbacks.onStatus({
+      state: "connecting",
+      backend: "workers-ai",
+      detail: reason ? "Falling back to Workers AI: " + reason : "Falling back to Workers AI",
+    });
+
+    try {
+      await fallback.start();
+    } catch (error) {
+      logger.error("Workers AI fallback failed to start", {
+        event: "aarya.ai.resilient.fallback_start_failed",
+        error,
+      });
+      this.callbacks.onStatus({
+        state: "error",
+        backend: "workers-ai",
+        detail: errorMessage(error),
+      });
+    }
+  }
+}
+

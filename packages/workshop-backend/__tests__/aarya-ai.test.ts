@@ -5,6 +5,7 @@ import {
   buildGeminiAudioInput,
   buildGeminiSetup,
   buildGeminiToolResponse,
+  createAaryaAiSession,
   DEFAULT_AARYA_GEMINI_MODEL,
   parseGeminiServerMessage,
   pcm16ToBase64,
@@ -23,7 +24,7 @@ function loudSamples(count: number): Int16Array {
 }
 
 describe("gemini wire helpers", () => {
-  it("builds a setup message with generationConfig.responseModalities and transcription configs", () => {
+  it("builds a setup message with generationConfig.responseModalities and systemInstruction", () => {
     const setup = buildGeminiSetup(
       { model: "models/test-live", systemPrompt: "You are a test assistant." },
       [
@@ -43,8 +44,6 @@ describe("gemini wire helpers", () => {
     expect(body["systemInstruction"]).toEqual({
       parts: [{ text: "You are a test assistant." }],
     });
-    expect(body["inputAudioTranscription"]).toEqual({});
-    expect(body["outputAudioTranscription"]).toEqual({});
 
     expect(Array.isArray(body["tools"])).toBe(true);
     const tools = body["tools"] as Array<Record<string, unknown>>;
@@ -156,6 +155,20 @@ describe("workers-ai fallback VAD", () => {
     samples.set(silence, loud.length);
     expect(utteranceEnded(samples)).toBe(false);
   });
+
+  it("filters out short transient spikes below minSpeechMs", () => {
+    const click = loudSamples(400); // 25ms at 16kHz, below default 100ms
+    const result = detectUtteranceEnd(click);
+    expect(result.hasSpeech).toBe(false);
+    expect(result.ended).toBe(false);
+  });
+
+  it("forces utterance end when exceeding maxUtteranceMs", () => {
+    const longSpeech = loudSamples(32000); // 2 seconds
+    const result = detectUtteranceEnd(longSpeech, { maxUtteranceMs: 1000 });
+    expect(result.hasSpeech).toBe(true);
+    expect(result.ended).toBe(true);
+  });
 });
 
 describe("pcm16 to WAV", () => {
@@ -249,3 +262,34 @@ describe("aarya tool registry", () => {
     expect(result.response).toMatchObject({ ok: false });
   });
 });
+
+describe("aarya ai session factory", () => {
+  it("creates a resilient session when gemini key is provided", () => {
+    const session = createAaryaAiSession(
+      {} as Cloudflare.Env,
+      {
+        onAudio: () => {},
+        onTranscript: () => {},
+        onStatus: () => {},
+        onToolCalls: async () => [],
+      },
+      [],
+      "test-key",
+    );
+    expect(session.backend).toBe("gemini");
+  });
+
+  it("creates workers-ai fallback directly when no gemini key is provided", () => {
+    const session = createAaryaAiSession(
+      {} as Cloudflare.Env,
+      {
+        onAudio: () => {},
+        onTranscript: () => {},
+        onStatus: () => {},
+        onToolCalls: async () => [],
+      },
+    );
+    expect(session.backend).toBe("workers-ai");
+  });
+});
+
