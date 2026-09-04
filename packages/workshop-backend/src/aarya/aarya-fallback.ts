@@ -18,6 +18,13 @@ const FALLBACK_PERSONA =
   "You are AARYA, a friendly voice assistant for the user's workspace. " +
   "Answer concisely and conversationally, in the same language the user speaks.";
 
+/**
+ * Minimum utterance length (in PCM16 samples at 16kHz) that we will send to whisper STT.
+ * Shorter buffers yield degenerate mel/VAD input and make whisper's Triton backend fail with
+ * "could not broadcast input array from shape (0,) into shape (0,2)".
+ */
+const MIN_TRANSCRIBE_SAMPLES = Math.floor(0.5 * FALLBACK_SAMPLE_RATE); // 8000 = 0.5s
+
 export const DEFAULT_AARYA_FALLBACK_STT = "@cf/openai/whisper-large-v3-turbo";
 export const LEGACY_AARYA_FALLBACK_STT = "@cf/openai/whisper";
 export const DEFAULT_AARYA_FALLBACK_TTS = "@cf/deepgram/aura-1";
@@ -99,6 +106,11 @@ export function detectUtteranceEnd(samples: Int16Array, options: AaryaVadOptions
 /** Convenience wrapper: true when VAD detects speech followed by enough trailing silence. */
 export function utteranceEnded(samples: Int16Array, options: AaryaVadOptions = {}): boolean {
   return detectUtteranceEnd(samples, options).ended;
+}
+
+/** True when an utterance is long enough to be worth sending to the STT model. */
+export function shouldTranscribe(samples: Int16Array): boolean {
+  return samples.length >= MIN_TRANSCRIBE_SAMPLES;
 }
 
 /** Interpret raw little-endian PCM16 bytes as an Int16Array. */
@@ -189,6 +201,15 @@ export class AaryaWorkersAiFallback implements AaryaAiSession {
     const utterance = this.buffer.slice(0, vad.speechEndSample);
     this.buffer = this.buffer.slice(vad.speechEndSample);
     if (utterance.length === 0) return;
+    if (!shouldTranscribe(utterance)) {
+      // Too short to transcribe reliably; sending it to whisper produces an empty VAD segment
+      // set and crashes the Triton backend. Drop it and keep listening.
+      logger.debug("dropping too-short aarya utterance", {
+        event: "aarya.ai.fallback.utterance.too_short",
+        samples: utterance.length,
+      });
+      return;
+    }
 
     this.processing = true;
     try {
@@ -220,6 +241,8 @@ export class AaryaWorkersAiFallback implements AaryaAiSession {
   }
 
   private async transcribe(samples: Int16Array): Promise<string> {
+    if (!shouldTranscribe(samples)) return "";
+
     const wav = pcm16ToWavBytes(samples);
     const sttModel = this.env.AARYA_WORKERS_AI_STT ?? DEFAULT_AARYA_FALLBACK_STT;
     const audioData = Array.from(wav);
@@ -231,6 +254,16 @@ export class AaryaWorkersAiFallback implements AaryaAiSession {
         vad_filter: true,
       })) as unknown as Record<string, unknown>;
     } catch (err) {
+      // Whisper's Triton backend throws this when VAD finds no speech segments (e.g. a
+      // noise-only or otherwise empty utterance). Treat it as "no speech" rather than failing
+      // the whole session, and do not retry: the legacy model would hit the same empty input.
+      if (isEmptyVadWhisperError(err)) {
+        logger.warn("whisper found no speech segments in utterance", {
+          event: "aarya.ai.fallback.stt.empty",
+          error: err,
+        });
+        return "";
+      }
       if (sttModel !== LEGACY_AARYA_FALLBACK_STT) {
         logger.warn("primary STT failed, falling back to legacy whisper", {
           event: "aarya.ai.fallback.stt.retry",
@@ -351,4 +384,10 @@ function base64ToBytes(base64: string): ArrayBuffer {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** True when the error is whisper/Triton's empty-VAD crash (no speech segments were found). */
+function isEmptyVadWhisperError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("could not broadcast input array") || message.includes("shape (0,)");
 }
