@@ -376,7 +376,16 @@ class AaryaLiveBridge implements AaryaAiSession {
         },
         this.tools,
       );
-      logger.debug("gemini live setup: " + JSON.stringify(setupMessage), {
+      // Redact the setup log so the system prompt text is never written to logs.
+      const modelForLog = (this.env.AARYA_GEMINI_MODEL ?? "").trim() || DEFAULT_AARYA_GEMINI_MODEL;
+      const setupForLog =
+        "model=" +
+        modelForLog +
+        " tools=" +
+        this.tools.length +
+        " systemPromptChars=" +
+        (this.systemPrompt ?? this.env.AARYA_GEMINI_SYSTEM_PROMPT ?? "").length;
+      logger.debug("gemini live setup: " + setupForLog, {
         event: "aarya.ai.gemini.setup",
       });
       ws.send(JSON.stringify(setupMessage));
@@ -431,10 +440,12 @@ class AaryaLiveBridge implements AaryaAiSession {
   private async handleServerMessage(data: unknown): Promise<void> {
     const parsed = parseGeminiServerMessage(data);
     if (parsed.errorDetail) {
+      this.clearSetupCompleteTimer();
       this.emitStatus("error", parsed.errorDetail);
       return;
     }
     if (parsed.goAwayDetail) {
+      this.clearSetupCompleteTimer();
       this.emitStatus("error", "Gemini Live is closing the session (time left: " + parsed.goAwayDetail + ")");
       return;
     }
