@@ -30,6 +30,9 @@ interface Participant {
  * participant. The Gemini Live / Workers AI bridge joins as a server-side participant behind this
  * same relay: human audio is forwarded to the AI, and AI audio is broadcast back to every human.
  */
+// NOTE: The class name `AryaCallRoom` (single "A") is FROZEN — it is referenced by
+// worker-configuration.d.ts (`durableNamespaces`) and scripts/testdata/golden-manifest.json.
+// Do NOT rename this class to `AaryaCallRoom`.
 export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   private readonly participants = new Map<string, Participant>();
 
