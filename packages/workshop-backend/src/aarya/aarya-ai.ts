@@ -491,7 +491,7 @@ export class AaryaResilientAiSession implements AaryaAiSession {
           if (status.state === "error" && !this.hasFallenBack) {
             logger.warn("Gemini Live session reported error, initiating Workers AI fallback", {
               event: "aarya.ai.resilient.fallback_on_error",
-              detail: status.detail,
+              error: status.detail,
             });
             void this.switchToFallback(status.detail);
             return;

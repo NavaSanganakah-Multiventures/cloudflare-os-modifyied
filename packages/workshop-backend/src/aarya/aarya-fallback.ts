@@ -229,7 +229,7 @@ export class AaryaWorkersAiFallback implements AaryaAiSession {
       result = (await this.env.WORKERS_AI.run(sttModel as any, {
         audio: audioData,
         vad_filter: true,
-      })) as Record<string, unknown>;
+      })) as unknown as Record<string, unknown>;
     } catch (err) {
       if (sttModel !== LEGACY_AARYA_FALLBACK_STT) {
         logger.warn("primary STT failed, falling back to legacy whisper", {
@@ -238,7 +238,7 @@ export class AaryaWorkersAiFallback implements AaryaAiSession {
         });
         result = (await this.env.WORKERS_AI.run(LEGACY_AARYA_FALLBACK_STT, {
           audio: audioData,
-        })) as Record<string, unknown>;
+        })) as unknown as Record<string, unknown>;
       } else {
         throw err;
       }
