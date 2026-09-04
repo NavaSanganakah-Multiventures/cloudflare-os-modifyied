@@ -89,6 +89,11 @@ export { OverseerDurableObject, GatekeeperLoopback, GatekeeperHookLoopback,
 // Re-export service-binding entrypoint for external channel integrations.
 export { ExternalMessageGateway };
 
+/**
+ * NOTE: The `AryaCallRoom` durable-object class name is intentionally frozen with a single "A".
+ * It is baked into `packages/workshop-backend/worker-configuration.d.ts` (`durableNamespaces`) and
+ * `scripts/testdata/golden-manifest.json` (release-manifest golden test). Do NOT rename it to `AaryaCallRoom`.
+ */
 // Re-export entrypoint type for Aarya voice rooms.
 export { AryaCallRoom };
 
