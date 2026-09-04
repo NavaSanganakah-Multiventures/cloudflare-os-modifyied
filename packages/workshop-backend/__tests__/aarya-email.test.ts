@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { RpcTarget } from "cloudflare:workers";
 
-import { AryaApprovalQueue, normalizeSendEmailArgs } from "../src/arya/arya-email";
+import { AaryaApprovalQueue, normalizeSendEmailArgs } from "../src/aarya/aarya-email";
 import type { Gatekeeper, HookController } from "@gadgets/workshop-shared/gatekeeper";
 
 describe("normalizeSendEmailArgs", () => {
@@ -45,16 +45,16 @@ function makeMockGatekeeper() {
 
 const SEND_DESC = { title: "Send: Hi", description: "**To:** a@b.com", implementsRevert: false };
 
-describe("AryaApprovalQueue", () => {
+describe("AaryaApprovalQueue", () => {
   it("auto-approves observations of the owner's own mailbox", async () => {
     const { gatekeeper } = makeMockGatekeeper();
-    const queue = new AryaApprovalQueue(gatekeeper, async () => "rejected");
+    const queue = new AaryaApprovalQueue(gatekeeper, async () => "rejected");
     await expect(queue.authorizeObservation({ title: "t", description: "d" })).resolves.toBeUndefined();
   });
 
   it("applies the action when the owner approves", async () => {
     const { gatekeeper, calls } = makeMockGatekeeper();
-    const queue = new AryaApprovalQueue(gatekeeper, async () => "approved");
+    const queue = new AaryaApprovalQueue(gatekeeper, async () => "approved");
     await queue.submitAction(7, SEND_DESC);
     expect(calls.apply).toEqual([7]);
     expect(calls.reject).toEqual([]);
@@ -62,7 +62,7 @@ describe("AryaApprovalQueue", () => {
 
   it("rejects the action and throws when the owner denies", async () => {
     const { gatekeeper, calls } = makeMockGatekeeper();
-    const queue = new AryaApprovalQueue(gatekeeper, async () => "rejected");
+    const queue = new AaryaApprovalQueue(gatekeeper, async () => "rejected");
     await expect(queue.submitAction(3, SEND_DESC)).rejects.toThrow(/rejected/i);
     expect(calls.reject).toEqual([3]);
     expect(calls.apply).toEqual([]);
@@ -70,7 +70,7 @@ describe("AryaApprovalQueue", () => {
 
   it("throws a timeout error and rejects the pending action", async () => {
     const { gatekeeper, calls } = makeMockGatekeeper();
-    const queue = new AryaApprovalQueue(gatekeeper, async () => "timeout");
+    const queue = new AaryaApprovalQueue(gatekeeper, async () => "timeout");
     await expect(queue.submitAction(1, SEND_DESC)).rejects.toThrow(/timed out/i);
     expect(calls.apply).toEqual([]);
     expect(calls.reject).toEqual([1]);
@@ -79,14 +79,14 @@ describe("AryaApprovalQueue", () => {
   it("forwards the action title and description to the confirmation callback", async () => {
     const { gatekeeper } = makeMockGatekeeper();
     const confirm = vi.fn(async () => "approved");
-    const queue = new AryaApprovalQueue(gatekeeper, confirm);
+    const queue = new AaryaApprovalQueue(gatekeeper, confirm);
     await queue.submitAction(9, SEND_DESC);
     expect(confirm).toHaveBeenCalledWith("Send: Hi", "**To:** a@b.com");
   });
 
   it("does not support binding hooks", async () => {
     const { gatekeeper } = makeMockGatekeeper();
-    const queue = new AryaApprovalQueue(gatekeeper, async () => "approved");
+    const queue = new AaryaApprovalQueue(gatekeeper, async () => "approved");
     await expect(
       queue.bindHook(
         null as unknown as Fetcher<HookController<RpcTarget>>,

@@ -1,6 +1,6 @@
-// Email support for the Arya voice assistant. Arya sends mail through the owner's connected
+// Email support for the Aarya voice assistant. Aarya sends mail through the owner's connected
 // Google/Gmail gatekeeper: the Gmail gatekeeper's mutating operations call submitAction() on an
-// AryaApprovalQueue, which routes the action through Arya's live voice-call confirmation gate, then
+// AaryaApprovalQueue, which routes the action through Aarya's live voice-call confirmation gate, then
 // calls the gatekeeper's applyAction() to actually send the email. Reads (authorizeObservation)
 // are auto-approved — the owner is reading their own mailbox.
 
@@ -14,11 +14,11 @@ import type {
   ObservationDescription,
 } from "@gadgets/workshop-shared/gatekeeper";
 
-/** A decision returned by Arya's confirmation gate. */
-export type AryaConfirmationDecision = "approved" | "rejected" | "timeout";
+/** A decision returned by Aarya's confirmation gate. */
+export type AaryaConfirmationDecision = "approved" | "rejected" | "timeout";
 
 /**
- * Routes Gmail gatekeeper actions through Arya's live voice-call confirmation gate.
+ * Routes Gmail gatekeeper actions through Aarya's live voice-call confirmation gate.
  *
  * The Gmail session's mutating operations (send / reply / forward) call submitAction() on this
  * queue. We ask the room owner to approve, then call the gatekeeper's applyAction() to actually
@@ -28,10 +28,10 @@ export type AryaConfirmationDecision = "approved" | "rejected" | "timeout";
  * This makes the single confirmation the owner sees for an email show the rich outbound message
  * (From / To / Subject / Body) produced by the gatekeeper, rather than a generic tool summary.
  */
-export class AryaApprovalQueue extends RpcTarget implements ApprovalQueue {
+export class AaryaApprovalQueue extends RpcTarget implements ApprovalQueue {
   constructor(
     private readonly gatekeeper: Fetcher<Gatekeeper<any>>,
-    private readonly requestConfirmation: (tool: string, summary: string) => Promise<AryaConfirmationDecision>,
+    private readonly requestConfirmation: (tool: string, summary: string) => Promise<AaryaConfirmationDecision>,
   ) {
     super();
   }
@@ -62,45 +62,45 @@ export class AryaApprovalQueue extends RpcTarget implements ApprovalQueue {
     _callback: RpcStub<Hook>,
     _description: HookDescription,
   ): Promise<void> {
-    return Promise.reject(new Error("Arya does not support hooks from a voice call."));
+    return Promise.reject(new Error("AARYA does not support hooks from a voice call."));
   }
 }
 
 // ---------------------------------------------------------------------------
-// Minimal shapes of the Gmail gatekeeper session Arya uses. The full types live in the
+// Minimal shapes of the Gmail gatekeeper session Aarya uses. The full types live in the
 // gatekeeper-google package (surfaced to agents via getTypeScriptTypes()); we only need a handful
 // of methods here, and the session is returned to us as `any` (Gatekeeper<any>).
 
 /** One thread returned by a Gmail cursor page. */
-export interface AryaGmailThreadEntry {
+export interface AaryaGmailThreadEntry {
   info: { id: string; subject: string; snippet?: string };
-  thread: AryaGmailThread;
+  thread: AaryaGmailThread;
 }
 
 /** A page cursor over Gmail threads. */
-export interface AryaGmailCursor {
-  next(): Promise<AryaGmailThreadEntry[] | null>;
+export interface AaryaGmailCursor {
+  next(): Promise<AaryaGmailThreadEntry[] | null>;
 }
 
 /** A single Gmail message capability. */
-export interface AryaGmailMessage {
+export interface AaryaGmailMessage {
   reply(body: string): Promise<void>;
 }
 
 /** A Gmail thread capability. */
-export interface AryaGmailThread {
-  messages(): Promise<AryaGmailMessage[]>;
+export interface AaryaGmailThread {
+  messages(): Promise<AaryaGmailMessage[]>;
 }
 
-/** The subset of the Gmail session Arya uses. */
-export interface AryaGmailSession {
+/** The subset of the Gmail session Aarya uses. */
+export interface AaryaGmailSession {
   send(to: string[], subject: string, body: string): Promise<void>;
-  listThreads(): Promise<AryaGmailCursor>;
-  search(query: string): Promise<AryaGmailCursor>;
+  listThreads(): Promise<AaryaGmailCursor>;
+  search(query: string): Promise<AaryaGmailCursor>;
 }
 
 /** A recent email thread, for display to the model and reuse by reply_email. */
-export interface AryaEmailSummary {
+export interface AaryaEmailSummary {
   id: string;
   subject: string;
   snippet?: string;

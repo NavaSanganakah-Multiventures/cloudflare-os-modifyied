@@ -1,21 +1,21 @@
 import { DurableObject } from "cloudflare:workers";
 import { createWorkshopLogger } from "../observability";
-import { isAuthorizedMember, verifyAryaToken } from "./arya-auth";
-import { createAryaAiSession, DEFAULT_ARYA_PERSONA } from "./arya-ai";
-import { AryaToolRegistry, geminiFunctionDeclarations } from "./arya-tools";
-import { AryaApprovalQueue } from "./arya-email";
-import type { AryaEmailSummary, AryaGmailSession, AryaGmailThread } from "./arya-email";
-import { summarizePrDiff } from "./arya-github";
-import type { AryaGithubPrReadResult, AryaGithubPrSummary, AryaGithubRepoSession, AryaReviewDecision } from "./arya-github";
+import { isAuthorizedMember, verifyAaryaToken } from "./aarya-auth";
+import { createAaryaAiSession, DEFAULT_AARYA_PERSONA } from "./aarya-ai";
+import { AaryaToolRegistry, geminiFunctionDeclarations } from "./aarya-tools";
+import { AaryaApprovalQueue } from "./aarya-email";
+import type { AaryaEmailSummary, AaryaGmailSession, AaryaGmailThread } from "./aarya-email";
+import { summarizePrDiff } from "./aarya-github";
+import type { AaryaGithubPrReadResult, AaryaGithubPrSummary, AaryaGithubRepoSession, AaryaReviewDecision } from "./aarya-github";
 import type { Gatekeeper } from "@gadgets/workshop-shared/gatekeeper";
-import type { AryaAiSession } from "./arya-ai";
-import type { AryaToolCall, AryaToolDefinition, AryaToolResult } from "./arya-tools";
-import type { AryaAiState, AryaClientMessage, AryaParticipantInfo, AryaServerMessage } from "./arya-types";
-import { buildNotificationsHint } from "./arya-reminders";
-import type { AryaNotification } from "./arya-reminders";
+import type { AaryaAiSession } from "./aarya-ai";
+import type { AaryaToolCall, AaryaToolDefinition, AaryaToolResult } from "./aarya-tools";
+import type { AaryaAiState, AaryaClientMessage, AaryaParticipantInfo, AaryaServerMessage } from "./aarya-types";
+import { buildNotificationsHint } from "./aarya-reminders";
+import type { AaryaNotification } from "./aarya-reminders";
 import type { UserDurableObject } from "../user";
 
-const logger = createWorkshopLogger("workshop.arya.room");
+const logger = createWorkshopLogger("workshop.aarya.room");
 
 interface Participant {
   id: string;
@@ -25,16 +25,19 @@ interface Participant {
 }
 
 /**
- * One Arya voice call. Participants connect over /api/arya/ws; the room verifies each token, keeps
+ * One Aarya voice call. Participants connect over /api/aarya/ws; the room verifies each token, keeps
  * the live participant set, relays JSON signaling, and relays binary audio frames to every other
  * participant. The Gemini Live / Workers AI bridge joins as a server-side participant behind this
  * same relay: human audio is forwarded to the AI, and AI audio is broadcast back to every human.
  */
+// NOTE: The class name `AryaCallRoom` (single "A") is FROZEN — it is referenced by
+// worker-configuration.d.ts (`durableNamespaces`) and scripts/testdata/golden-manifest.json.
+// Do NOT rename this class to `AaryaCallRoom`.
 export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   private readonly participants = new Map<string, Participant>();
 
-  private ai: AryaAiSession | null = null;
-  private aiState: AryaAiState = "off";
+  private ai: AaryaAiSession | null = null;
+  private aiState: AaryaAiState = "off";
   private ownerId: string | null = null;
   // In-memory is safe here: a confirmation only exists during a live call, and the call's open
   // WebSockets keep this Durable Object from hibernating. If the owner is not connected (or never
@@ -43,10 +46,10 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   // Lazy Gmail session for the owner, created on first email tool use. The session's ApprovalQueue
   // routes send/reply confirmations through requestConfirmation(); cached thread stubs let
   // reply_email reuse a thread listed by list_emails without re-fetching.
-  private gmailSession: AryaGmailSession | null = null;
-  private readonly gmailThreads = new Map<string, AryaGmailThread>();
-  private readonly githubSessions = new Map<string, AryaGithubRepoSession>();
-  private readonly tools = new AryaToolRegistry({
+  private gmailSession: AaryaGmailSession | null = null;
+  private readonly gmailThreads = new Map<string, AaryaGmailThread>();
+  private readonly githubSessions = new Map<string, AaryaGithubRepoSession>();
+  private readonly tools = new AaryaToolRegistry({
     now: () => new Date(),
     voiceStatus: () => ({ state: this.aiState, backend: this.ai?.backend }),
     mutations: {
@@ -78,7 +81,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     github: {
       listPrs: (repo: string) => this.listPrs(repo),
       readPr: (repo: string, prNumber: number) => this.readPr(repo, prNumber),
-      reviewPr: (repo: string, prNumber: number, decision: AryaReviewDecision, body: string) =>
+      reviewPr: (repo: string, prNumber: number, decision: AaryaReviewDecision, body: string) =>
         this.reviewPr(repo, prNumber, decision, body),
     },
   });
@@ -91,7 +94,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     const url = new URL(request.url);
     const call = url.searchParams.get("call");
     const token = url.searchParams.get("token");
-    const claims = await verifyAryaToken(token, this.env);
+    const claims = await verifyAaryaToken(token, this.env);
 
     if (!claims?.sub || !claims.call || claims.call !== call) {
       return new Response("Invalid or expired voice-call token", { status: 401 });
@@ -116,8 +119,8 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
 
     server.addEventListener("message", (event) => {
       void this.handleMessage(participant, event.data).catch((err) => {
-        logger.warn("failed to handle arya voice message", {
-          event: "arya.room.message.failed",
+        logger.warn("failed to handle aarya voice message", {
+          event: "aarya.room.message.failed",
           error: err,
         });
       });
@@ -160,7 +163,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     });
     this.broadcast({ type: "peer-joined", peer: this.peerInfo(participant) }, participant.id);
 
-    logger.info("arya voice participant joined", { event: "arya.room.join" });
+    logger.info("aarya voice participant joined", { event: "aarya.room.join" });
   }
 
   private async removeParticipant(participantId: string): Promise<void> {
@@ -173,7 +176,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       // Already closed.
     }
     this.broadcast({ type: "peer-left", peerId: participantId });
-    logger.info("arya voice participant left", { event: "arya.room.leave" });
+    logger.info("aarya voice participant left", { event: "aarya.room.leave" });
 
     if (this.participants.size === 0) {
       await this.stopAi();
@@ -186,8 +189,8 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       this.broadcastBinary(data, participant.id);
       if (this.ai) {
         void this.ai.handleAudioChunk(data).catch((error) => {
-          logger.warn("failed to route audio to arya ai", {
-            event: "arya.room.ai.audio.failed",
+          logger.warn("failed to route audio to aarya ai", {
+            event: "aarya.room.ai.audio.failed",
             error,
           });
         });
@@ -195,7 +198,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       return;
     }
 
-    let message: AryaClientMessage;
+    let message: AaryaClientMessage;
     try {
       message = JSON.parse(String(data));
     } catch {
@@ -252,11 +255,11 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     try {
       const user = this.ownerUser();
       if (user) {
-        geminiKey = (await user.getAryaGeminiKey()) ?? undefined;
+        geminiKey = (await user.getAaryaGeminiKey()) ?? undefined;
       }
     } catch (error) {
       logger.warn("failed to fetch user gemini key from user DO", {
-        event: "arya.room.ai.key.fetch.failed",
+        event: "aarya.room.ai.key.fetch.failed",
         error,
       });
     }
@@ -264,10 +267,10 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     // Surface any due reminders in the AI's first reply. We only clear them from the inbox after
     // the session actually starts, so a failed start doesn't silently drop the user's reminders.
     const { hint, pending } = await this.collectNotificationHint();
-    const basePersona = this.env.ARYA_GEMINI_SYSTEM_PROMPT ?? DEFAULT_ARYA_PERSONA;
+    const basePersona = this.env.AARYA_GEMINI_SYSTEM_PROMPT ?? DEFAULT_AARYA_PERSONA;
     const systemPrompt = hint ? `${basePersona}\n\n${hint}` : undefined;
 
-    const session = createAryaAiSession(
+    const session = createAaryaAiSession(
       this.env,
       {
         onAudio: (audio) => this.broadcastBinary(audio),
@@ -297,8 +300,8 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     try {
       await session.start();
     } catch (error) {
-      logger.warn("failed to start arya ai session", {
-        event: "arya.room.ai.start.failed",
+      logger.warn("failed to start aarya ai session", {
+        event: "aarya.room.ai.start.failed",
         error,
       });
       this.aiState = "error";
@@ -325,8 +328,8 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     try {
       await session.stop();
     } catch (error) {
-      logger.warn("failed to stop arya ai session", {
-        event: "arya.room.ai.stop.failed",
+      logger.warn("failed to stop aarya ai session", {
+        event: "aarya.room.ai.stop.failed",
         error,
       });
       this.aiState = "off";
@@ -334,8 +337,8 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     }
   }
 
-  private async executeToolCalls(calls: AryaToolCall[]): Promise<AryaToolResult[]> {
-    const results: AryaToolResult[] = [];
+  private async executeToolCalls(calls: AaryaToolCall[]): Promise<AaryaToolResult[]> {
+    const results: AaryaToolResult[] = [];
     for (const call of calls) {
       const tool = this.tools.find(call.name);
       if (tool?.mutating) {
@@ -357,7 +360,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     return results;
   }
 
-  private summarizeToolCall(call: AryaToolCall, tool: AryaToolDefinition): string {
+  private summarizeToolCall(call: AaryaToolCall, tool: AaryaToolDefinition): string {
     try {
       return tool.summarize?.(call.args) ?? describeToolCall(call);
     } catch {
@@ -381,7 +384,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     });
   }
 
-  private sendToOwner(message: AryaServerMessage): void {
+  private sendToOwner(message: AaryaServerMessage): void {
     const ownerId = this.ownerId;
     if (!ownerId) {
       this.broadcast(message);
@@ -411,7 +414,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     return userNs.get(userNs.idFromName(ownerId));
   }
 
-  private async collectNotificationHint(): Promise<{ hint: string; pending: AryaNotification[] }> {
+  private async collectNotificationHint(): Promise<{ hint: string; pending: AaryaNotification[] }> {
     const user = this.ownerUser();
     if (!user) return { hint: "", pending: [] };
     try {
@@ -419,22 +422,22 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       const pending = await user.listNotifications();
       return { hint: buildNotificationsHint(pending), pending };
     } catch (error) {
-      logger.warn("failed to collect arya notifications", {
-        event: "arya.room.notifications.collect.failed",
+      logger.warn("failed to collect aarya notifications", {
+        event: "aarya.room.notifications.collect.failed",
         error,
       });
       return { hint: "", pending: [] };
     }
   }
 
-  private async clearNotifications(notifications: AryaNotification[]): Promise<void> {
+  private async clearNotifications(notifications: AaryaNotification[]): Promise<void> {
     const user = this.ownerUser();
     if (!user || notifications.length === 0) return;
     try {
       await user.clearNotifications(notifications.map((n) => n.id));
     } catch (error) {
-      logger.warn("failed to clear arya notifications", {
-        event: "arya.room.notifications.clear.failed",
+      logger.warn("failed to clear aarya notifications", {
+        event: "aarya.room.notifications.clear.failed",
         error,
       });
     }
@@ -444,22 +447,22 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   // Email (Gmail gatekeeper). Lazy session creation + the three email tool operations.
 
   /** Generic gatekeeper session start for a connected vendor + resource URL. Routes mutating
-   * actions through Arya's confirmation gate via AryaApprovalQueue. Returns null when the owner
+   * actions through Aarya's confirmation gate via AaryaApprovalQueue. Returns null when the owner
    * has no usable connected account or the session fails to start. */
-  private async startAryaGatekeeperSession(
+  private async startAaryaGatekeeperSession(
     vendorId: string,
     url: string,
     facetKey: string,
-  ): Promise<AryaGmailSession | AryaGithubRepoSession | null> {
+  ): Promise<AaryaGmailSession | AaryaGithubRepoSession | null> {
     const user = this.ownerUser();
     if (!user) return null;
 
     let resolved: { class: DurableObjectClass<Gatekeeper<any>>; accountId: number } | null;
     try {
-      resolved = await user.getAryaGatekeeperClass(vendorId, url);
+      resolved = await user.getAaryaGatekeeperClass(vendorId, url);
     } catch (error) {
       logger.warn("failed to resolve owner gatekeeper class", {
-        event: "arya.room.gatekeeper.class.failed",
+        event: "aarya.room.gatekeeper.class.failed",
         vendorId,
         error,
       });
@@ -469,15 +472,15 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
 
     const gatekeeperClass = resolved.class;
     const gatekeeper = this.ctx.facets.get(facetKey, () => ({ class: gatekeeperClass }));
-    const approvalQueue = new AryaApprovalQueue(
+    const approvalQueue = new AaryaApprovalQueue(
       gatekeeper,
       (tool, summary) => this.requestConfirmation(tool, summary),
     );
     try {
-      return (await gatekeeper.startSession(approvalQueue)) as AryaGmailSession | AryaGithubRepoSession;
+      return (await gatekeeper.startSession(approvalQueue)) as AaryaGmailSession | AaryaGithubRepoSession;
     } catch (error) {
-      logger.warn("failed to start arya gatekeeper session", {
-        event: "arya.room.gatekeeper.session.start.failed",
+      logger.warn("failed to start aarya gatekeeper session", {
+        event: "aarya.room.gatekeeper.session.start.failed",
         vendorId,
         error,
       });
@@ -485,14 +488,14 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     }
   }
 
-  private async ensureGmailSession(): Promise<AryaGmailSession | null> {
+  private async ensureGmailSession(): Promise<AaryaGmailSession | null> {
     if (this.gmailSession) return this.gmailSession;
-    const session = await this.startAryaGatekeeperSession(
+    const session = await this.startAaryaGatekeeperSession(
       "google",
       "https://mail.google.com/mail/",
-      `arya-gmail-${this.ownerId}`,
+      `aarya-gmail-${this.ownerId}`,
     );
-    this.gmailSession = session as AryaGmailSession | null;
+    this.gmailSession = session as AaryaGmailSession | null;
     return this.gmailSession;
   }
 
@@ -502,13 +505,13 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     await session.send(to, subject, body);
   }
 
-  private async listEmails(query?: string): Promise<AryaEmailSummary[]> {
+  private async listEmails(query?: string): Promise<AaryaEmailSummary[]> {
     const session = await this.ensureGmailSession();
     if (!session) throw new Error("You haven't connected a Gmail account. Connect Gmail in Settings first.");
     const cursor = await (query ? session.search(query) : session.listThreads());
     const page = await cursor.next();
     if (!page) return [];
-    const summaries: AryaEmailSummary[] = [];
+    const summaries: AaryaEmailSummary[] = [];
     for (const entry of page) {
       this.gmailThreads.set(entry.info.id, entry.thread);
       summaries.push({ id: entry.info.id, subject: entry.info.subject, snippet: entry.info.snippet });
@@ -545,21 +548,21 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   // ---------------------------------------------------------------------------
   // GitHub (gatekeeper). Per-repo lazy sessions + the three PR review tool operations.
 
-  private async ensureGithubRepoSession(ownerRepo: string): Promise<AryaGithubRepoSession | null> {
+  private async ensureGithubRepoSession(ownerRepo: string): Promise<AaryaGithubRepoSession | null> {
     const cached = this.githubSessions.get(ownerRepo);
     if (cached) return cached;
-    const session = await this.startAryaGatekeeperSession(
+    const session = await this.startAaryaGatekeeperSession(
       "github",
       `https://github.com/${ownerRepo}`,
-      `arya-github-${ownerRepo.replaceAll("/", "-")}`,
+      `aarya-github-${ownerRepo.replaceAll("/", "-")}`,
     );
     if (!session) return null;
-    const repo = session as AryaGithubRepoSession;
+    const repo = session as AaryaGithubRepoSession;
     this.githubSessions.set(ownerRepo, repo);
     return repo;
   }
 
-  private async listPrs(repo: string): Promise<AryaGithubPrSummary[]> {
+  private async listPrs(repo: string): Promise<AaryaGithubPrSummary[]> {
     const session = await this.ensureGithubRepoSession(repo);
     if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
     const cursor = await session.listPullRequests({ state: "open" });
@@ -573,7 +576,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     }));
   }
 
-  private async readPr(repo: string, prNumber: number): Promise<AryaGithubPrReadResult> {
+  private async readPr(repo: string, prNumber: number): Promise<AaryaGithubPrReadResult> {
     const session = await this.ensureGithubRepoSession(repo);
     if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
     const pr = await session.getPullRequest(String(prNumber));
@@ -596,7 +599,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   private async reviewPr(
     repo: string,
     prNumber: number,
-    decision: AryaReviewDecision,
+    decision: AaryaReviewDecision,
     body: string,
   ): Promise<void> {
     const session = await this.ensureGithubRepoSession(repo);
@@ -606,17 +609,17 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     await pr.postReview({ revision: diff.revision, decision, bodyMarkdown: body });
   }
 
-  private peerInfo(participant: Participant): AryaParticipantInfo {
+  private peerInfo(participant: Participant): AaryaParticipantInfo {
     return { id: participant.id, userId: participant.userId, name: participant.name };
   }
 
-  private peerList(exceptId?: string): AryaParticipantInfo[] {
+  private peerList(exceptId?: string): AaryaParticipantInfo[] {
     return [...this.participants.values()]
       .filter((p) => p.id !== exceptId)
       .map((p) => this.peerInfo(p));
   }
 
-  private send(participant: Participant, message: AryaServerMessage): void {
+  private send(participant: Participant, message: AaryaServerMessage): void {
     try {
       participant.ws.send(JSON.stringify(message));
     } catch {
@@ -624,12 +627,12 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     }
   }
 
-  private sendTo(participantId: string, message: AryaServerMessage): void {
+  private sendTo(participantId: string, message: AaryaServerMessage): void {
     const participant = this.participants.get(participantId);
     if (participant) this.send(participant, message);
   }
 
-  private broadcast(message: AryaServerMessage, exceptId?: string): void {
+  private broadcast(message: AaryaServerMessage, exceptId?: string): void {
     for (const participant of this.participants.values()) {
       if (participant.id === exceptId) continue;
       this.send(participant, message);
@@ -654,6 +657,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function describeToolCall(call: AryaToolCall): string {
+function describeToolCall(call: AaryaToolCall): string {
   return call.name + " " + JSON.stringify(call.args);
 }

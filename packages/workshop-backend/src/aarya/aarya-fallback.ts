@@ -1,25 +1,25 @@
-// Workers AI fallback for the Arya voice assistant.
+// Workers AI fallback for the Aarya voice assistant.
 //
-// When ARYA_GEMINI_API_KEY is absent the voice assistant uses this pipeline instead of the
+// When AARYA_GEMINI_API_KEY is absent the voice assistant uses this pipeline instead of the
 // Gemini Live bridge: PCM16 audio is buffered, a simple energy-based VAD detects end-of-utterance,
 // then whisper transcribes, an LLM completes the reply, and melotts synthesizes audio. This is a
 // request-response loop rather than true streaming, but it keeps the assistant usable without a
 // Gemini key.
 
 import { createWorkshopLogger } from "../observability";
-import type { AryaAiCallbacks, AryaAiSession } from "./arya-ai";
-import type { AryaAiBackend, AryaAiState } from "./arya-types";
+import type { AaryaAiCallbacks, AaryaAiSession } from "./aarya-ai";
+import type { AaryaAiBackend, AaryaAiState } from "./aarya-types";
 
-const logger = createWorkshopLogger("workshop.arya.fallback");
+const logger = createWorkshopLogger("workshop.aarya.fallback");
 
 const FALLBACK_SAMPLE_RATE = 16000;
-const DEFAULT_ARYA_FALLBACK_LLM = "@cf/meta/llama-3.1-8b-instruct-fast";
+const DEFAULT_AARYA_FALLBACK_LLM = "@cf/meta/llama-3.1-8b-instruct-fast";
 const FALLBACK_PERSONA =
-  "You are Arya, a friendly voice assistant for the user's workspace. " +
+  "You are AARYA, a friendly voice assistant for the user's workspace. " +
   "Answer concisely and conversationally, in the same language the user speaks.";
 
 /** Options for the simple energy-based voice-activity detector. */
-export interface AryaVadOptions {
+export interface AaryaVadOptions {
   threshold?: number;
   silenceMs?: number;
   sampleRate?: number;
@@ -27,7 +27,7 @@ export interface AryaVadOptions {
 }
 
 /** Result of running VAD over a buffer of PCM16 samples. */
-export interface AryaVadResult {
+export interface AaryaVadResult {
   hasSpeech: boolean;
   ended: boolean;
   speechEndSample: number;
@@ -41,7 +41,7 @@ export interface AryaVadResult {
  * above `threshold` as speech. An utterance has ended when there is at least `silenceMs` of
  * trailing silence after the last speech frame.
  */
-export function detectUtteranceEnd(samples: Int16Array, options: AryaVadOptions = {}): AryaVadResult {
+export function detectUtteranceEnd(samples: Int16Array, options: AaryaVadOptions = {}): AaryaVadResult {
   const threshold = options.threshold ?? 0.01;
   const silenceMs = options.silenceMs ?? 700;
   const sampleRate = options.sampleRate ?? FALLBACK_SAMPLE_RATE;
@@ -78,7 +78,7 @@ export function detectUtteranceEnd(samples: Int16Array, options: AryaVadOptions 
 }
 
 /** Convenience wrapper: true when VAD detects speech followed by enough trailing silence. */
-export function utteranceEnded(samples: Int16Array, options: AryaVadOptions = {}): boolean {
+export function utteranceEnded(samples: Int16Array, options: AaryaVadOptions = {}): boolean {
   return detectUtteranceEnd(samples, options).ended;
 }
 
@@ -127,8 +127,8 @@ export function pcm16ToWavBytes(samples: Int16Array, sampleRate = FALLBACK_SAMPL
 }
 
 /** Workers AI fallback session: STT -> LLM -> TTS pipeline driven by a simple VAD. */
-export class AryaWorkersAiFallback implements AryaAiSession {
-  readonly backend: AryaAiBackend = "workers-ai";
+export class AaryaWorkersAiFallback implements AaryaAiSession {
+  readonly backend: AaryaAiBackend = "workers-ai";
 
   private buffer: Int16Array<ArrayBufferLike> = new Int16Array(0);
   private processing = false;
@@ -136,7 +136,7 @@ export class AryaWorkersAiFallback implements AryaAiSession {
 
   constructor(
     private readonly env: Cloudflare.Env,
-    private readonly callbacks: AryaAiCallbacks,
+    private readonly callbacks: AaryaAiCallbacks,
     private readonly systemPrompt?: string,
   ) {}
 
@@ -169,8 +169,8 @@ export class AryaWorkersAiFallback implements AryaAiSession {
     try {
       await this.processUtterance(utterance);
     } catch (error) {
-      logger.warn("arya workers-ai fallback utterance failed", {
-        event: "arya.ai.fallback.utterance.failed",
+      logger.warn("aarya workers-ai fallback utterance failed", {
+        event: "aarya.ai.fallback.utterance.failed",
         error,
       });
       this.emitStatus("error", errorMessage(error));
@@ -203,8 +203,8 @@ export class AryaWorkersAiFallback implements AryaAiSession {
   }
 
   private async complete(userText: string): Promise<string> {
-    const model = this.env.ARYA_WORKERS_AI_LLM ?? DEFAULT_ARYA_FALLBACK_LLM;
-    const persona = this.systemPrompt ?? this.env.ARYA_GEMINI_SYSTEM_PROMPT ?? FALLBACK_PERSONA;
+    const model = this.env.AARYA_WORKERS_AI_LLM ?? DEFAULT_AARYA_FALLBACK_LLM;
+    const persona = this.systemPrompt ?? this.env.AARYA_GEMINI_SYSTEM_PROMPT ?? FALLBACK_PERSONA;
     const result = await this.env.WORKERS_AI.run(model, {
       messages: [
         { role: "system", content: persona },
@@ -227,7 +227,7 @@ export class AryaWorkersAiFallback implements AryaAiSession {
     return base64ToBytes(result.audio);
   }
 
-  private emitStatus(state: AryaAiState, detail?: string): void {
+  private emitStatus(state: AaryaAiState, detail?: string): void {
     this.callbacks.onStatus({ state, backend: this.backend, detail });
   }
 }

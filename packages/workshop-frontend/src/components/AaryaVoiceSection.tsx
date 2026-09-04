@@ -23,7 +23,7 @@ function FieldLabel({ children }: { children: ReactNode }) {
   )
 }
 
-export default function AryaVoiceSection() {
+export default function AaryaVoiceSection() {
   const { authenticatedApi } = useAuthenticatedApi()
   const toasts = useKumoToastManager()
   const [keyStatus, setKeyStatus] = useState<{ set: boolean; masked: string | null } | null>(null)
@@ -33,7 +33,7 @@ export default function AryaVoiceSection() {
 
   useEffect(() => {
     let cancelled = false
-    authenticatedApi.getAryaGeminiKeyStatus()
+    authenticatedApi.getAaryaGeminiKeyStatus()
       .then((status) => { if (!cancelled) setKeyStatus(status) })
       .catch(() => {})
     return () => { cancelled = true }
@@ -43,9 +43,9 @@ export default function AryaVoiceSection() {
     if (!keyInput.trim()) return
     setSaving(true)
     try {
-      await authenticatedApi.setAryaGeminiKey(keyInput.trim())
+      await authenticatedApi.setAaryaGeminiKey(keyInput.trim())
       setKeyInput('')
-      const status = await authenticatedApi.getAryaGeminiKeyStatus()
+      const status = await authenticatedApi.getAaryaGeminiKeyStatus()
       setKeyStatus(status)
       toasts.add({ title: 'Gemini API key saved', variant: 'success' })
     } catch {
@@ -58,7 +58,7 @@ export default function AryaVoiceSection() {
   const handleClear = async () => {
     setSaving(true)
     try {
-      await authenticatedApi.clearAryaGeminiKey()
+      await authenticatedApi.clearAaryaGeminiKey()
       setKeyInput('')
       setKeyStatus({ set: false, masked: null })
       toasts.add({ title: 'Gemini API key removed', variant: 'success' })
@@ -71,7 +71,7 @@ export default function AryaVoiceSection() {
 
   return (
     <section className="flex flex-col gap-3">
-      <SectionLabel>Arya Voice</SectionLabel>
+      <SectionLabel>AARYA Voice</SectionLabel>
       <div className="rounded-xl border border-kumo-line bg-kumo-base p-5">
         <div className="flex max-w-sm flex-col gap-4">
           <div>
@@ -82,7 +82,7 @@ export default function AryaVoiceSection() {
               </p>
             ) : (
               <p className="mt-1 text-[13px] text-kumo-subtle">
-                No key configured — Arya will use the Workers AI fallback.
+                No key configured — AARYA will use the Workers AI fallback.
               </p>
             )}
           </div>

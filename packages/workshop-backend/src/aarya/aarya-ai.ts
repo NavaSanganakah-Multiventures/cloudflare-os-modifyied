@@ -1,25 +1,25 @@
-// Gemini Live bridge and Workers AI fallback for the Arya voice assistant.
+// Gemini Live bridge and Workers AI fallback for the Aarya voice assistant.
 //
 // The Gemini Live bridge is the primary AI: it opens a bidirectional WebSocket to Google's
 // BidiGenerateContent endpoint, streams PCM16 audio in both directions, and handles live
-// function-calling via the tool executor. When ARYA_GEMINI_API_KEY is absent the factory falls
-// back to AryaWorkersAiFallback (whisper STT + LLM + melotts TTS) so the assistant still works
+// function-calling via the tool executor. When AARYA_GEMINI_API_KEY is absent the factory falls
+// back to AaryaWorkersAiFallback (whisper STT + LLM + melotts TTS) so the assistant still works
 // without a Gemini key.
 
 import { createWorkshopLogger } from "../observability";
-import type { AryaAiBackend, AryaAiState } from "./arya-types";
-import type { AryaToolCall, AryaToolResult, GeminiTool } from "./arya-tools";
-import { AryaWorkersAiFallback } from "./arya-fallback";
+import type { AaryaAiBackend, AaryaAiState } from "./aarya-types";
+import type { AaryaToolCall, AaryaToolResult, GeminiTool } from "./aarya-tools";
+import { AaryaWorkersAiFallback } from "./aarya-fallback";
 
-const logger = createWorkshopLogger("workshop.arya.ai");
+const logger = createWorkshopLogger("workshop.aarya.ai");
 
-export const DEFAULT_ARYA_GEMINI_MODEL = "models/gemini-3.1-flash-live-preview";
+export const DEFAULT_AARYA_GEMINI_MODEL = "models/gemini-3.1-flash-live-preview";
 
 const GEMINI_LIVE_ENDPOINT =
   "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 
-export const DEFAULT_ARYA_PERSONA =
-  "You are Arya, a friendly and helpful voice assistant for the user's workspace platform. " +
+export const DEFAULT_AARYA_PERSONA =
+  "You are AARYA, a friendly and helpful voice assistant for the user's workspace platform. " +
   "Keep spoken replies short, natural, and conversational. " +
   "When you need the current time or the live voice status, use the provided tools.";
 
@@ -30,23 +30,23 @@ export interface GeminiSetupOptions {
 }
 
 /** Status event emitted by an AI session to the room. */
-export interface AryaStatusEvent {
-  state: AryaAiState;
-  backend: AryaAiBackend;
+export interface AaryaStatusEvent {
+  state: AaryaAiState;
+  backend: AaryaAiBackend;
   detail?: string;
 }
 
 /** Callbacks the room provides to receive AI output. */
-export interface AryaAiCallbacks {
+export interface AaryaAiCallbacks {
   onAudio(audio: ArrayBuffer): void;
   onTranscript(transcript: { role: "user" | "assistant"; text: string; final: boolean }): void;
-  onStatus(status: AryaStatusEvent): void;
-  onToolCalls(calls: AryaToolCall[]): Promise<AryaToolResult[]>;
+  onStatus(status: AaryaStatusEvent): void;
+  onToolCalls(calls: AaryaToolCall[]): Promise<AaryaToolResult[]>;
 }
 
 /** A live AI session (Gemini or Workers AI fallback) that the room drives. */
-export interface AryaAiSession {
-  readonly backend: AryaAiBackend;
+export interface AaryaAiSession {
+  readonly backend: AaryaAiBackend;
   start(): Promise<void>;
   stop(): Promise<void>;
   handleAudioChunk(chunk: ArrayBuffer): Promise<void>;
@@ -72,12 +72,12 @@ export function base64ToPcm16(base64: string): ArrayBuffer {
 /** Build the Gemini Live setup message (sent as the first WebSocket frame). */
 export function buildGeminiSetup(options: GeminiSetupOptions, tools: GeminiTool[] = []): Record<string, unknown> {
   const setup: Record<string, unknown> = {
-    model: options.model ?? DEFAULT_ARYA_GEMINI_MODEL,
+    model: options.model ?? DEFAULT_AARYA_GEMINI_MODEL,
     generationConfig: {
       responseModalities: ["AUDIO"],
     },
     systemInstruction: {
-      parts: [{ text: options.systemPrompt ?? DEFAULT_ARYA_PERSONA }],
+      parts: [{ text: options.systemPrompt ?? DEFAULT_AARYA_PERSONA }],
     },
     inputAudioTranscription: {},
     outputAudioTranscription: {},
@@ -106,7 +106,7 @@ export interface ParsedGeminiMessage {
   audio: ArrayBuffer[];
   userTranscripts: string[];
   assistantTranscripts: string[];
-  toolCalls: AryaToolCall[];
+  toolCalls: AaryaToolCall[];
 }
 
 /** Parse a Gemini Live server message (string or pre-parsed object). Defensive: never throws. */
@@ -187,7 +187,7 @@ export function parseGeminiServerMessage(message: unknown): ParsedGeminiMessage 
 }
 
 /** Build a Gemini Live tool-response message from executed tool results. */
-export function buildGeminiToolResponse(results: AryaToolResult[]): Record<string, unknown> {
+export function buildGeminiToolResponse(results: AaryaToolResult[]): Record<string, unknown> {
   return {
     toolResponse: {
       functionResponses: results.map((result) => ({
@@ -200,18 +200,18 @@ export function buildGeminiToolResponse(results: AryaToolResult[]): Record<strin
 }
 
 /** Factory: pick Gemini Live when a key is configured, else Workers AI fallback. */
-export function createAryaAiSession(
+export function createAaryaAiSession(
   env: Cloudflare.Env,
-  callbacks: AryaAiCallbacks,
+  callbacks: AaryaAiCallbacks,
   tools: GeminiTool[] = [],
   geminiKey?: string,
   systemPrompt?: string,
-): AryaAiSession {
-  const key = geminiKey ?? env.ARYA_GEMINI_API_KEY;
+): AaryaAiSession {
+  const key = geminiKey ?? env.AARYA_GEMINI_API_KEY;
   if (key) {
-    return new AryaLiveBridge(env, callbacks, tools, key, systemPrompt);
+    return new AaryaLiveBridge(env, callbacks, tools, key, systemPrompt);
   }
-  return new AryaWorkersAiFallback(env, callbacks, systemPrompt);
+  return new AaryaWorkersAiFallback(env, callbacks, systemPrompt);
 }
 
 function errorMessage(error: unknown): string {
@@ -238,14 +238,14 @@ function waitForOpen(ws: WebSocket): Promise<void> {
 }
 
 /** Gemini Live bridge: bidirectional WebSocket to Google's BidiGenerateContent endpoint. */
-class AryaLiveBridge implements AryaAiSession {
-  readonly backend: AryaAiBackend = "gemini";
+class AaryaLiveBridge implements AaryaAiSession {
+  readonly backend: AaryaAiBackend = "gemini";
   private ws: WebSocket | null = null;
   private intentionallyStopped = false;
 
   constructor(
     private readonly env: Cloudflare.Env,
-    private readonly callbacks: AryaAiCallbacks,
+    private readonly callbacks: AaryaAiCallbacks,
     private readonly tools: GeminiTool[] = [],
     private readonly geminiKey: string,
     private readonly systemPrompt?: string,
@@ -255,7 +255,7 @@ class AryaLiveBridge implements AryaAiSession {
     if (this.ws) return;
     const key = this.geminiKey;
     if (!key) {
-      throw new Error("ARYA_GEMINI_API_KEY is not configured");
+      throw new Error("AARYA_GEMINI_API_KEY is not configured");
     }
     this.intentionallyStopped = false;
     this.emitStatus("connecting");
@@ -272,7 +272,7 @@ class AryaLiveBridge implements AryaAiSession {
     ws.addEventListener("message", (event) => {
       void this.handleServerMessage(event.data).catch((error) => {
         logger.warn("failed to handle gemini live message", {
-          event: "arya.ai.gemini.message.failed",
+          event: "aarya.ai.gemini.message.failed",
           error,
         });
       });
@@ -302,8 +302,8 @@ class AryaLiveBridge implements AryaAiSession {
       JSON.stringify(
         buildGeminiSetup(
           {
-            model: this.env.ARYA_GEMINI_MODEL,
-            systemPrompt: this.systemPrompt ?? this.env.ARYA_GEMINI_SYSTEM_PROMPT,
+            model: this.env.AARYA_GEMINI_MODEL,
+            systemPrompt: this.systemPrompt ?? this.env.AARYA_GEMINI_SYSTEM_PROMPT,
           },
           this.tools,
         ),
@@ -332,7 +332,7 @@ class AryaLiveBridge implements AryaAiSession {
       ws.send(JSON.stringify(buildGeminiAudioInput(chunk)));
     } catch (error) {
       logger.warn("failed to send audio to gemini live", {
-        event: "arya.ai.gemini.audio.send.failed",
+        event: "aarya.ai.gemini.audio.send.failed",
         error,
       });
     }
@@ -361,7 +361,7 @@ class AryaLiveBridge implements AryaAiSession {
     }
   }
 
-  private emitStatus(state: AryaAiState, detail?: string): void {
+  private emitStatus(state: AaryaAiState, detail?: string): void {
     this.callbacks.onStatus({ state, backend: this.backend, detail });
   }
 }

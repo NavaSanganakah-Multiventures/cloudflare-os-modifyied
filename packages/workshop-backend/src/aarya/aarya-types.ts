@@ -1,13 +1,13 @@
-// Wire types for Arya voice calls. These are plain JSON (and binary audio) messages sent over the
-// /api/arya/ws WebSocket. They are intentionally separate from the Cap'n Web RPC API: audio frames
+// Wire types for Aarya voice calls. These are plain JSON (and binary audio) messages sent over the
+// /api/aarya/ws WebSocket. They are intentionally separate from the Cap'n Web RPC API: audio frames
 // and signaling need a low-latency channel distinct from the workspace RPC socket.
 //
 // PR 2 adds the Gemini Live / Workers AI bridge as another participant in the room; PR 3 adds the
 // browser client. The signal messages are placeholders so a WebRTC transport can be introduced
 // behind the same room later without changing the wire protocol.
 
-/** Public identity of one participant in an Arya voice room. */
-export interface AryaParticipantInfo {
+/** Public identity of one participant in an Aarya voice room. */
+export interface AaryaParticipantInfo {
   /** Opaque, connection-scoped participant id (not the user id). */
   id: string;
   /** Authenticated user id carried by the call token. */
@@ -17,13 +17,13 @@ export interface AryaParticipantInfo {
 }
 
 /** Lifecycle state of the server-side AI participant. */
-export type AryaAiState = "off" | "connecting" | "listening" | "error";
+export type AaryaAiState = "off" | "connecting" | "listening" | "error";
 
 /** Which AI engine is driving the voice session. */
-export type AryaAiBackend = "gemini" | "workers-ai";
+export type AaryaAiBackend = "gemini" | "workers-ai";
 
 /** JSON messages the client sends to the server. */
-export type AryaClientMessage =
+export type AaryaClientMessage =
   | { type: "ping"; ts: number }
   | { type: "signal"; target: string; data: unknown }
   | { type: "ring" }
@@ -34,9 +34,9 @@ export type AryaClientMessage =
   | { type: "tool-confirmation-response"; requestId: string; approved: boolean };
 
 /** JSON messages the server sends to the client. */
-export type AryaServerMessage =
-  | { type: "welcome"; roomId: string; selfId: string; participants: AryaParticipantInfo[] }
-  | { type: "peer-joined"; peer: AryaParticipantInfo }
+export type AaryaServerMessage =
+  | { type: "welcome"; roomId: string; selfId: string; participants: AaryaParticipantInfo[] }
+  | { type: "peer-joined"; peer: AaryaParticipantInfo }
   | { type: "peer-left"; peerId: string }
   | { type: "signal"; from: string; data: unknown }
   | { type: "ring"; from: string }
@@ -44,7 +44,7 @@ export type AryaServerMessage =
   | { type: "rejected"; by: string }
   | { type: "hangup"; by: string }
   | { type: "pong"; ts: number }
-  | { type: "ai-status"; state: AryaAiState; backend?: AryaAiBackend; detail?: string }
+  | { type: "ai-status"; state: AaryaAiState; backend?: AaryaAiBackend; detail?: string }
   | { type: "transcript"; role: "user" | "assistant"; text: string; final: boolean }
   | { type: "error"; code: string; message: string }
   | { type: "tool-confirmation-request"; requestId: string; tool: string; summary: string };

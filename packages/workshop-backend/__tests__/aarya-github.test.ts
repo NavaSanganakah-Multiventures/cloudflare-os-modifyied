@@ -6,10 +6,10 @@ import {
   normalizeReviewPrArgs,
   serializePrDiffFiles,
   summarizePrDiff,
-} from "../src/arya/arya-github";
-import type { AryaGithubCursor, AryaGithubDiff, AryaGithubDiffFile } from "../src/arya/arya-github";
+} from "../src/aarya/aarya-github";
+import type { AaryaGithubCursor, AaryaGithubDiff, AaryaGithubDiffFile } from "../src/aarya/aarya-github";
 
-function mockCursor<T>(pages: T[][]): AryaGithubCursor<T> {
+function mockCursor<T>(pages: T[][]): AaryaGithubCursor<T> {
   let i = 0;
   return { next: async () => (i < pages.length ? pages[i++] : null) };
 }
@@ -60,7 +60,7 @@ describe("normalizeReviewPrArgs", () => {
 
 describe("serializePrDiffFiles", () => {
   it("serializes files, hunks, and diff line markers", () => {
-    const files: AryaGithubDiffFile[] = [
+    const files: AaryaGithubDiffFile[] = [
       {
         path: "src/a.ts",
         status: "modified",
@@ -83,7 +83,7 @@ describe("serializePrDiffFiles", () => {
 
   it("truncates at maxBytes", () => {
     const big = "x".repeat(500);
-    const files: AryaGithubDiffFile[] = [
+    const files: AaryaGithubDiffFile[] = [
       { path: "f", status: "added", additions: 10, deletions: 0, hunks: [{ header: "@@", lines: [{ kind: "added", text: big }] }] },
     ];
     const out = serializePrDiffFiles(files, 100);
@@ -94,7 +94,7 @@ describe("serializePrDiffFiles", () => {
 
 describe("summarizePrDiff", () => {
   it("pages the files cursor and serializes", async () => {
-    const diff: AryaGithubDiff = {
+    const diff: AaryaGithubDiff = {
       revision: { baseSha: "aaa", headSha: "bbb" },
       files: mockCursor([
         [{ path: "a", status: "added", additions: 1, deletions: 0, hunks: [] }],
@@ -107,7 +107,7 @@ describe("summarizePrDiff", () => {
   });
 
   it("stops paging when the cursor returns null", async () => {
-    const diff: AryaGithubDiff = {
+    const diff: AaryaGithubDiff = {
       revision: { baseSha: "a", headSha: "b" },
       files: mockCursor([[]]),
     };

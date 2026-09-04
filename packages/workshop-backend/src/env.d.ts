@@ -100,24 +100,24 @@ declare global {
       // DEFAULT_MIN_WALLET_BALANCE_USD.
       MIN_WALLET_BALANCE?: string;
 
-      // Arya voice assistant: signing secret for voice-call tokens (HS256). Voice calls are
+      // Aarya voice assistant: signing secret for voice-call tokens (HS256). Voice calls are
       // disabled until this is configured.
-      ARYA_SIGNING_SECRET?: string;
+      AARYA_SIGNING_SECRET?: string;
 
-      // Optional comma-separated list of user ids allowed to join Arya voice calls. Absent/empty
+      // Optional comma-separated list of user ids allowed to join Aarya voice calls. Absent/empty
       // means any caller with a validly-signed token (the token itself is the authority).
-      ARYA_AUTHORIZED_MEMBERS?: string;
+      AARYA_AUTHORIZED_MEMBERS?: string;
 
-      // Dev-only: set to "true" to enable GET /api/arya/dev-token for local testing. Never set in
+      // Dev-only: set to "true" to enable GET /api/aarya/dev-token for local testing. Never set in
       // production.
-      ARYA_ALLOW_DEV_TOKEN?: string;
+      AARYA_ALLOW_DEV_TOKEN?: string;
 
       // Gemini Live primary AI bridge.
-      ARYA_GEMINI_API_KEY?: string;
-      ARYA_GEMINI_MODEL?: string;          // default "models/gemini-3.1-flash-live-preview"
-      ARYA_GEMINI_SYSTEM_PROMPT?: string;
+      AARYA_GEMINI_API_KEY?: string;
+      AARYA_GEMINI_MODEL?: string;          // default "models/gemini-3.1-flash-live-preview"
+      AARYA_GEMINI_SYSTEM_PROMPT?: string;
       // Workers AI fallback LLM (default "@cf/meta/llama-3.1-8b-instruct-fast").
-      ARYA_WORKERS_AI_LLM?: string;
+      AARYA_WORKERS_AI_LLM?: string;
     }
   }
 }

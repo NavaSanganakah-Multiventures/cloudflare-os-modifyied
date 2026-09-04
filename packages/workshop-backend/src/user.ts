@@ -14,7 +14,7 @@ import type { AdminSettings } from "./admin-settings.js";
 import { isReservedBlueprintKey, readBlueprintKvRecord } from "./blueprint-archive.js";
 import { filterEnabledResources, isResourceDisabled, readAdminConfig } from "./admin-config.js";
 import { buildGatekeeperVendorMap } from "./auth/auth-vendors.js";
-import type { AryaNotification, AryaReminder } from "./arya/arya-reminders";
+import type { AaryaNotification, AaryaReminder } from "./aarya/aarya-reminders";
 
 const logger = createWorkshopLogger("workshop.user");
 
@@ -182,15 +182,15 @@ function makeUserStorage(storage: DurableObjectStorage) {
           byWorkspace(record: OutputRecord) { return record.workspaceId; },
         },
       }),
-      // Arya reminders + the notification inbox. Reminders are swept into the inbox when they
-      // become due and are surfaced the next time the user starts an Arya voice call.
-      reminders: collection<AryaReminder>()({
+      // Aarya reminders + the notification inbox. Reminders are swept into the inbox when they
+      // become due and are surfaced the next time the user starts an Aarya voice call.
+      reminders: collection<AaryaReminder>()({
         primaryKey: "id",
         nonUniqueIndexes: {
-          byDueAt(record: AryaReminder) { return record.dueAt; },
+          byDueAt(record: AaryaReminder) { return record.dueAt; },
         },
       }),
-      notifications: collection<AryaNotification>()({
+      notifications: collection<AaryaNotification>()({
         primaryKey: "id",
       }),
     },
@@ -237,9 +237,9 @@ function makeUserStorage(storage: DurableObjectStorage) {
       // null = password disabled (e.g. because some other auth mechanism is used)
       passwordHashHash: <Uint8Array | null>null,
 
-      // User-scoped Gemini API key for the Arya voice assistant. Never returned to the client;
+      // User-scoped Gemini API key for the Aarya voice assistant. Never returned to the client;
       // only a masked hint is shown in the Settings page.
-      aryaGeminiKey: <string | null>null,
+      aaryaGeminiKey: <string | null>null,
     }
   });
 }
@@ -300,7 +300,7 @@ async function checkGatekeeperVendorFilter(
 // Durable Object that stores information about a user.
 /** Soonest due time (ms epoch) among reminders, or null when there are none. Used to arm the
  * per-user reminder alarm so due reminders become notifications without a live voice call. */
-function nextReminderAlarmTime(reminders: Iterable<AryaReminder>): number | null {
+function nextReminderAlarmTime(reminders: Iterable<AaryaReminder>): number | null {
   let soonest: number | null = null;
   for (const reminder of reminders) {
     if (soonest === null || reminder.dueAt < soonest) soonest = reminder.dueAt;
@@ -543,12 +543,12 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     this.storage.profile.put(profile);
   }
 
-  // ---- Arya reminders & notification inbox ---------------------------------------------
-  // Stored per-user; Arya's call room sweeps due reminders into the inbox and surfaces the
+  // ---- Aarya reminders & notification inbox ---------------------------------------------
+  // Stored per-user; Aarya's call room sweeps due reminders into the inbox and surfaces the
   // notifications in the assistant's system prompt at the start of each call.
 
-  async addReminder(message: string, dueAt: number): Promise<AryaReminder> {
-    const reminder: AryaReminder = {
+  async addReminder(message: string, dueAt: number): Promise<AaryaReminder> {
+    const reminder: AaryaReminder = {
       id: crypto.randomUUID(),
       message,
       dueAt,
@@ -559,7 +559,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return reminder;
   }
 
-  async listReminders(): Promise<AryaReminder[]> {
+  async listReminders(): Promise<AaryaReminder[]> {
     return Array.from(this.storage.reminders.byDueAt.list())
       .toSorted((a, b) => a.dueAt - b.dueAt);
   }
@@ -572,7 +572,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
   /** Move due reminders into the notification inbox; returns how many were swept. */
   async sweepDueReminders(now: number = Date.now()): Promise<number> {
-    const due: AryaReminder[] = [];
+    const due: AaryaReminder[] = [];
     for (const reminder of this.storage.reminders.byDueAt.list()) {
       if (reminder.dueAt > now) break;
       due.push(reminder);
@@ -590,7 +590,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return due.length;
   }
 
-  async listNotifications(): Promise<AryaNotification[]> {
+  async listNotifications(): Promise<AaryaNotification[]> {
     return Array.from(this.storage.notifications.list())
       .toSorted((a, b) => a.createdAt - b.createdAt);
   }
@@ -628,23 +628,23 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     await this.scheduleNextReminderAlarm();
   }
 
-  getAryaGeminiKey(): Promise<string | null> {
-    return Promise.resolve(this.storage.aryaGeminiKey.get());
+  getAaryaGeminiKey(): Promise<string | null> {
+    return Promise.resolve(this.storage.aaryaGeminiKey.get());
   }
 
-  getAryaGeminiKeyStatus(): Promise<{ set: boolean; masked: string | null }> {
-    const key = this.storage.aryaGeminiKey.get();
+  getAaryaGeminiKeyStatus(): Promise<{ set: boolean; masked: string | null }> {
+    const key = this.storage.aaryaGeminiKey.get();
     if (!key) return Promise.resolve({ set: false, masked: null });
     const masked = key.length > 8 ? key.slice(0, 4) + "..." + key.slice(-4) : "****";
     return Promise.resolve({ set: true, masked });
   }
 
-  async setAryaGeminiKey(key: string): Promise<void> {
-    this.storage.aryaGeminiKey.put(key.trim() || null);
+  async setAaryaGeminiKey(key: string): Promise<void> {
+    this.storage.aaryaGeminiKey.put(key.trim() || null);
   }
 
-  async clearAryaGeminiKey(): Promise<void> {
-    this.storage.aryaGeminiKey.put(null);
+  async clearAaryaGeminiKey(): Promise<void> {
+    this.storage.aaryaGeminiKey.put(null);
   }
 
   async listModels(): Promise<AiChatAuthorInfo[]> {
@@ -1941,17 +1941,17 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
 
   /**
    * Resolve the owner's connected Google account to a full-mailbox Gmail gatekeeper DO class, so the
-   * Arya voice assistant can send email on the owner's behalf. Returns null when no usable Google
+   * Aarya voice assistant can send email on the owner's behalf. Returns null when no usable Google
    * account (with Gmail) is connected, or when an administrator has disabled Gmail. The first
    * Google account is used; multiple Google accounts are not currently distinguished.
    */
   /**
    * Resolve one of the owner's connected accounts to a gatekeeper DO class for the given resource
-   * URL, so the Arya voice assistant can act on the owner's behalf (Gmail, GitHub, ...). Uses the
+   * URL, so the Aarya voice assistant can act on the owner's behalf (Gmail, GitHub, ...). Uses the
    * first connected account for the vendor. Returns null when no usable account is connected, or
    * when an administrator has disabled the resource.
    */
-  async getAryaGatekeeperClass(vendorId: string, url: string)
+  async getAaryaGatekeeperClass(vendorId: string, url: string)
       : Promise<{ class: DurableObjectClass<Gatekeeper<any>>, accountId: number } | null> {
     for (const rec of this.#connectedAccountRecords()) {
       if (rec.vendorId !== vendorId) continue;
@@ -1959,8 +1959,8 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
         const { class: cls } = await this.getGatekeeperClassFor(rec.id, url);
         return { class: cls, accountId: rec.id };
       } catch (error) {
-        logger.warn("arya: failed to resolve gatekeeper class for account", {
-          event: "arya.gatekeeper.class.resolve.failed", vendorId, accountId: rec.id, error,
+        logger.warn("aarya: failed to resolve gatekeeper class for account", {
+          event: "aarya.gatekeeper.class.resolve.failed", vendorId, accountId: rec.id, error,
         });
       }
     }

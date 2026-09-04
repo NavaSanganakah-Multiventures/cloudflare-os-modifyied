@@ -1,5 +1,15 @@
 This project is building a platform for "vibe coded" personal applications and AI agents that run inside a strong sandbox.
 
+## Naming: AARYA (not Arya)
+
+The voice assistant's canonical name is **AARYA** (all caps, double A), not "Arya".
+
+* User-facing strings must use **AARYA** (persona prompts, UI labels, error messages).
+* Code identifiers and file names use idiomatic double-A casing: `AaryaReminder`, `aarya-voice.ts`, `getAaryaGeminiKey()`, `mintAaryaVoiceToken()`, and the API path `/api/aarya/`.
+* Env vars use the `AARYA_*` prefix (e.g. `AARYA_GEMINI_API_KEY`).
+* The Durable Object class name `AryaCallRoom` is **frozen** (single A) — it is baked into `packages/workshop-backend/worker-configuration.d.ts` (`durableNamespaces`) and `scripts/testdata/golden-manifest.json` (release-manifest golden test). Renaming it would require regenerating those generated files and would break the golden release-manifest test, so leave it as-is.
+* The platform/product name "Aarya Smart" (double A) is already correct.
+
 ## Encoding Requirement
 
 All text files, code, documentation, and records in this repository must be encoded and decoded using **UTF-8**.

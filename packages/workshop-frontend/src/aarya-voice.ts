@@ -1,28 +1,28 @@
-// Audio capture, playback, and WebSocket helpers for the Arya voice panel.
+// Audio capture, playback, and WebSocket helpers for the Aarya voice panel.
 //
 // All audio processing happens client-side. The microphone is only accessed after the user
 // activates push-to-talk; before that, no audio leaves the browser.
 
-/** Build the WebSocket URL for an Arya voice call. */
-export function aryaVoiceWsUrl(baseUrl: string, call: string, token: string): string {
+/** Build the WebSocket URL for an Aarya voice call. */
+export function aaryaVoiceWsUrl(baseUrl: string, call: string, token: string): string {
   const url = new URL(baseUrl);
   url.protocol = url.protocol.replace("http", "ws");
-  url.pathname = "/api/arya/ws";
+  url.pathname = "/api/aarya/ws";
   url.searchParams.set("call", call);
   url.searchParams.set("token", token);
   return url.toString();
 }
 
-/** Handlers for messages received over the Arya voice WebSocket. */
-export interface AryaVoiceHandlers {
+/** Handlers for messages received over the Aarya voice WebSocket. */
+export interface AaryaVoiceHandlers {
   onStatus: (state: string, backend?: string, detail?: string) => void;
   onTranscript: (role: "user" | "assistant", text: string, final: boolean) => void;
   onAudio: (audio: ArrayBuffer) => void;
   onPeerEvent: (msg: Record<string, unknown>) => void;
 }
 
-/** Create a WebSocket connection to the Arya voice room. */
-export function connectAryaVoice(wsUrl: string, handlers: AryaVoiceHandlers): WebSocket {
+/** Create a WebSocket connection to the Aarya voice room. */
+export function connectAaryaVoice(wsUrl: string, handlers: AaryaVoiceHandlers): WebSocket {
   const ws = new WebSocket(wsUrl);
   ws.binaryType = "arraybuffer";
 

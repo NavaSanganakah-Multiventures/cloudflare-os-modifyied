@@ -1,13 +1,13 @@
-// Reminder and notification types + pure helpers for the Arya voice assistant.
+// Reminder and notification types + pure helpers for the Aarya voice assistant.
 //
 // Reminders are stored per-user in UserDurableObject (not in a separate Durable Object) and are
-// delivered the next time the user talks to Arya: the call room sweeps due reminders into the
+// delivered the next time the user talks to Aarya: the call room sweeps due reminders into the
 // user's notification inbox, then hands the pending notifications to the AI's system prompt at
 // the start of the call. A later trigger slice (email / background push) can build a global sweep
 // on top of these same per-user records.
 
-/** One reminder the user asked Arya to deliver later. */
-export interface AryaReminder {
+/** One reminder the user asked Aarya to deliver later. */
+export interface AaryaReminder {
   id: string;
   message: string;
   /** Epoch milliseconds when the reminder becomes due. */
@@ -16,8 +16,8 @@ export interface AryaReminder {
   createdAt: number;
 }
 
-/** A pending notification surfaced to Arya (today only swept reminders). */
-export interface AryaNotification {
+/** A pending notification surfaced to Aarya (today only swept reminders). */
+export interface AaryaNotification {
   id: string;
   kind: "reminder";
   title: string;
@@ -85,10 +85,10 @@ export function summarizeReminder(args: Record<string, unknown>): string {
 }
 
 /**
- * Build a short system-prompt hint listing pending notifications so Arya can announce them
+ * Build a short system-prompt hint listing pending notifications so Aarya can announce them
  * naturally. Returns "" when there is nothing to announce.
  */
-export function buildNotificationsHint(notifications: AryaNotification[]): string {
+export function buildNotificationsHint(notifications: AaryaNotification[]): string {
   if (notifications.length === 0) return "";
   const lines = notifications.map((n) => `- ${n.title}: ${n.detail}`);
   return (

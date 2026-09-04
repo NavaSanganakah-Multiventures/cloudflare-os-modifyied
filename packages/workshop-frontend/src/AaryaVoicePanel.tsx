@@ -1,11 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useAuthenticatedApi } from './AuthContext'
 import {
-  aryaVoiceWsUrl,
-  connectAryaVoice,
+  aaryaVoiceWsUrl,
+  connectAaryaVoice,
   createMicCapture,
   playPcm16Audio,
-} from './arya-voice'
+} from './aarya-voice'
 import { Microphone, X, Phone, PhoneSlash, SpeakerHigh } from '@phosphor-icons/react'
 
 interface TranscriptEntry {
@@ -13,9 +13,9 @@ interface TranscriptEntry {
   text: string
 }
 
-/** Floating voice panel: connects to the Arya WebSocket, captures mic audio (push-to-talk),
+/** Floating voice panel: connects to the Aarya WebSocket, captures mic audio (push-to-talk),
  *  plays AI audio, and shows live transcripts and status. */
-export function AryaVoicePanel() {
+export function AaryaVoicePanel() {
   const { authenticatedApi } = useAuthenticatedApi()
   const [open, setOpen] = useState(false)
   const [connected, setConnected] = useState(false)
@@ -35,14 +35,14 @@ export function AryaVoicePanel() {
     setTranscripts([])
     try {
       const callId = crypto.randomUUID()
-      const token = await authenticatedApi.mintAryaVoiceToken(callId)
-      const wsUrl = aryaVoiceWsUrl(window.location.origin, callId, token)
+      const token = await authenticatedApi.mintAaryaVoiceToken(callId)
+      const wsUrl = aaryaVoiceWsUrl(window.location.origin, callId, token)
 
       if (!playbackRef.current) {
         playbackRef.current = new AudioContext({ sampleRate: 16000 })
       }
 
-      const ws = connectAryaVoice(wsUrl, {
+      const ws = connectAaryaVoice(wsUrl, {
         onStatus: (state, backend, detail) => {
           setAiState(state)
           if (backend) setAiBackend(backend)
@@ -163,7 +163,7 @@ export function AryaVoicePanel() {
       <button
         onClick={() => setOpen((o) => !o)}
         className="press fixed bottom-6 right-6 z-50 grid h-12 w-12 cursor-pointer place-items-center rounded-full bg-kumo-brand text-white shadow-lg transition-colors hover:bg-kumo-brand-hover"
-        aria-label="Toggle Arya voice panel"
+        aria-label="Toggle AARYA voice panel"
       >
         <Microphone size={22} />
       </button>
@@ -173,7 +173,7 @@ export function AryaVoicePanel() {
           <div className="flex items-center justify-between border-b border-kumo-line px-4 py-3">
             <div className="flex items-center gap-2">
               <Microphone size={16} className="text-kumo-brand" />
-              <span className="text-[14px] font-medium text-kumo-default">Arya Voice</span>
+              <span className="text-[14px] font-medium text-kumo-default">AARYA Voice</span>
               {aiBackend && (
                 <span className="rounded-md bg-kumo-tint px-1.5 py-0.5 text-[10px] font-medium text-kumo-subtle">
                   {aiBackend === 'gemini' ? 'Gemini' : 'Workers AI'}
@@ -198,7 +198,7 @@ export function AryaVoicePanel() {
               <div className="flex flex-col gap-2">
                 {transcripts.map((t, i) => (
                   <div key={i} className={'text-[13px] ' + (t.role === 'assistant' ? 'text-kumo-default' : 'text-kumo-subtle')}>
-                    <span className="font-medium">{t.role === 'assistant' ? 'Arya' : 'You'}: </span>
+                    <span className="font-medium">{t.role === 'assistant' ? 'AARYA' : 'You'}: </span>
                     {t.text}
                   </div>
                 ))}
@@ -208,7 +208,7 @@ export function AryaVoicePanel() {
 
           {confirmation && (
             <div className="border-t border-kumo-warning/40 bg-kumo-warning-tint px-4 py-3">
-              <p className="text-[12px] font-medium text-kumo-warning">Arya wants to:</p>
+              <p className="text-[12px] font-medium text-kumo-warning">AARYA wants to:</p>
               <p className="mt-1 text-[13px] text-kumo-default">{confirmation.summary || confirmation.tool}</p>
               <div className="mt-2 flex gap-2">
                 <button

@@ -1,71 +1,71 @@
-// Tool registry for the Arya voice assistant. Read-only tools execute directly; mutating tools are
+// Tool registry for the Aarya voice assistant. Read-only tools execute directly; mutating tools are
 // executed only after the room asks the user for confirmation (the confirmation gate).
 
-import type { AryaAiBackend, AryaAiState } from "./arya-types";
-import type { AryaNotification, AryaReminder } from "./arya-reminders";
-import { normalizeSetReminderArgs, summarizeReminder } from "./arya-reminders";
-import { normalizeSendEmailArgs } from "./arya-email";
-import { normalizeGithubPrNumberArg, normalizeGithubRepoArg, normalizeReviewPrArgs } from "./arya-github";
-import type { AryaEmailSummary } from "./arya-email";
-import type { AryaGithubPrReadResult, AryaGithubPrSummary, AryaReviewDecision } from "./arya-github";
+import type { AaryaAiBackend, AaryaAiState } from "./aarya-types";
+import type { AaryaNotification, AaryaReminder } from "./aarya-reminders";
+import { normalizeSetReminderArgs, summarizeReminder } from "./aarya-reminders";
+import { normalizeSendEmailArgs } from "./aarya-email";
+import { normalizeGithubPrNumberArg, normalizeGithubRepoArg, normalizeReviewPrArgs } from "./aarya-github";
+import type { AaryaEmailSummary } from "./aarya-email";
+import type { AaryaGithubPrReadResult, AaryaGithubPrSummary, AaryaReviewDecision } from "./aarya-github";
 
 /** A function call requested by the AI model. */
-export interface AryaToolCall {
+export interface AaryaToolCall {
   id: string;
   name: string;
   args: Record<string, unknown>;
 }
 
 /** The result of executing one tool call. `response` is what gets sent back to the model. */
-export interface AryaToolResult {
+export interface AaryaToolResult {
   id: string;
   name: string;
   response: unknown;
 }
 
 /** Mutating capabilities exposed to gated tools. Each call is user-confirmed before execution. */
-export interface AryaMutations {
+export interface AaryaMutations {
   /** Update the room owner's display name. */
   setOwnerDisplayName(name: string): Promise<void>;
   /** Store a new reminder for the room owner. */
-  setReminder(message: string, dueAt: number): Promise<AryaReminder>;
+  setReminder(message: string, dueAt: number): Promise<AaryaReminder>;
   /** Cancel one of the room owner's reminders. Returns true when it existed. */
   cancelReminder(id: string): Promise<boolean>;
 }
 
 /** Email capabilities exposed to tools. Confirmation for sends is provided by the Gmail gatekeeper's
- * ApprovalQueue (AryaApprovalQueue), so these are not gated by the room's confirmation flow. */
-export interface AryaEmailRuntime {
+ * ApprovalQueue (AaryaApprovalQueue), so these are not gated by the room's confirmation flow. */
+export interface AaryaEmailRuntime {
   sendEmail(to: string[], subject: string, body: string): Promise<void>;
-  listEmails(query?: string): Promise<AryaEmailSummary[]>;
+  listEmails(query?: string): Promise<AaryaEmailSummary[]>;
   replyEmail(threadId: string, body: string): Promise<void>;
 }
 
 /** GitHub capabilities exposed to tools. Confirmation for reviews is provided by the GitHub
- * gatekeeper's ApprovalQueue (AryaApprovalQueue), so these are not gated by the room's flow. */
-export interface AryaGithubRuntime {
-  listPrs(repo: string): Promise<AryaGithubPrSummary[]>;
-  readPr(repo: string, prNumber: number): Promise<AryaGithubPrReadResult>;
-  reviewPr(repo: string, prNumber: number, decision: AryaReviewDecision, body: string): Promise<void>;
+ * gatekeeper's ApprovalQueue (AaryaApprovalQueue), so these are not gated by the room's flow. */
+export interface AaryaGithubRuntime {
+  listPrs(repo: string): Promise<AaryaGithubPrSummary[]>;
+  readPr(repo: string, prNumber: number): Promise<AaryaGithubPrReadResult>;
+  reviewPr(repo: string, prNumber: number, decision: AaryaReviewDecision, body: string): Promise<void>;
 }
 
 /** Runtime hooks tools can touch. */
-export interface AryaToolRuntime {
+export interface AaryaToolRuntime {
   now(): Date;
-  voiceStatus(): { state: AryaAiState; backend?: AryaAiBackend };
-  mutations: AryaMutations;
+  voiceStatus(): { state: AaryaAiState; backend?: AaryaAiBackend };
+  mutations: AaryaMutations;
   /** Read the owner's pending reminders, soonest first. */
-  readReminders(): Promise<AryaReminder[]>;
+  readReminders(): Promise<AaryaReminder[]>;
   /** Read the owner's pending notifications. */
-  readNotifications(): Promise<AryaNotification[]>;
+  readNotifications(): Promise<AaryaNotification[]>;
   /** Email capabilities, or absent when no Gmail account is connected. */
-  email?: AryaEmailRuntime;
+  email?: AaryaEmailRuntime;
   /** GitHub capabilities, or absent when no GitHub account is connected. */
-  github?: AryaGithubRuntime;
+  github?: AaryaGithubRuntime;
 }
 
-/** A tool the Arya assistant can execute. */
-export interface AryaToolDefinition {
+/** A tool the Aarya assistant can execute. */
+export interface AaryaToolDefinition {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
@@ -73,7 +73,7 @@ export interface AryaToolDefinition {
   mutating?: boolean;
   /** Human-readable summary of a pending call, shown in the confirmation prompt. */
   summarize?: (args: Record<string, unknown>) => string;
-  execute(args: Record<string, unknown>, runtime: AryaToolRuntime): unknown | Promise<unknown>;
+  execute(args: Record<string, unknown>, runtime: AaryaToolRuntime): unknown | Promise<unknown>;
 }
 
 /** Gemini function declaration shape (subset the Live API accepts). */
@@ -89,7 +89,7 @@ export interface GeminiTool {
 }
 
 /** Build the Gemini tools array from tool definitions (empty when there are none). */
-export function geminiFunctionDeclarations(tools: AryaToolDefinition[]): GeminiTool[] {
+export function geminiFunctionDeclarations(tools: AaryaToolDefinition[]): GeminiTool[] {
   if (tools.length === 0) return [];
   return [
     {
@@ -102,7 +102,7 @@ export function geminiFunctionDeclarations(tools: AryaToolDefinition[]): GeminiT
   ];
 }
 
-const DEFAULT_ARYA_TOOLS: AryaToolDefinition[] = [
+const DEFAULT_AARYA_TOOLS: AaryaToolDefinition[] = [
   {
     name: "get_current_time",
     description: "Return the current date and time as an ISO-8601 string.",
@@ -111,7 +111,7 @@ const DEFAULT_ARYA_TOOLS: AryaToolDefinition[] = [
   },
   {
     name: "get_voice_status",
-    description: "Return the live state of the Arya voice assistant.",
+    description: "Return the live state of the AARYA voice assistant.",
     parameters: { type: "object", properties: {} },
     execute: (_args, runtime) => runtime.voiceStatus(),
   },
@@ -315,11 +315,11 @@ function errorMessage(error: unknown): string {
 }
 
 /** Execute a single tool call against the given runtime. Never throws. */
-export async function executeAryaTool(
-  call: AryaToolCall,
-  runtime: AryaToolRuntime,
-): Promise<AryaToolResult> {
-  const tool = DEFAULT_ARYA_TOOLS.find((candidate) => candidate.name === call.name);
+export async function executeAaryaTool(
+  call: AaryaToolCall,
+  runtime: AaryaToolRuntime,
+): Promise<AaryaToolResult> {
+  const tool = DEFAULT_AARYA_TOOLS.find((candidate) => candidate.name === call.name);
   if (!tool) {
     return {
       id: call.id,
@@ -336,18 +336,18 @@ export async function executeAryaTool(
 }
 
 /** Registry that owns the built-in tool set. */
-export class AryaToolRegistry {
-  constructor(private readonly runtime: AryaToolRuntime) {}
+export class AaryaToolRegistry {
+  constructor(private readonly runtime: AaryaToolRuntime) {}
 
-  definitions(): AryaToolDefinition[] {
-    return DEFAULT_ARYA_TOOLS;
+  definitions(): AaryaToolDefinition[] {
+    return DEFAULT_AARYA_TOOLS;
   }
 
-  find(name: string): AryaToolDefinition | undefined {
-    return DEFAULT_ARYA_TOOLS.find((candidate) => candidate.name === name);
+  find(name: string): AaryaToolDefinition | undefined {
+    return DEFAULT_AARYA_TOOLS.find((candidate) => candidate.name === name);
   }
 
-  execute(call: AryaToolCall): Promise<AryaToolResult> {
-    return executeAryaTool(call, this.runtime);
+  execute(call: AaryaToolCall): Promise<AaryaToolResult> {
+    return executeAaryaTool(call, this.runtime);
   }
 }

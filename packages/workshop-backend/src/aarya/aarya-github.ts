@@ -1,18 +1,18 @@
-// GitHub support for the Arya voice assistant. Arya reviews pull requests through the owner's
-// connected GitHub gatekeeper, reusing Arya's confirmation gate (AryaApprovalQueue) for the
+// GitHub support for the Aarya voice assistant. Aarya reviews pull requests through the owner's
+// connected GitHub gatekeeper, reusing Aarya's confirmation gate (AaryaApprovalQueue) for the
 // mutating postReview() call. Reads (list/read diff) authorize through the same queue, which
 // auto-approves observations of the owner's own data.
 
-/** A review decision Arya may post on a pull request. */
-export type AryaReviewDecision = "approve" | "comment" | "requestChanges";
+/** A review decision Aarya may post on a pull request. */
+export type AaryaReviewDecision = "approve" | "comment" | "requestChanges";
 
 /** A pagination cursor over GitHub results. */
-export interface AryaGithubCursor<T> {
+export interface AaryaGithubCursor<T> {
   next(): Promise<T[] | null>;
 }
 
 /** A pull request as returned by listPullRequests(). */
-export interface AryaGithubListPr {
+export interface AaryaGithubListPr {
   id: string;
   title: string;
   state: string;
@@ -20,15 +20,15 @@ export interface AryaGithubListPr {
 }
 
 /** A pull request summary shown to the model. */
-export interface AryaGithubPrSummary {
+export interface AaryaGithubPrSummary {
   number: number;
   title: string;
   author: string;
   state: string;
 }
 
-/** Full pull request details from getDetails(). Only the fields Arya reads are declared. */
-export interface AryaGithubPrDetails {
+/** Full pull request details from getDetails(). Only the fields Aarya reads are declared. */
+export interface AaryaGithubPrDetails {
   id: string;
   title: string;
   state: string;
@@ -41,51 +41,51 @@ export interface AryaGithubPrDetails {
 }
 
 /** One line inside a diff hunk. */
-export interface AryaGithubDiffLine {
+export interface AaryaGithubDiffLine {
   kind: "context" | "added" | "removed";
   text: string;
 }
 
 /** One hunk inside a changed file. */
-export interface AryaGithubDiffHunk {
+export interface AaryaGithubDiffHunk {
   header: string;
-  lines: AryaGithubDiffLine[];
+  lines: AaryaGithubDiffLine[];
 }
 
 /** One changed file in a pull request diff. */
-export interface AryaGithubDiffFile {
+export interface AaryaGithubDiffFile {
   path: string;
   status: string;
   additions: number;
   deletions: number;
-  hunks: AryaGithubDiffHunk[];
+  hunks: AaryaGithubDiffHunk[];
 }
 
 /** A pull request diff pinned to a revision. */
-export interface AryaGithubDiff {
+export interface AaryaGithubDiff {
   revision: { baseSha: string; headSha: string };
-  files: AryaGithubCursor<AryaGithubDiffFile>;
+  files: AaryaGithubCursor<AaryaGithubDiffFile>;
 }
 
-/** The subset of the GitHub pull-request capability Arya uses. */
-export interface AryaGithubPullRequest {
-  getDetails(): Promise<AryaGithubPrDetails>;
-  readDiff(): Promise<AryaGithubDiff>;
+/** The subset of the GitHub pull-request capability Aarya uses. */
+export interface AaryaGithubPullRequest {
+  getDetails(): Promise<AaryaGithubPrDetails>;
+  readDiff(): Promise<AaryaGithubDiff>;
   postReview(review: {
-    revision: AryaGithubDiff["revision"];
-    decision: AryaReviewDecision;
+    revision: AaryaGithubDiff["revision"];
+    decision: AaryaReviewDecision;
     bodyMarkdown?: string;
   }): Promise<void>;
 }
 
-/** The subset of the GitHub repo session Arya uses. */
-export interface AryaGithubRepoSession {
-  getPullRequest(id: string): Promise<AryaGithubPullRequest>;
-  listPullRequests(options?: { state?: string }): Promise<AryaGithubCursor<AryaGithubListPr>>;
+/** The subset of the GitHub repo session Aarya uses. */
+export interface AaryaGithubRepoSession {
+  getPullRequest(id: string): Promise<AaryaGithubPullRequest>;
+  listPullRequests(options?: { state?: string }): Promise<AaryaGithubCursor<AaryaGithubListPr>>;
 }
 
 /** A pull request read result returned to the model. */
-export interface AryaGithubPrReadResult {
+export interface AaryaGithubPrReadResult {
   number: number;
   title: string;
   state: string;
@@ -127,7 +127,7 @@ export function normalizeGithubPrNumberArg(args: Record<string, unknown>): numbe
 export interface ReviewPrInput {
   repo: string;
   prNumber: number;
-  decision: AryaReviewDecision;
+  decision: AaryaReviewDecision;
   body: string;
 }
 
@@ -152,7 +152,7 @@ export function normalizeReviewPrArgs(args: Record<string, unknown>): ReviewPrIn
 // large, so it is capped at maxBytes and the file list is paged lazily.
 
 /** Serialize a page of diff files into capped plain-text for the model. Pure for testing. */
-export function serializePrDiffFiles(files: AryaGithubDiffFile[], maxBytes = 20000): string {
+export function serializePrDiffFiles(files: AaryaGithubDiffFile[], maxBytes = 20000): string {
   const blocks: string[] = [];
   let bytes = 0;
   for (const file of files) {
@@ -176,8 +176,8 @@ export function serializePrDiffFiles(files: AryaGithubDiffFile[], maxBytes = 200
 }
 
 /** Page the diff files cursor (up to 50 files) and serialize to capped text. */
-export async function summarizePrDiff(diff: AryaGithubDiff, maxBytes = 20000): Promise<string> {
-  const collected: AryaGithubDiffFile[] = [];
+export async function summarizePrDiff(diff: AaryaGithubDiff, maxBytes = 20000): Promise<string> {
+  const collected: AaryaGithubDiffFile[] = [];
   for (let i = 0; i < 50; i++) {
     const page = await diff.files.next();
     if (!page) break;
