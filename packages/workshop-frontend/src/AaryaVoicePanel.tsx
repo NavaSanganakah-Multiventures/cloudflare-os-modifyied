@@ -4,7 +4,7 @@ import {
   aaryaVoiceWsUrl,
   connectAaryaVoice,
   createMicCapture,
-  playPcm16Audio,
+  AaryaAudioPlayer,
 } from './aarya-voice'
 import { Microphone, X, Phone, PhoneSlash, SpeakerHigh } from '@phosphor-icons/react'
 
@@ -21,6 +21,7 @@ export function AaryaVoicePanel() {
   const [connected, setConnected] = useState(false)
   const [aiState, setAiState] = useState('off')
   const [aiBackend, setAiBackend] = useState<string | undefined>(undefined)
+  const [statusDetail, setStatusDetail] = useState<string | null>(null)
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([])
   const [talking, setTalking] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -29,31 +30,45 @@ export function AaryaVoicePanel() {
   const wsRef = useRef<WebSocket | null>(null)
   const micRef = useRef<{ stop: () => void } | null>(null)
   const playbackRef = useRef<AudioContext | null>(null)
+  const playerRef = useRef<AaryaAudioPlayer | null>(null)
 
   const handleConnect = useCallback(async () => {
     setError(null)
+    setStatusDetail(null)
     setTranscripts([])
     try {
       const callId = crypto.randomUUID()
       const token = await authenticatedApi.mintAaryaVoiceToken(callId)
       const wsUrl = aaryaVoiceWsUrl(window.location.origin, callId, token)
 
-      if (!playbackRef.current) {
-        playbackRef.current = new AudioContext({ sampleRate: 16000 })
+      if (!playbackRef.current || playbackRef.current.state === 'closed') {
+        const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+        playbackRef.current = new AudioContextClass()
+      }
+      if (playbackRef.current.state === 'suspended') {
+        try {
+          await playbackRef.current.resume()
+        } catch {
+          // Ignore resume failure on setup.
+        }
+      }
+      if (!playerRef.current) {
+        playerRef.current = new AaryaAudioPlayer(playbackRef.current, 1.6)
       }
 
       const ws = connectAaryaVoice(wsUrl, {
         onStatus: (state, backend, detail) => {
           setAiState(state)
           if (backend) setAiBackend(backend)
+          if (detail) setStatusDetail(detail)
           if (state === 'error' && detail) setError(detail)
         },
         onTranscript: (role, text, _final) => {
           setTranscripts((prev) => [...prev, { role, text }])
         },
         onAudio: (audio) => {
-          if (playbackRef.current) {
-            playPcm16Audio(audio, playbackRef.current)
+          if (playerRef.current) {
+            void playerRef.current.play(audio)
           }
         },
         onPeerEvent: (msg) => {
@@ -87,6 +102,10 @@ export function AaryaVoicePanel() {
     if (micRef.current) {
       micRef.current.stop()
       micRef.current = null
+    }
+    if (playerRef.current) {
+      playerRef.current.stop()
+      playerRef.current = null
     }
     setTalking(false)
     if (wsRef.current) {
@@ -151,6 +170,10 @@ export function AaryaVoicePanel() {
   useEffect(() => {
     return () => {
       handleDisconnect()
+      if (playerRef.current) {
+        playerRef.current.stop()
+        playerRef.current = null
+      }
       if (playbackRef.current) {
         playbackRef.current.close()
         playbackRef.current = null
@@ -175,8 +198,16 @@ export function AaryaVoicePanel() {
               <Microphone size={16} className="text-kumo-brand" />
               <span className="text-[14px] font-medium text-kumo-default">AARYA Voice</span>
               {aiBackend && (
-                <span className="rounded-md bg-kumo-tint px-1.5 py-0.5 text-[10px] font-medium text-kumo-subtle">
-                  {aiBackend === 'gemini' ? 'Gemini' : 'Workers AI'}
+                <span
+                  title={statusDetail ?? undefined}
+                  className={
+                    'rounded-md px-1.5 py-0.5 text-[10px] font-medium ' +
+                    (aiBackend === 'gemini'
+                      ? 'bg-blue-500/10 text-blue-500'
+                      : 'bg-kumo-tint text-kumo-subtle')
+                  }
+                >
+                  {aiBackend === 'gemini' ? 'Gemini Live' : 'Workers AI'}
                 </span>
               )}
             </div>
@@ -188,7 +219,12 @@ export function AaryaVoicePanel() {
           <div className="flex items-center gap-2 px-4 py-2">
             <div className={'h-2 w-2 rounded-full ' + (aiState === 'listening' ? 'bg-green-500' : aiState === 'error' ? 'bg-red-500' : 'bg-kumo-inactive')} />
             <span className={'text-[12px] ' + (aiState === 'listening' ? 'text-green-500' : aiState === 'error' ? 'text-red-500' : 'text-kumo-inactive')}>{aiState}</span>
-            {error && <span className="text-[12px] text-red-500">{error}</span>}
+            {error && <span className="truncate text-[12px] text-red-500" title={error}>{error}</span>}
+            {!error && statusDetail && aiBackend === 'workers-ai' && (
+              <span className="truncate text-[11px] text-kumo-subtle" title={statusDetail}>
+                (Fallback active)
+              </span>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-2">

@@ -50,7 +50,7 @@ export interface AaryaVadResult {
  * when the utterance exceeds `maxUtteranceMs`.
  */
 export function detectUtteranceEnd(samples: Int16Array, options: AaryaVadOptions = {}): AaryaVadResult {
-  const threshold = options.threshold ?? 0.01;
+  const threshold = options.threshold ?? 0.004;
   const silenceMs = options.silenceMs ?? 700;
   const sampleRate = options.sampleRate ?? FALLBACK_SAMPLE_RATE;
   const frameMs = options.frameMs ?? 20;

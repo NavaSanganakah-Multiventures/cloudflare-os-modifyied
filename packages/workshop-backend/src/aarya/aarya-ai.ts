@@ -13,7 +13,7 @@ import { AaryaWorkersAiFallback } from "./aarya-fallback";
 
 const logger = createWorkshopLogger("workshop.aarya.ai");
 
-export const DEFAULT_AARYA_GEMINI_MODEL = "models/gemini-3.1-flash-live-preview";
+export const DEFAULT_AARYA_GEMINI_MODEL = "models/gemini-2.0-flash-exp";
 
 // The endpoint is documented as wss://generativelanguage.googleapis.com/ws/...; workerd's
 // fetch()-based WebSocket client requires the https:// URL for the same host and path (the runtime
@@ -302,6 +302,7 @@ export class AaryaLiveBridge implements AaryaAiSession {
     private readonly tools: GeminiTool[] = [],
     private readonly geminiKey: string,
     private readonly systemPrompt?: string,
+    private readonly modelOverride?: string,
   ) {}
 
   async start(): Promise<void> {
@@ -347,6 +348,7 @@ export class AaryaLiveBridge implements AaryaAiSession {
     });
     ws.addEventListener("error", (event) => {
       if (!this.intentionallyStopped) {
+        this.clearSetupCompleteTimer();
         this.emitStatus(
           "error",
           event.message
@@ -367,16 +369,26 @@ export class AaryaLiveBridge implements AaryaAiSession {
     }
 
     try {
+      const modelToUse =
+        this.modelOverride ??
+        this.env.AARYA_GEMINI_MODEL?.trim() ||
+        DEFAULT_AARYA_GEMINI_MODEL;
       const setupMessage = buildGeminiSetup(
         {
-          model: this.env.AARYA_GEMINI_MODEL,
+          model: modelToUse,
           systemPrompt: this.systemPrompt ?? this.env.AARYA_GEMINI_SYSTEM_PROMPT,
         },
         this.tools,
       );
-      logger.debug("gemini live setup: " + JSON.stringify(setupMessage), {
-        event: "aarya.ai.gemini.setup",
-      });
+      logger.debug(
+        "gemini live setup: model=" +
+          modelToUse +
+          ", tools=" +
+          this.tools.length,
+        {
+          event: "aarya.ai.gemini.setup",
+        },
+      );
       ws.send(JSON.stringify(setupMessage));
     } catch (error) {
       this.ws = null;
@@ -429,10 +441,12 @@ export class AaryaLiveBridge implements AaryaAiSession {
   private async handleServerMessage(data: unknown): Promise<void> {
     const parsed = parseGeminiServerMessage(data);
     if (parsed.errorDetail) {
+      this.clearSetupCompleteTimer();
       this.emitStatus("error", parsed.errorDetail);
       return;
     }
     if (parsed.goAwayDetail) {
+      this.clearSetupCompleteTimer();
       this.emitStatus("error", "Gemini Live is closing the session (time left: " + parsed.goAwayDetail + ")");
       return;
     }
@@ -475,6 +489,7 @@ export class AaryaLiveBridge implements AaryaAiSession {
 export class AaryaResilientAiSession implements AaryaAiSession {
   private activeSession: AaryaAiSession;
   private hasFallenBack = false;
+  private attemptedDefaultGeminiModel = false;
 
   constructor(
     private readonly env: Cloudflare.Env,
@@ -483,25 +498,30 @@ export class AaryaResilientAiSession implements AaryaAiSession {
     private readonly geminiKey: string,
     private readonly systemPrompt?: string,
   ) {
-    this.activeSession = new AaryaLiveBridge(
-      env,
+    this.activeSession = this.createGeminiSession();
+  }
+
+  private createGeminiSession(modelOverride?: string): AaryaLiveBridge {
+    return new AaryaLiveBridge(
+      this.env,
       {
-        ...callbacks,
+        ...this.callbacks,
         onStatus: (status) => {
           if (status.state === "error" && !this.hasFallenBack) {
-            logger.warn("Gemini Live session reported error, initiating Workers AI fallback", {
+            logger.warn("Gemini Live session reported error, handling fallback", {
               event: "aarya.ai.resilient.fallback_on_error",
               error: status.detail,
             });
-            void this.switchToFallback(status.detail);
+            void this.handleGeminiFailure(status.detail);
             return;
           }
-          callbacks.onStatus(status);
+          this.callbacks.onStatus(status);
         },
       },
-      tools,
-      geminiKey,
-      systemPrompt,
+      this.tools,
+      this.geminiKey,
+      this.systemPrompt,
+      modelOverride,
     );
   }
 
@@ -513,11 +533,11 @@ export class AaryaResilientAiSession implements AaryaAiSession {
     try {
       await this.activeSession.start();
     } catch (error) {
-      logger.warn("Gemini Live start failed, falling back to Workers AI", {
+      logger.warn("Gemini Live start failed, handling fallback", {
         event: "aarya.ai.resilient.start_failed_fallback",
         error,
       });
-      await this.switchToFallback(errorMessage(error));
+      await this.handleGeminiFailure(errorMessage(error));
     }
   }
 
@@ -527,6 +547,38 @@ export class AaryaResilientAiSession implements AaryaAiSession {
 
   async handleAudioChunk(chunk: ArrayBuffer): Promise<void> {
     await this.activeSession.handleAudioChunk(chunk);
+  }
+
+  private async handleGeminiFailure(reason?: string): Promise<void> {
+    if (this.hasFallenBack) return;
+
+    // If a custom model was configured and failed, retry once with the standard default model.
+    const customModel = this.env.AARYA_GEMINI_MODEL?.trim();
+    if (customModel && customModel !== DEFAULT_AARYA_GEMINI_MODEL && !this.attemptedDefaultGeminiModel) {
+      this.attemptedDefaultGeminiModel = true;
+      logger.info(
+        "configured Gemini model failed, retrying with default model " + DEFAULT_AARYA_GEMINI_MODEL,
+        {
+          event: "aarya.ai.resilient.retry_default_model",
+          customModel,
+          defaultModel: DEFAULT_AARYA_GEMINI_MODEL,
+        },
+      );
+      try {
+        await this.activeSession.stop();
+      } catch {
+        // Ignore stop errors.
+      }
+      this.activeSession = this.createGeminiSession(DEFAULT_AARYA_GEMINI_MODEL);
+      try {
+        await this.activeSession.start();
+        return;
+      } catch (err) {
+        reason = "Default model failed after custom model (" + (reason ?? "") + "): " + errorMessage(err);
+      }
+    }
+
+    await this.switchToFallback(reason);
   }
 
   private async switchToFallback(reason?: string): Promise<void> {
