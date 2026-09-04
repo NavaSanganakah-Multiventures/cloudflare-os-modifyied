@@ -204,10 +204,10 @@ export class AaryaWorkersAiFallback implements AaryaAiSession {
     if (!shouldTranscribe(utterance)) {
       // Too short to transcribe reliably; sending it to whisper produces an empty VAD segment
       // set and crashes the Triton backend. Drop it and keep listening.
-      logger.debug("dropping too-short aarya utterance", {
-        event: "aarya.ai.fallback.utterance.too_short",
-        samples: utterance.length,
-      });
+      logger.debug(
+        "dropping too-short aarya utterance (" + utterance.length + " samples)",
+        { event: "aarya.ai.fallback.utterance.too_short" },
+      );
       return;
     }
 
