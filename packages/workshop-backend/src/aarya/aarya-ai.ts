@@ -78,7 +78,7 @@ export function base64ToPcm16(base64: string): ArrayBuffer {
 /** Build the Gemini Live setup message (sent as the first WebSocket frame). */
 export function buildGeminiSetup(options: GeminiSetupOptions, tools: GeminiTool[] = []): Record<string, unknown> {
   const setup: Record<string, unknown> = {
-    model: options.model ?? DEFAULT_AARYA_GEMINI_MODEL,
+    model: options.model?.trim() || DEFAULT_AARYA_GEMINI_MODEL,
     generationConfig: {
       responseModalities: ["AUDIO"],
     },
@@ -114,6 +114,7 @@ export interface ParsedGeminiMessage {
   assistantTranscripts: string[];
   toolCalls: AaryaToolCall[];
   goAwayDetail?: string;
+  errorDetail?: string;
 }
 
 /** Parse a Gemini Live server message (string or pre-parsed object). Defensive: never throws. */
@@ -137,6 +138,23 @@ export function parseGeminiServerMessage(message: unknown): ParsedGeminiMessage 
   if (!msg || typeof msg !== "object") return parsed;
 
   const record = msg as Record<string, unknown>;
+
+  // gRPC-style error envelope (code/message/status). The Live API normally closes the socket on
+  // errors, but some failures are delivered as a final message and then left half-open, which would
+  // otherwise surface only as a setupComplete timeout. Surface the real reason instead.
+  const error = record["error"];
+  if (error && typeof error === "object") {
+    const e = error as Record<string, unknown>;
+    const message = typeof e["message"] === "string" ? e["message"] : "";
+    const status = typeof e["status"] === "string" ? e["status"] : "";
+    const code = typeof e["code"] === "number" ? String(e["code"]) : "";
+    parsed.errorDetail =
+      "Gemini Live error" +
+      (status ? " (" + status + ")" : "") +
+      (code ? " code " + code : "") +
+      (message ? ": " + message : "");
+  }
+
   parsed.setupComplete = "setupComplete" in record;
 
   const goAway = record["goAway"];
@@ -261,7 +279,6 @@ async function connectGeminiLiveSocket(url: string): Promise<WebSocket> {
       );
     }
     ws.binaryType = "arraybuffer";
-    ws.accept();
     return ws;
   } catch (error) {
     if (controller.signal.aborted) {
@@ -341,18 +358,28 @@ class AaryaLiveBridge implements AaryaAiSession {
       }
     });
 
+    // Accept only after listeners are attached so an early close/error/message is never missed.
     try {
-      ws.send(
-        JSON.stringify(
-          buildGeminiSetup(
-            {
-              model: this.env.AARYA_GEMINI_MODEL,
-              systemPrompt: this.systemPrompt ?? this.env.AARYA_GEMINI_SYSTEM_PROMPT,
-            },
-            this.tools,
-          ),
-        ),
+      ws.accept();
+    } catch (error) {
+      this.ws = null;
+      this.clearSetupCompleteTimer();
+      this.emitStatus("error", errorMessage(error));
+      throw error;
+    }
+
+    try {
+      const setupMessage = buildGeminiSetup(
+        {
+          model: this.env.AARYA_GEMINI_MODEL,
+          systemPrompt: this.systemPrompt ?? this.env.AARYA_GEMINI_SYSTEM_PROMPT,
+        },
+        this.tools,
       );
+      logger.debug("gemini live setup: " + JSON.stringify(setupMessage), {
+        event: "aarya.ai.gemini.setup",
+      });
+      ws.send(JSON.stringify(setupMessage));
     } catch (error) {
       this.ws = null;
       this.clearSetupCompleteTimer();
@@ -403,6 +430,10 @@ class AaryaLiveBridge implements AaryaAiSession {
 
   private async handleServerMessage(data: unknown): Promise<void> {
     const parsed = parseGeminiServerMessage(data);
+    if (parsed.errorDetail) {
+      this.emitStatus("error", parsed.errorDetail);
+      return;
+    }
     if (parsed.goAwayDetail) {
       this.emitStatus("error", "Gemini Live is closing the session (time left: " + parsed.goAwayDetail + ")");
       return;
