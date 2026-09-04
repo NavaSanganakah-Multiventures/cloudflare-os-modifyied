@@ -10,7 +10,7 @@ import {
   parseGeminiServerMessage,
   pcm16ToBase64,
 } from "../src/aarya/aarya-ai";
-import { detectUtteranceEnd, pcm16ToWavBytes, utteranceEnded } from "../src/aarya/aarya-fallback";
+import { detectUtteranceEnd, pcm16ToWavBytes, shouldTranscribe, utteranceEnded } from "../src/aarya/aarya-fallback";
 import {
   AaryaToolRegistry,
   executeAaryaTool,
@@ -187,6 +187,18 @@ describe("pcm16 to WAV", () => {
     expect(view.getInt16(48, true)).toBe(-1);
     expect(view.getInt16(50, true)).toBe(32000);
     expect(wav.byteLength).toBe(52);
+  });
+});
+
+describe("whisper STT utterance guard", () => {
+  it("skips utterances shorter than the minimum transcribe length", () => {
+    expect(shouldTranscribe(loudSamples(0.4 * 16000))).toBe(false);
+    expect(shouldTranscribe(new Int16Array(0))).toBe(false);
+  });
+
+  it("allows utterances at least the minimum transcribe length", () => {
+    expect(shouldTranscribe(loudSamples(0.5 * 16000))).toBe(true);
+    expect(shouldTranscribe(loudSamples(1.0 * 16000))).toBe(true);
   });
 });
 
