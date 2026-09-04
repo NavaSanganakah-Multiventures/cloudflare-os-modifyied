@@ -369,10 +369,10 @@ export class AaryaLiveBridge implements AaryaAiSession {
     }
 
     try {
+      const configuredModel = this.env.AARYA_GEMINI_MODEL?.trim();
       const modelToUse =
         this.modelOverride ??
-        this.env.AARYA_GEMINI_MODEL?.trim() ||
-        DEFAULT_AARYA_GEMINI_MODEL;
+        (configuredModel ? configuredModel : DEFAULT_AARYA_GEMINI_MODEL);
       const setupMessage = buildGeminiSetup(
         {
           model: modelToUse,
