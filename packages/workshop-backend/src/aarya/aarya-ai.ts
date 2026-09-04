@@ -142,7 +142,9 @@ export function parseGeminiServerMessage(message: unknown): ParsedGeminiMessage 
   const goAway = record["goAway"];
   if (goAway && typeof goAway === "object") {
     const timeLeft = (goAway as Record<string, unknown>)["timeLeft"];
-    parsed.goAwayDetail = typeof timeLeft === "string" ? timeLeft : "unknown";
+    if (typeof timeLeft === "string") {
+      parsed.goAwayDetail = timeLeft;
+    }
   }
 
   const serverContent = record["serverContent"];
@@ -263,7 +265,7 @@ async function connectGeminiLiveSocket(url: string): Promise<WebSocket> {
     return ws;
   } catch (error) {
     if (controller.signal.aborted) {
-      throw new Error("Gemini Live connection timed out during handshake");
+      throw new Error("Gemini Live connection timed out during handshake", { cause: error });
     }
     throw error;
   } finally {
