@@ -557,11 +557,12 @@ export class AaryaResilientAiSession implements AaryaAiSession {
     if (customModel && customModel !== DEFAULT_AARYA_GEMINI_MODEL && !this.attemptedDefaultGeminiModel) {
       this.attemptedDefaultGeminiModel = true;
       logger.info(
-        "configured Gemini model failed, retrying with default model " + DEFAULT_AARYA_GEMINI_MODEL,
+        "configured Gemini model " +
+          customModel +
+          " failed, retrying with default model " +
+          DEFAULT_AARYA_GEMINI_MODEL,
         {
           event: "aarya.ai.resilient.retry_default_model",
-          customModel,
-          defaultModel: DEFAULT_AARYA_GEMINI_MODEL,
         },
       );
       try {
