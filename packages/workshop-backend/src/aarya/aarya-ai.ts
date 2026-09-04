@@ -15,8 +15,14 @@ const logger = createWorkshopLogger("workshop.aarya.ai");
 
 export const DEFAULT_AARYA_GEMINI_MODEL = "models/gemini-3.1-flash-live-preview";
 
+// The endpoint is documented as wss://generativelanguage.googleapis.com/ws/...; workerd's
+// fetch()-based WebSocket client requires the https:// URL for the same host and path (the runtime
+// performs the WebSocket upgrade handshake on our behalf).
 const GEMINI_LIVE_ENDPOINT =
-  "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+  "https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+
+const GEMINI_HANDSHAKE_TIMEOUT_MS = 15000;
+const GEMINI_SETUP_COMPLETE_TIMEOUT_MS = 15000;
 
 export const DEFAULT_AARYA_PERSONA =
   "You are AARYA, a friendly and helpful voice assistant for the user's workspace platform. " +
@@ -107,6 +113,7 @@ export interface ParsedGeminiMessage {
   userTranscripts: string[];
   assistantTranscripts: string[];
   toolCalls: AaryaToolCall[];
+  goAwayDetail?: string;
 }
 
 /** Parse a Gemini Live server message (string or pre-parsed object). Defensive: never throws. */
@@ -131,6 +138,12 @@ export function parseGeminiServerMessage(message: unknown): ParsedGeminiMessage 
 
   const record = msg as Record<string, unknown>;
   parsed.setupComplete = "setupComplete" in record;
+
+  const goAway = record["goAway"];
+  if (goAway && typeof goAway === "object") {
+    const timeLeft = (goAway as Record<string, unknown>)["timeLeft"];
+    parsed.goAwayDetail = typeof timeLeft === "string" ? timeLeft : "unknown";
+  }
 
   const serverContent = record["serverContent"];
   if (serverContent && typeof serverContent === "object") {
@@ -218,23 +231,44 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function waitForOpen(ws: WebSocket): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const cleanup = () => {
-      ws.removeEventListener("open", onOpen);
-      ws.removeEventListener("error", onError);
-    };
-    const onOpen = () => {
-      cleanup();
-      resolve();
-    };
-    const onError = () => {
-      cleanup();
-      reject(new Error("Gemini Live WebSocket failed to connect"));
-    };
-    ws.addEventListener("open", onOpen);
-    ws.addEventListener("error", onError);
-  });
+/** Log-friendly, bounded rendering of a raw Gemini server message. */
+function describeServerMessage(data: unknown): string {
+  const text = typeof data === "string" ? data : String(data);
+  return text.length > 1000 ? text.slice(0, 1000) + "..." : text;
+}
+
+/** Open a client WebSocket to Gemini using workerd's fetch-based upgrade pattern. */
+async function connectGeminiLiveSocket(url: string): Promise<WebSocket> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GEMINI_HANDSHAKE_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      headers: { Upgrade: "websocket" },
+      signal: controller.signal,
+    });
+    const ws = response.webSocket;
+    if (!ws) {
+      let body = "";
+      try {
+        body = (await response.text()).slice(0, 500);
+      } catch {
+        // Ignore body read failures; the HTTP status is the useful signal.
+      }
+      throw new Error(
+        "Gemini Live connection failed with HTTP " + response.status + (body ? ": " + body : ""),
+      );
+    }
+    ws.binaryType = "arraybuffer";
+    ws.accept();
+    return ws;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error("Gemini Live connection timed out during handshake");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Gemini Live bridge: bidirectional WebSocket to Google's BidiGenerateContent endpoint. */
@@ -242,6 +276,8 @@ class AaryaLiveBridge implements AaryaAiSession {
   readonly backend: AaryaAiBackend = "gemini";
   private ws: WebSocket | null = null;
   private intentionallyStopped = false;
+  private setupCompleteReceived = false;
+  private setupCompleteTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly env: Cloudflare.Env,
@@ -258,11 +294,12 @@ class AaryaLiveBridge implements AaryaAiSession {
       throw new Error("AARYA_GEMINI_API_KEY is not configured");
     }
     this.intentionallyStopped = false;
+    this.setupCompleteReceived = false;
     this.emitStatus("connecting");
 
     let ws: WebSocket;
     try {
-      ws = new WebSocket(GEMINI_LIVE_ENDPOINT + "?key=" + encodeURIComponent(key));
+      ws = await connectGeminiLiveSocket(GEMINI_LIVE_ENDPOINT + "?key=" + encodeURIComponent(key));
     } catch (error) {
       this.emitStatus("error", errorMessage(error));
       throw error;
@@ -270,6 +307,9 @@ class AaryaLiveBridge implements AaryaAiSession {
     this.ws = ws;
 
     ws.addEventListener("message", (event) => {
+      logger.debug("gemini live server message: " + describeServerMessage(event.data), {
+        event: "aarya.ai.gemini.message.raw",
+      });
       void this.handleServerMessage(event.data).catch((error) => {
         logger.warn("failed to handle gemini live message", {
           event: "aarya.ai.gemini.message.failed",
@@ -277,42 +317,63 @@ class AaryaLiveBridge implements AaryaAiSession {
         });
       });
     });
-    ws.addEventListener("close", () => {
+    ws.addEventListener("close", (event) => {
       if (this.ws !== ws) return;
       this.ws = null;
+      this.clearSetupCompleteTimer();
       if (!this.intentionallyStopped) {
-        this.emitStatus("error", "Gemini Live connection closed");
+        this.emitStatus(
+          "error",
+          "Gemini Live connection closed (code " + event.code + ", reason: " + (event.reason || "none") + ")",
+        );
       }
     });
-    ws.addEventListener("error", () => {
+    ws.addEventListener("error", (event) => {
       if (!this.intentionallyStopped) {
-        this.emitStatus("error", "Gemini Live connection error");
+        this.emitStatus(
+          "error",
+          event.message
+            ? "Gemini Live connection error: " + event.message
+            : "Gemini Live connection error",
+        );
       }
     });
 
     try {
-      await waitForOpen(ws);
+      ws.send(
+        JSON.stringify(
+          buildGeminiSetup(
+            {
+              model: this.env.AARYA_GEMINI_MODEL,
+              systemPrompt: this.systemPrompt ?? this.env.AARYA_GEMINI_SYSTEM_PROMPT,
+            },
+            this.tools,
+          ),
+        ),
+      );
     } catch (error) {
       this.ws = null;
+      this.clearSetupCompleteTimer();
       this.emitStatus("error", errorMessage(error));
       throw error;
     }
 
-    ws.send(
-      JSON.stringify(
-        buildGeminiSetup(
-          {
-            model: this.env.AARYA_GEMINI_MODEL,
-            systemPrompt: this.systemPrompt ?? this.env.AARYA_GEMINI_SYSTEM_PROMPT,
-          },
-          this.tools,
-        ),
-      ),
-    );
+    this.setupCompleteTimer = setTimeout(() => {
+      if (this.intentionallyStopped || this.setupCompleteReceived) return;
+      this.ws = null;
+      this.clearSetupCompleteTimer();
+      this.emitStatus("error", "Gemini Live did not confirm setup (setupComplete timeout)");
+      try {
+        ws.close(4000, "setupComplete timeout");
+      } catch {
+        // Already closed.
+      }
+    }, GEMINI_SETUP_COMPLETE_TIMEOUT_MS);
   }
 
   async stop(): Promise<void> {
     this.intentionallyStopped = true;
+    this.clearSetupCompleteTimer();
     const ws = this.ws;
     this.ws = null;
     if (ws) {
@@ -340,7 +401,13 @@ class AaryaLiveBridge implements AaryaAiSession {
 
   private async handleServerMessage(data: unknown): Promise<void> {
     const parsed = parseGeminiServerMessage(data);
+    if (parsed.goAwayDetail) {
+      this.emitStatus("error", "Gemini Live is closing the session (time left: " + parsed.goAwayDetail + ")");
+      return;
+    }
     if (parsed.setupComplete) {
+      this.setupCompleteReceived = true;
+      this.clearSetupCompleteTimer();
       this.emitStatus("listening");
     }
     for (const audio of parsed.audio) {
@@ -358,6 +425,13 @@ class AaryaLiveBridge implements AaryaAiSession {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(buildGeminiToolResponse(results)));
       }
+    }
+  }
+
+  private clearSetupCompleteTimer(): void {
+    if (this.setupCompleteTimer !== null) {
+      clearTimeout(this.setupCompleteTimer);
+      this.setupCompleteTimer = null;
     }
   }
 
