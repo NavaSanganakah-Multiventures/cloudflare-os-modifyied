@@ -22,7 +22,11 @@ const GEMINI_LIVE_ENDPOINT =
   "https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 
 const GEMINI_HANDSHAKE_TIMEOUT_MS = 15000;
-const GEMINI_SETUP_COMPLETE_TIMEOUT_MS = 15000;
+const GEMINI_SETUP_COMPLETE_TIMEOUT_MS = 30000;
+
+// Gemini Live outputs assistant audio as PCM16 at 24kHz; the voice panel plays PCM16 at 16kHz.
+const GEMINI_LIVE_OUTPUT_SAMPLE_RATE = 24000;
+const AARYA_PLAYBACK_SAMPLE_RATE = 16000;
 
 export const DEFAULT_AARYA_PERSONA =
   "You are AARYA, a friendly and helpful voice assistant for the user's workspace platform. " +
@@ -75,6 +79,25 @@ export function base64ToPcm16(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+/** Resample mono PCM16 by linear interpolation (e.g. Gemini's 24kHz output to 16kHz playback). */
+export function resamplePcm16(input: ArrayBuffer, fromRate: number, toRate: number): ArrayBuffer {
+  const src = new Int16Array(input);
+  if (src.length === 0 || fromRate <= 0 || toRate <= 0 || fromRate === toRate) {
+    return input.slice(0);
+  }
+  const ratio = fromRate / toRate;
+  const outLength = Math.max(1, Math.floor(src.length / ratio));
+  const out = new Int16Array(outLength);
+  for (let i = 0; i < outLength; i++) {
+    const position = i * ratio;
+    const left = Math.floor(position);
+    const right = Math.min(left + 1, src.length - 1);
+    const fraction = position - left;
+    out[i] = Math.round(src[left] + (src[right] - src[left]) * fraction);
+  }
+  return out.buffer;
+}
+
 /** Build the Gemini Live setup message (sent as the first WebSocket frame). */
 export function buildGeminiSetup(options: GeminiSetupOptions, tools: GeminiTool[] = []): Record<string, unknown> {
   const setup: Record<string, unknown> = {
@@ -85,6 +108,8 @@ export function buildGeminiSetup(options: GeminiSetupOptions, tools: GeminiTool[
     systemInstruction: {
       parts: [{ text: options.systemPrompt ?? DEFAULT_AARYA_PERSONA }],
     },
+    inputAudioTranscription: {},
+    outputAudioTranscription: {},
   };
   if (tools.length > 0) {
     setup["tools"] = tools;
@@ -389,6 +414,9 @@ export class AaryaLiveBridge implements AaryaAiSession {
       if (this.intentionallyStopped || this.setupCompleteReceived) return;
       this.ws = null;
       this.clearSetupCompleteTimer();
+      logger.warn("gemini live setupComplete timeout, readyState=" + ws.readyState, {
+        event: "aarya.ai.gemini.setup.timeout",
+      });
       this.emitStatus("error", "Gemini Live did not confirm setup (setupComplete timeout)");
       try {
         ws.close(4000, "setupComplete timeout");
@@ -442,7 +470,7 @@ export class AaryaLiveBridge implements AaryaAiSession {
       this.emitStatus("listening");
     }
     for (const audio of parsed.audio) {
-      this.callbacks.onAudio(audio);
+      this.callbacks.onAudio(resamplePcm16(audio, GEMINI_LIVE_OUTPUT_SAMPLE_RATE, AARYA_PLAYBACK_SAMPLE_RATE));
     }
     for (const text of parsed.userTranscripts) {
       this.callbacks.onTranscript({ role: "user", text, final: true });
