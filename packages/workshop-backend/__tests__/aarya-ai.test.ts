@@ -9,6 +9,7 @@ import {
   DEFAULT_AARYA_GEMINI_MODEL,
   parseGeminiServerMessage,
   pcm16ToBase64,
+  resamplePcm16,
 } from "../src/aarya/aarya-ai";
 import { detectUtteranceEnd, pcm16ToWavBytes, shouldTranscribe, utteranceEnded } from "../src/aarya/aarya-fallback";
 import {
@@ -45,6 +46,9 @@ describe("gemini wire helpers", () => {
       parts: [{ text: "You are a test assistant." }],
     });
 
+    expect(body["inputAudioTranscription"]).toEqual({});
+    expect(body["outputAudioTranscription"]).toEqual({});
+
     expect(Array.isArray(body["tools"])).toBe(true);
     const tools = body["tools"] as Array<Record<string, unknown>>;
     expect(tools[0]["functionDeclarations"]).toEqual([
@@ -73,6 +77,20 @@ describe("gemini wire helpers", () => {
     const bytes = Uint8Array.from([0, 1, 2, 250, 255, 128]);
     const roundTripped = new Uint8Array(base64ToPcm16(pcm16ToBase64(bytes)));
     expect(Array.from(roundTripped)).toEqual(Array.from(bytes));
+  });
+
+  it("resamples 24kHz PCM16 to 16kHz by linear interpolation", () => {
+    const input = Int16Array.from([0, 1000, 2000]);
+    const out = new Int16Array(resamplePcm16(input.buffer, 24000, 16000));
+    expect(out.length).toBe(2);
+    expect(out[0]).toBe(0);
+    expect(out[1]).toBe(1500);
+  });
+
+  it("returns input unchanged for identical rates", () => {
+    const input = Int16Array.from([100, -200, 300]);
+    const out = new Int16Array(resamplePcm16(input.buffer, 16000, 16000));
+    expect(Array.from(out)).toEqual([100, -200, 300]);
   });
 
   it("parses setupComplete, audio, transcriptions, and tool calls", () => {
