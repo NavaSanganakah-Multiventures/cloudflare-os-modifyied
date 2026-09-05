@@ -46,7 +46,8 @@ export function AaryaVoicePanel() {
         onStatus: (state, backend, detail) => {
           setAiState(state)
           if (backend) setAiBackend(backend)
-          if (state === 'error' && detail) setError(detail)
+          if (detail) setError(detail)
+          else if (state === 'error') setError('AARYA encountered an error')
         },
         onTranscript: (role, text, _final) => {
           setTranscripts((prev) => [...prev, { role, text }])
@@ -102,6 +103,7 @@ export function AaryaVoicePanel() {
     setAiState('off')
     setTranscripts([])
     setConfirmation(null)
+    setError(null)
   }, [])
 
   const handleStartTalk = useCallback(async () => {
@@ -188,8 +190,8 @@ export function AaryaVoicePanel() {
           <div className="flex items-center gap-2 px-4 py-2">
             <div className={'h-2 w-2 rounded-full ' + (aiState === 'listening' ? 'bg-green-500' : aiState === 'error' ? 'bg-red-500' : 'bg-kumo-inactive')} />
             <span className={'text-[12px] ' + (aiState === 'listening' ? 'text-green-500' : aiState === 'error' ? 'text-red-500' : 'text-kumo-inactive')}>{aiState}</span>
-            {error && <span className="text-[12px] text-red-500">{error}</span>}
           </div>
+          {error && <p className="px-4 pb-2 text-[11px] leading-4 text-red-500">{error}</p>}
 
           <div className="flex-1 overflow-y-auto px-4 py-2">
             {transcripts.length === 0 ? (

@@ -545,7 +545,7 @@ export class AaryaResilientAiSession implements AaryaAiSession {
     this.callbacks.onStatus({
       state: "connecting",
       backend: "workers-ai",
-      detail: reason ? "Falling back to Workers AI: " + reason : "Falling back to Workers AI",
+      detail: `Gemini Live failed${reason ? ": " + reason : ""}. Switched to Workers AI fallback.`,
     });
 
     try {
