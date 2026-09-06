@@ -131,7 +131,7 @@ export class JulesRest {
     if (contentType.includes("application/json")) {
       return toCamelKeys(await response.json());
     }
-    return toCamelKeys(await response.text());
+    return await response.text();
   }
 
   private get(path: string): Promise<unknown> {
