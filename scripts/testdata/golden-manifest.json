@@ -490,6 +490,47 @@
         "BASE_URL": "$PUBLIC_BASE_URL/gatekeeper/jules"
       }
     },
+    "gatekeeper-jules-flow": {
+      "bindings": [],
+      "compatibilityDate": "2026-02-02",
+      "compatibilityFlags": [
+        "allow_irrevocable_stub_storage"
+      ],
+      "inputs": [],
+      "installable": true,
+      "kind": "gatekeeper",
+      "mainModule": "jules-flow.js",
+      "migrations": [
+        {
+          "new_sqlite_classes": [
+            "JulesFlowGatekeeperImpl"
+          ],
+          "tag": "v0"
+        }
+      ],
+      "modules": [
+        {
+          "name": "jules-flow.js",
+          "r2Key": "blobs/modules/3ebe85675768680c3451c96f2eb9de8a3404bbca3451d7b32cb53058e87ced75",
+          "sha256": "3ebe85675768680c3451c96f2eb9de8a3404bbca3451d7b32cb53058e87ced75",
+          "size": 63,
+          "type": "esm"
+        }
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "logs": {
+          "invocation_logs": false
+        }
+      },
+      "preinstall": true,
+      "shortName": "jules-flow",
+      "singleton": true,
+      "vars": {
+        "BASE_URL": "$PUBLIC_BASE_URL/gatekeeper/jules-flow"
+      }
+    },
     "gatekeeper-linear": {
       "bindings": [
         {
