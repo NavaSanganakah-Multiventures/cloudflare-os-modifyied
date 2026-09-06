@@ -13,13 +13,13 @@ import { AaryaWorkersAiFallback } from "./aarya-fallback";
 
 const logger = createWorkshopLogger("workshop.aarya.ai");
 
-export const DEFAULT_AARYA_GEMINI_MODEL = "models/gemini-3.1-flash-live-preview";
+export const DEFAULT_AARYA_GEMINI_MODEL = "models/gemini-2.0-flash-exp";
 
 // The endpoint is documented as wss://generativelanguage.googleapis.com/ws/...; workerd's
 // fetch()-based WebSocket client requires the https:// URL for the same host and path (the runtime
 // performs the WebSocket upgrade handshake on our behalf).
 const GEMINI_LIVE_ENDPOINT =
-  "https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
+  "https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent";
 
 const GEMINI_HANDSHAKE_TIMEOUT_MS = 15000;
 const GEMINI_SETUP_COMPLETE_TIMEOUT_MS = 30000;

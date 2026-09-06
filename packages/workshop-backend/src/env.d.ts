@@ -114,7 +114,7 @@ declare global {
 
       // Gemini Live primary AI bridge.
       AARYA_GEMINI_API_KEY?: string;
-      AARYA_GEMINI_MODEL?: string;          // default "models/gemini-3.1-flash-live-preview"
+      AARYA_GEMINI_MODEL?: string;          // default "models/gemini-2.0-flash-exp"
       AARYA_GEMINI_SYSTEM_PROMPT?: string;
       // Workers AI fallback configuration.
       AARYA_WORKERS_AI_LLM?: string;        // default "@cf/meta/llama-3.1-8b-instruct-fast"
