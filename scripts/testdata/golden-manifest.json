@@ -450,6 +450,46 @@
         "BASE_URL": "$PUBLIC_BASE_URL/gatekeeper/homeassistant"
       }
     },
+    "gatekeeper-jules": {
+      "bindings": [],
+      "compatibilityDate": "2026-02-02",
+      "compatibilityFlags": [
+        "allow_irrevocable_stub_storage"
+      ],
+      "inputs": [],
+      "installable": true,
+      "kind": "gatekeeper",
+      "mainModule": "jules.js",
+      "migrations": [
+        {
+          "new_sqlite_classes": [
+            "UserAccount",
+            "JulesGatekeeperImpl"
+          ],
+          "tag": "v0"
+        }
+      ],
+      "modules": [
+        {
+          "name": "jules.js",
+          "r2Key": "blobs/modules/96b78a8ff64f41328685c8352a1fde015f8fb4452a5005ba4c847657ea50f56e",
+          "sha256": "96b78a8ff64f41328685c8352a1fde015f8fb4452a5005ba4c847657ea50f56e",
+          "size": 58,
+          "type": "esm"
+        }
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "logs": {
+          "invocation_logs": false
+        }
+      },
+      "shortName": "jules",
+      "vars": {
+        "BASE_URL": "$PUBLIC_BASE_URL/gatekeeper/jules"
+      }
+    },
     "gatekeeper-linear": {
       "bindings": [
         {
