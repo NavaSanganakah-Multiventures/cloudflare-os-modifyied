@@ -399,9 +399,13 @@ export class AaryaLiveBridge implements AaryaAiSession {
         },
         this.tools,
       );
-      logger.debug("gemini live setup: " + JSON.stringify(setupMessage), {
-        event: "aarya.ai.gemini.setup",
-      });
+      const modelForLog = (this.env.AARYA_GEMINI_MODEL ?? "").trim() || DEFAULT_AARYA_GEMINI_MODEL;
+      const systemPromptForLog = this.systemPrompt ?? this.env.AARYA_GEMINI_SYSTEM_PROMPT ?? "";
+      logger.debug(
+        "gemini live setup: model=" + modelForLog + ", tools=" + this.tools.length +
+          ", systemPromptChars=" + systemPromptForLog.length,
+        { event: "aarya.ai.gemini.setup" },
+      );
       ws.send(JSON.stringify(setupMessage));
     } catch (error) {
       this.ws = null;
@@ -457,10 +461,12 @@ export class AaryaLiveBridge implements AaryaAiSession {
   private async handleServerMessage(data: unknown): Promise<void> {
     const parsed = parseGeminiServerMessage(data);
     if (parsed.errorDetail) {
+      this.clearSetupCompleteTimer();
       this.emitStatus("error", parsed.errorDetail);
       return;
     }
     if (parsed.goAwayDetail) {
+      this.clearSetupCompleteTimer();
       this.emitStatus("error", "Gemini Live is closing the session (time left: " + parsed.goAwayDetail + ")");
       return;
     }
