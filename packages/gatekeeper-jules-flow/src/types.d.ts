@@ -49,6 +49,8 @@ export interface WorkflowInfo {
   title?: string;
   request: string;
   planSummary: string;
+  julesPrompt?: string;
+  officialDocs?: FlowOfficialDoc[];
   githubRepo: string;
   julesSource: string;
   julesSessionId?: string;
