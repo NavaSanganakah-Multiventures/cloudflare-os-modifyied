@@ -7,10 +7,9 @@ This package wraps the Jules REST API (https://jules.googleapis.com/v1alpha, aut
 - list and get Jules sources (GitHub repositories connected to Jules);
 - create, get, and list Jules sessions;
 - send messages and approve plans;
-- archive, unarchive, and delete sessions;
 - list and get session activities (generated plans, progress updates, and pull requests).
 
-Read-only operations are authorized as observations after the data is fetched. Side-effecting operations go through the approval queue as actions and are only applied once approved.
+Read-only operations are authorized as observations after the data is fetched. Side-effecting operations go through the approval queue as actions and are only applied once approved. List methods follow the API's nextPageToken automatically and return every matching result.
 
 ## Connection
 
