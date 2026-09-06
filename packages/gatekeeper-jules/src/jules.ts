@@ -583,6 +583,13 @@ function truncate(text: string, max: number): string {
   return text.length <= max ? text : text.slice(0, max - 1) + "\u2026";
 }
 
+const JULES_CREATE_SESSION_ACTION: ActionKind = { tag: "jules.createSession", label: "Create a Google Jules session" };
+const JULES_SEND_MESSAGE_ACTION: ActionKind = { tag: "jules.sendMessage", label: "Send a message to a Jules session" };
+const JULES_APPROVE_PLAN_ACTION: ActionKind = { tag: "jules.approvePlan", label: "Approve a Jules plan" };
+const JULES_ARCHIVE_SESSION_ACTION: ActionKind = { tag: "jules.archiveSession", label: "Archive a Jules session" };
+const JULES_UNARCHIVE_SESSION_ACTION: ActionKind = { tag: "jules.unarchiveSession", label: "Unarchive a Jules session" };
+const JULES_DELETE_SESSION_ACTION: ActionKind = { tag: "jules.deleteSession", label: "Delete a Jules session" };
+
 function describeAction(action: JulesAction): ActionDescription {
   switch (action.type) {
     case "createSession": {
@@ -594,6 +601,8 @@ function describeAction(action: JulesAction): ActionDescription {
         description: "Starts a new Jules session with prompt \"" + prompt + "\"" + title + source + ".",
         implementsRevert: false,
         awaitDecision: true,
+        actionKind: JULES_CREATE_SESSION_ACTION,
+        autoApprovable: true,
       };
     }
     case "sendMessage":
@@ -602,6 +611,8 @@ function describeAction(action: JulesAction): ActionDescription {
         description: "Sends a message to " + action.session + ": \"" + truncate(action.prompt, 160) + "\".",
         implementsRevert: false,
         awaitDecision: true,
+        actionKind: JULES_SEND_MESSAGE_ACTION,
+        autoApprovable: true,
       };
     case "approvePlan":
       return {
@@ -609,6 +620,8 @@ function describeAction(action: JulesAction): ActionDescription {
         description: "Approves the pending plan in " + action.session + ".",
         implementsRevert: false,
         awaitDecision: true,
+        actionKind: JULES_APPROVE_PLAN_ACTION,
+        autoApprovable: true,
       };
     case "archiveSession":
       return {
@@ -616,6 +629,8 @@ function describeAction(action: JulesAction): ActionDescription {
         description: "Archives " + action.session + ".",
         implementsRevert: false,
         awaitDecision: true,
+        actionKind: JULES_ARCHIVE_SESSION_ACTION,
+        autoApprovable: true,
       };
     case "unarchiveSession":
       return {
@@ -623,6 +638,8 @@ function describeAction(action: JulesAction): ActionDescription {
         description: "Unarchives " + action.session + ".",
         implementsRevert: false,
         awaitDecision: true,
+        actionKind: JULES_UNARCHIVE_SESSION_ACTION,
+        autoApprovable: true,
       };
     case "deleteSession":
       return {
@@ -630,6 +647,8 @@ function describeAction(action: JulesAction): ActionDescription {
         description: "Permanently deletes " + action.session + ".",
         implementsRevert: false,
         awaitDecision: true,
+        actionKind: JULES_DELETE_SESSION_ACTION,
+        autoApprovable: true,
       };
   }
 }
@@ -703,7 +722,14 @@ export class JulesGatekeeperImpl extends DurableObject<Env, JulesGatekeeperImplP
   }
 
   async getAutoApprovableActions(): Promise<ActionKind[]> {
-    return [];
+    return [
+      JULES_CREATE_SESSION_ACTION,
+      JULES_SEND_MESSAGE_ACTION,
+      JULES_APPROVE_PLAN_ACTION,
+      JULES_ARCHIVE_SESSION_ACTION,
+      JULES_UNARCHIVE_SESSION_ACTION,
+      JULES_DELETE_SESSION_ACTION,
+    ];
   }
 
   async startSession(approvalQueue: RpcStub<ApprovalQueue>): Promise<JulesSessionIface> {
