@@ -71,10 +71,6 @@ function toWireSourceContext(ctx: JulesSourceContext): Record<string, unknown> {
   if (ctx.githubRepoContext) {
     out.githubRepoContext = { startingBranch: ctx.githubRepoContext.startingBranch };
   }
-  if (ctx.workingBranch != null) out.workingBranch = ctx.workingBranch;
-  if (ctx.environmentVariablesEnabled != null) {
-    out.environmentVariablesEnabled = ctx.environmentVariablesEnabled;
-  }
   return out;
 }
 
@@ -127,11 +123,18 @@ export class JulesRest {
 
     if (response.status === 204) return undefined;
 
+    const text = await response.text();
+    if (text.length === 0) return undefined;
+
     const contentType = response.headers.get("Content-Type") ?? "";
     if (contentType.includes("application/json")) {
-      return toCamelKeys(await response.json());
+      try {
+        return toCamelKeys(JSON.parse(text));
+      } catch {
+        // Fall through: the server returned a non-JSON (or empty) body.
+      }
     }
-    return await response.text();
+    return text;
   }
 
   private get(path: string): Promise<unknown> {
@@ -145,35 +148,45 @@ export class JulesRest {
     });
   }
 
-  private del(path: string): Promise<unknown> {
-    return this.request(path, { method: "DELETE" });
-  }
-
   /** Quick reachability/auth check used by the connect flow. */
   async ping(): Promise<void> {
     await this.get("v1alpha/sources?pageSize=1");
   }
 
+  private async listPages<T>(
+    path: string,
+    options: { pageSize?: number; filter?: string } | undefined,
+    key: string,
+  ): Promise<T[]> {
+    const out: T[] = [];
+    let pageToken: string | undefined;
+    const pageSize = options?.pageSize;
+    const filter = options?.filter;
+    for (let page = 0; page < 1000; page++) {
+      const params = new URLSearchParams();
+      if (pageSize != null) params.set("pageSize", String(pageSize));
+      if (filter) params.set("filter", filter);
+      if (pageToken) params.set("pageToken", pageToken);
+      const qs = params.toString();
+      const data = await this.get(path + (qs ? "?" + qs : ""));
+      const items = ((data as any)?.[key] ?? []) as T[];
+      out.push(...items);
+      pageToken = (data as any)?.nextPageToken as string | undefined;
+      if (!pageToken) break;
+    }
+    return out;
+  }
+
   async listSources(options?: { pageSize?: number; filter?: string }): Promise<JulesSource[]> {
-    const params = new URLSearchParams();
-    if (options?.pageSize != null) params.set("pageSize", String(options.pageSize));
-    if (options?.filter) params.set("filter", options.filter);
-    const qs = params.toString();
-    const data = await this.get("v1alpha/sources" + (qs ? "?" + qs : ""));
-    return ((data as any)?.sources ?? []) as JulesSource[];
+    return this.listPages<JulesSource>("v1alpha/sources", options, "sources");
   }
 
   async getSource(name: string): Promise<JulesSource> {
     return (await this.get("v1alpha/" + encodeName(name))) as JulesSource;
   }
 
-  async listSessions(options?: { pageSize?: number; filter?: string }): Promise<JulesSessionInfo[]> {
-    const params = new URLSearchParams();
-    if (options?.pageSize != null) params.set("pageSize", String(options.pageSize));
-    if (options?.filter) params.set("filter", options.filter);
-    const qs = params.toString();
-    const data = await this.get("v1alpha/sessions" + (qs ? "?" + qs : ""));
-    return ((data as any)?.sessions ?? []) as JulesSessionInfo[];
+  async listSessions(options?: { pageSize?: number }): Promise<JulesSessionInfo[]> {
+    return this.listPages<JulesSessionInfo>("v1alpha/sessions", options, "sessions");
   }
 
   async createSession(input: JulesCreateSessionInput): Promise<JulesSessionInfo> {
@@ -194,31 +207,15 @@ export class JulesRest {
   }
 
   async approvePlan(session: string): Promise<void> {
-    await this.post("v1alpha/" + encodeName(session) + ":approvePlan", {});
-  }
-
-  async archiveSession(session: string): Promise<void> {
-    await this.post("v1alpha/" + encodeName(session) + ":archive", {});
-  }
-
-  async unarchiveSession(session: string): Promise<void> {
-    await this.post("v1alpha/" + encodeName(session) + ":unarchive", {});
-  }
-
-  async deleteSession(session: string): Promise<void> {
-    await this.del("v1alpha/" + encodeName(session));
+    // The approvePlan REST method requires an empty request body.
+    await this.post("v1alpha/" + encodeName(session) + ":approvePlan");
   }
 
   async listActivities(
     session: string,
-    options?: { pageSize?: number; filter?: string },
+    options?: { pageSize?: number },
   ): Promise<JulesActivity[]> {
-    const params = new URLSearchParams();
-    if (options?.pageSize != null) params.set("pageSize", String(options.pageSize));
-    if (options?.filter) params.set("filter", options.filter);
-    const qs = params.toString();
-    const data = await this.get("v1alpha/" + encodeName(session) + "/activities" + (qs ? "?" + qs : ""));
-    return ((data as any)?.activities ?? []) as JulesActivity[];
+    return this.listPages<JulesActivity>("v1alpha/" + encodeName(session) + "/activities", options, "activities");
   }
 
   async getActivity(name: string): Promise<JulesActivity> {
