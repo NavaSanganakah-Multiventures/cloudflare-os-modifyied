@@ -381,7 +381,7 @@ class JulesFlowSessionImpl extends RpcTarget implements JulesFlowSession {
     if (existing.phase === "DONE") {
       throw new Error("Workflow " + id + " is already DONE; it cannot be cancelled.");
     }
-    const projected = existing.phase === "CANCELLED"
+    const projected: WorkflowInfo = existing.phase === "CANCELLED"
       ? existing
       : { ...existing, phase: "CANCELLED", updatedAt: nowIso() };
     await this.#ctx.submitWrite({ type: "cancel", workflowId: id });
