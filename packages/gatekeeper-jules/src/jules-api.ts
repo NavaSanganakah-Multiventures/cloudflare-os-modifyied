@@ -35,6 +35,10 @@ export class JulesError extends Error {
 const JULES_BASE_URL = "https://jules.googleapis.com/";
 const JULES_TIMEOUT_MS = 30_000;
 const JULES_ERROR_BODY_MAX_BYTES = 400;
+/** Upper bound on pages followed by a single list call, to guard against upstream pagination bugs. */
+const JULES_MAX_LIST_PAGES = 200;
+/** Upper bound on total items collected by a single list call, to bound memory usage. */
+const JULES_MAX_LIST_ITEMS = 10_000;
 
 /** Converts a snake_case key to camelCase. Already-camelCase keys are unchanged. */
 function toCamelKey(key: string): string {
@@ -162,7 +166,8 @@ export class JulesRest {
     let pageToken: string | undefined;
     const pageSize = options?.pageSize;
     const filter = options?.filter;
-    for (let page = 0; page < 1000; page++) {
+    const seenTokens = new Set<string>();
+    for (let page = 0; page < JULES_MAX_LIST_PAGES; page++) {
       const params = new URLSearchParams();
       if (pageSize != null) params.set("pageSize", String(pageSize));
       if (filter) params.set("filter", filter);
@@ -171,8 +176,12 @@ export class JulesRest {
       const data = await this.get(path + (qs ? "?" + qs : ""));
       const items = ((data as any)?.[key] ?? []) as T[];
       out.push(...items);
-      pageToken = (data as any)?.nextPageToken as string | undefined;
-      if (!pageToken) break;
+      if (out.length >= JULES_MAX_LIST_ITEMS) break;
+      const next = (data as any)?.nextPageToken as string | undefined;
+      if (!next) break;
+      if (seenTokens.has(next)) break; // upstream repeated a token; stop instead of looping
+      seenTokens.add(next);
+      pageToken = next;
     }
     return out;
   }
