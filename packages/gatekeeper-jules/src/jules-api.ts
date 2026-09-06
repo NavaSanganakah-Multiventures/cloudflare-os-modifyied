@@ -40,6 +40,14 @@ const JULES_MAX_LIST_PAGES = 200;
 /** Upper bound on total items collected by a single list call, to bound memory usage. */
 const JULES_MAX_LIST_ITEMS = 10_000;
 
+const JULES_SESSION_FIELDS =
+  "nextPageToken,sessions(name,id,title,prompt,state,archived,automationMode,requirePlanApproval," +
+  "sourceContext(source,githubRepoContext(startingBranch)),url,createTime,updateTime," +
+  "outputs(pullRequest(url,title,description)))";
+
+const JULES_SOURCE_FIELDS =
+  "nextPageToken,sources(name,id,githubRepo(owner,repo,isPrivate,defaultBranch(displayName),branches(displayName)))";
+
 /** Converts a snake_case key to camelCase. Already-camelCase keys are unchanged. */
 function toCamelKey(key: string): string {
   return key.replace(/_([a-z0-9])/g, (_match, c: string) => c.toUpperCase());
@@ -159,18 +167,20 @@ export class JulesRest {
 
   private async listPages<T>(
     path: string,
-    options: { pageSize?: number; filter?: string } | undefined,
+    options: { pageSize?: number; filter?: string; fields?: string } | undefined,
     key: string,
   ): Promise<T[]> {
     const out: T[] = [];
     let pageToken: string | undefined;
     const pageSize = options?.pageSize;
     const filter = options?.filter;
+    const fields = options?.fields;
     const seenTokens = new Set<string>();
     for (let page = 0; page < JULES_MAX_LIST_PAGES; page++) {
       const params = new URLSearchParams();
       if (pageSize != null) params.set("pageSize", String(pageSize));
       if (filter) params.set("filter", filter);
+      if (fields) params.set("fields", fields);
       if (pageToken) params.set("pageToken", pageToken);
       const qs = params.toString();
       const data = await this.get(path + (qs ? "?" + qs : ""));
@@ -187,7 +197,7 @@ export class JulesRest {
   }
 
   async listSources(options?: { pageSize?: number; filter?: string }): Promise<JulesSource[]> {
-    return this.listPages<JulesSource>("v1alpha/sources", options, "sources");
+    return this.listPages<JulesSource>("v1alpha/sources", { ...options, fields: JULES_SOURCE_FIELDS }, "sources");
   }
 
   async getSource(name: string): Promise<JulesSource> {
@@ -195,7 +205,7 @@ export class JulesRest {
   }
 
   async listSessions(options?: { pageSize?: number; filter?: string }): Promise<JulesSessionInfo[]> {
-    return this.listPages<JulesSessionInfo>("v1alpha/sessions", options, "sessions");
+    return this.listPages<JulesSessionInfo>("v1alpha/sessions", { ...options, fields: JULES_SESSION_FIELDS }, "sessions");
   }
 
   async createSession(input: JulesCreateSessionInput): Promise<JulesSessionInfo> {
