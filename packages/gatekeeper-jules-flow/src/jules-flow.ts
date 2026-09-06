@@ -175,7 +175,6 @@ export class JulesFlowGatekeeperImpl extends DurableObject<Env, JulesFlowAccount
       snippet: "Tracks and advances the GitHub -> Google Jules coding workflow (plan, PR, CI, review, merge).",
       suggestedBindingName: "JULES_FLOW",
       tsType: "JulesFlowSession",
-      hasSlashCommands: false,
     };
   }
 
