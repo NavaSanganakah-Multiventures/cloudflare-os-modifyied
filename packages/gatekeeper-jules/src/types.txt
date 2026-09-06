@@ -320,8 +320,11 @@ export interface JulesListSessionsOptions {
   /** Number of results per upstream page (max 100). The gatekeeper automatically follows
    *  nextPageToken and returns every matching session. */
   pageSize?: number;
-  /** Optional AIP-160 filter expression. If not set, only non-archived sessions are returned
-   *  (for example "archived = true" lists only archived sessions). */
+  /** Optional AIP-160 filter expression. The upstream Jules API returns only non-archived
+   *  sessions when the filter is omitted. Examples:
+   *  - "archived = true" (only archived sessions)
+   *  - "archived = false" (default; only non-archived sessions)
+   *  - "archived = true OR archived = false" (all sessions). */
   filter?: string;
 }
 
