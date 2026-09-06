@@ -192,8 +192,6 @@ export class JulesRest {
   async createSession(input: JulesCreateSessionInput): Promise<JulesSessionInfo> {
     const body: Record<string, unknown> = { prompt: input.prompt };
     if (input.title != null) body.title = input.title;
-    if (input.automationMode != null) body.automationMode = input.automationMode;
-    if (input.requirePlanApproval != null) body.requirePlanApproval = input.requirePlanApproval;
     if (input.sourceContext) body.sourceContext = toWireSourceContext(input.sourceContext);
     return (await this.post("v1alpha/sessions", body)) as JulesSessionInfo;
   }
