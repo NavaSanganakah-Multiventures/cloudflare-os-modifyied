@@ -36,8 +36,8 @@
 // Reads (listSources, getSource, listSessions, getSession, listActivities, getActivity) are
 // authorized as observations.
 //
-// Writes (createSession, sendMessage, approvePlan) are queued for approval and do NOT
-// execute against Jules until the user
+// Writes (createSession, sendMessage, approvePlan, archiveSession, unarchiveSession,
+// deleteSession) are queued for approval and do NOT execute against Jules until the user
 // approves them. The write method's Promise resolves as soon as the action is queued; it does
 // not wait for Jules to carry out the action. There is no simulation of pending writes, so
 // after queuing a write you should wait for approval before relying on its effect (for example,
@@ -113,6 +113,8 @@ export interface JulesSessionInfo {
   prompt?: string;
   /** Current lifecycle state of the session. */
   state: JulesSessionState;
+  /** Whether the session is archived (hidden from the default session list). */
+  archived?: boolean;
   /** Optional automation mode for the session. */
   automationMode?: JulesAutomationMode;
   /** Whether generated plans require explicit approval. */
@@ -318,6 +320,12 @@ export interface JulesListSessionsOptions {
   /** Number of results per upstream page (max 100). The gatekeeper automatically follows
    *  nextPageToken and returns every matching session. */
   pageSize?: number;
+  /** Optional AIP-160 filter expression. The upstream Jules API returns only non-archived
+   *  sessions when the filter is omitted. Examples:
+   *  - "archived = true" (only archived sessions)
+   *  - "archived = false" (default; only non-archived sessions)
+   *  - "archived = true OR archived = false" (all sessions). */
+  filter?: string;
 }
 
 /** Options for listing activities for a session. */
@@ -373,6 +381,19 @@ export interface JulesSession extends RpcTarget {
   /** Approve the currently pending plan in a session. Queued for approval.
    * @example await session.approvePlan("sessions/session-id"); */
   approvePlan(session: string): Promise<void>;
+
+  /** Archive a session. Queued for approval. Archived sessions are hidden from the default
+   *  session list but remain accessible by name and can be unarchived.
+   * @example await session.archiveSession("sessions/session-id"); */
+  archiveSession(session: string): Promise<void>;
+
+  /** Unarchive a session. Queued for approval.
+   * @example await session.unarchiveSession("sessions/session-id"); */
+  unarchiveSession(session: string): Promise<void>;
+
+  /** Permanently delete a session. Queued for approval. This cannot be undone.
+   * @example await session.deleteSession("sessions/session-id"); */
+  deleteSession(session: string): Promise<void>;
 
   /** List activities for a session.
    * @example const activities = await session.listActivities("sessions/session-id"); */

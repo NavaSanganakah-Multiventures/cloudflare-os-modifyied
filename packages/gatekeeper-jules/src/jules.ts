@@ -533,12 +533,18 @@ export class JulesVerifier extends WorkerEntrypoint<Env> implements GatekeeperUs
 type JulesAction =
   | { id: number; type: "createSession"; input: JulesCreateSessionInput }
   | { id: number; type: "sendMessage"; session: string; prompt: string }
-  | { id: number; type: "approvePlan"; session: string };
+  | { id: number; type: "approvePlan"; session: string }
+  | { id: number; type: "archiveSession"; session: string }
+  | { id: number; type: "unarchiveSession"; session: string }
+  | { id: number; type: "deleteSession"; session: string };
 
 type SubmitWriteBody =
   | { type: "createSession"; input: JulesCreateSessionInput }
   | { type: "sendMessage"; session: string; prompt: string }
-  | { type: "approvePlan"; session: string };
+  | { type: "approvePlan"; session: string }
+  | { type: "archiveSession"; session: string }
+  | { type: "unarchiveSession"; session: string }
+  | { type: "deleteSession"; session: string };
 
 type JulesRevertInfo = { type: "noRevert" };
 
@@ -601,6 +607,27 @@ function describeAction(action: JulesAction): ActionDescription {
       return {
         title: "Approve Jules plan",
         description: "Approves the pending plan in " + action.session + ".",
+        implementsRevert: false,
+        awaitDecision: true,
+      };
+    case "archiveSession":
+      return {
+        title: "Archive Google Jules session",
+        description: "Archives " + action.session + ".",
+        implementsRevert: false,
+        awaitDecision: true,
+      };
+    case "unarchiveSession":
+      return {
+        title: "Unarchive Google Jules session",
+        description: "Unarchives " + action.session + ".",
+        implementsRevert: false,
+        awaitDecision: true,
+      };
+    case "deleteSession":
+      return {
+        title: "Delete Google Jules session",
+        description: "Permanently deletes " + action.session + ".",
         implementsRevert: false,
         awaitDecision: true,
       };
@@ -735,6 +762,18 @@ export class JulesGatekeeperImpl extends DurableObject<Env, JulesGatekeeperImplP
           await rest.approvePlan(action.session);
           revertInfo = { type: "noRevert" };
           break;
+        case "archiveSession":
+          await rest.archiveSession(action.session);
+          revertInfo = { type: "noRevert" };
+          break;
+        case "unarchiveSession":
+          await rest.unarchiveSession(action.session);
+          revertInfo = { type: "noRevert" };
+          break;
+        case "deleteSession":
+          await rest.deleteSession(action.session);
+          revertInfo = { type: "noRevert" };
+          break;
       }
     } catch (e) {
       if (e instanceof JulesError && e.isAuthError) await this.#userAccount().noteCredentialsExpired();
@@ -752,7 +791,8 @@ export class JulesGatekeeperImpl extends DurableObject<Env, JulesGatekeeperImplP
   async revertAction(actionId: number): Promise<void | { message?: string; canRetry?: boolean; restart?: boolean }> {
     const applied = this.#getApplied(actionId);
     if (!applied) throw new Error("No applied Google Jules action exists with id " + actionId + ".");
-    // The documented Jules REST API has no undo endpoints (no delete/archive/unarchive), so no write is revertible.
+    // No Jules write is modeled as revertible: createSession/sendMessage/approvePlan/deleteSession
+    // have no undo, and unarchiving is kept as an explicit user action rather than an automatic revert.
     throw new Error("This action cannot be reverted.");
   }
 
@@ -927,6 +967,24 @@ class JulesSessionImpl extends RpcTarget implements JulesSessionIface {
     const fullName = expandResourceName(session, "sessions");
     await this.#assertSessionInScope(fullName);
     await this.#ctx.submitWrite({ type: "approvePlan", session: fullName });
+  }
+
+  async archiveSession(session: string): Promise<void> {
+    const fullName = expandResourceName(session, "sessions");
+    await this.#assertSessionInScope(fullName);
+    await this.#ctx.submitWrite({ type: "archiveSession", session: fullName });
+  }
+
+  async unarchiveSession(session: string): Promise<void> {
+    const fullName = expandResourceName(session, "sessions");
+    await this.#assertSessionInScope(fullName);
+    await this.#ctx.submitWrite({ type: "unarchiveSession", session: fullName });
+  }
+
+  async deleteSession(session: string): Promise<void> {
+    const fullName = expandResourceName(session, "sessions");
+    await this.#assertSessionInScope(fullName);
+    await this.#ctx.submitWrite({ type: "deleteSession", session: fullName });
   }
 
   async listActivities(session: string, options?: JulesListActivitiesOptions): Promise<JulesActivity[]> {
