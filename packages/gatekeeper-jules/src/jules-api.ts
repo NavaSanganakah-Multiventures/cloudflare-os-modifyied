@@ -185,7 +185,7 @@ export class JulesRest {
     return (await this.get("v1alpha/" + encodeName(name))) as JulesSource;
   }
 
-  async listSessions(options?: { pageSize?: number }): Promise<JulesSessionInfo[]> {
+  async listSessions(options?: { pageSize?: number; filter?: string }): Promise<JulesSessionInfo[]> {
     return this.listPages<JulesSessionInfo>("v1alpha/sessions", options, "sessions");
   }
 
@@ -207,6 +207,18 @@ export class JulesRest {
   async approvePlan(session: string): Promise<void> {
     // The approvePlan REST method requires an empty request body.
     await this.post("v1alpha/" + encodeName(session) + ":approvePlan", {});
+  }
+
+  async archiveSession(name: string): Promise<JulesSessionInfo> {
+    return (await this.post("v1alpha/" + encodeName(name) + ":archive", {})) as JulesSessionInfo;
+  }
+
+  async unarchiveSession(name: string): Promise<JulesSessionInfo> {
+    return (await this.post("v1alpha/" + encodeName(name) + ":unarchive", {})) as JulesSessionInfo;
+  }
+
+  async deleteSession(name: string): Promise<void> {
+    await this.request("v1alpha/" + encodeName(name), { method: "DELETE" });
   }
 
   async listActivities(
