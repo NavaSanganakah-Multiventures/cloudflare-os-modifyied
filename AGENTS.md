@@ -271,3 +271,24 @@ executor feature exposed by the GitHubRepo binding.
    C/C++ toolchain (`build-essential`, `cmake`, `clang`, `ninja-build`).
 4. Always propose code changes first, then run the build on the resulting feature branch, and
    report the build result (exit code, stdout, stderr) back to the user.
+
+## Autonomous Jules Flow (single-approval code changes)
+
+When the user asks to carry a repository change end-to-end automatically — plan in Hindi,
+implement via Google Jules, drive CI green, review, and merge — load and follow the
+`jules-flow` skill at `.agents/skills/jules-flow/SKILL.md`. Core rules:
+
+* **Exactly one manual approval.** `startFlow()` on the ambient `JULES_FLOW` binding is the only
+  manual action. After it, `updateWorkflow()` (`flow.update`) and `cancelFlow()`
+  (`flow.cancel`) are auto-approvable, and the underlying GitHub + Jules work is performed through
+  the agent's own `GitHubRepo` / `JulesSource` connections (whose write kinds must also be
+  auto-approvable for a fully hands-off run). There is **no second approval** for CI runs or for
+  merging the PR — the merge is automatic.
+* **Official documentation, not Aarya docs.** Before planning or writing the Jules prompt, pull
+  official documentation for the technologies the change touches (Cloudflare Workers / Durable
+  Objects / GitHub / Google Jules / etc.) — **not** Aarya Smart's own docs — and pass those
+  link(s) to Jules with an instruction to read them (and any other related official docs) before
+  planning or working.
+* **Repo-edit rules still apply.** Any repo edits the agent makes itself still follow the
+  branch-first workflow above, and `.github/workflows/*` edits remain a distinct approval category
+  — never assume they are auto-approved.
