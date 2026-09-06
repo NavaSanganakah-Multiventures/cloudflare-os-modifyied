@@ -61,9 +61,11 @@ function generateNonce(): string {
 }
 
 function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  // Fold the length comparison into the accumulator instead of returning early, so the
+  // timing of nonce validation does not reveal whether a candidate had the right length.
+  let diff = a.length ^ b.length;
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i++) diff |= (a.charCodeAt(i) | 0) ^ (b.charCodeAt(i) | 0);
   return diff === 0;
 }
 
@@ -290,6 +292,7 @@ export class UserAccount extends DurableObject<Env> {
     }
 
     this.ctx.storage.kv.delete("nonce");
+    this.ctx.storage.kv.delete("expired");
     this.ctx.storage.kv.put<JulesCredentials>("credentials", { apiKey });
 
     const callback = this.ctx.storage.kv.get<Fetcher<GatekeeperConnectCallback>>("callback");
@@ -320,8 +323,13 @@ export class UserAccount extends DurableObject<Env> {
   }
 
   async noteCredentialsExpired(): Promise<void> {
-    this.ctx.storage.kv.delete("credentials");
-    await this.ctx.storage.setAlarm(Date.now() + CONNECT_ALARM_MS);
+    // Keep the credential record so prepareReconnect() still recognizes this account; the
+    // stale API key keeps failing auth until the user replaces it through the reconnect flow.
+    if (this.ctx.storage.kv.get<boolean>("expired")) return;
+    this.ctx.storage.kv.put("expired", true);
+    const callback = this.ctx.storage.kv.get<Fetcher<GatekeeperConnectCallback>>("callback");
+    if (callback) await callback.credentialsExpired();
+    await this.ctx.storage.deleteAlarm();
   }
 
   async alarm(): Promise<void> {
@@ -336,6 +344,7 @@ export class UserAccount extends DurableObject<Env> {
     this.ctx.storage.kv.delete("nonce");
     this.ctx.storage.kv.delete("callback");
     this.ctx.storage.kv.delete("reconnecting");
+    this.ctx.storage.kv.delete("expired");
     await this.ctx.storage.deleteAlarm();
   }
 }
@@ -692,8 +701,7 @@ export class JulesGatekeeperImpl extends DurableObject<Env, JulesGatekeeperImplP
         return;
       case "archiveToggle": {
         if (applied.action.type === "archiveSession") await rest.unarchiveSession(info.session);
-        else if (applied.action.type === "unarchiveSession") await rest.archiveSession(info.session);
-        else throw new Error("This action cannot be reverted.");
+        else await rest.archiveSession(info.session);
         return;
       }
       default:
