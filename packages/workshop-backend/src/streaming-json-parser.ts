@@ -52,6 +52,11 @@ export class StreamingToolInputParser {
   #decodedValue: string = "";
   #streamComplete: boolean = false;
 
+  // A high surrogate waiting for its low surrogate in a `\uXXXX` pair. Emoji and other
+  // astral characters arrive as two escapes; joining them here keeps emitted deltas from
+  // carrying a lone surrogate that would render as a replacement character.
+  #pendingHighSurrogate: number | null = null;
+
   constructor(streamingFieldName: string) {
     this.#streamingFieldName = streamingFieldName;
   }
@@ -233,6 +238,38 @@ export class StreamingToolInputParser {
     }
   }
 
+  // Append a single UTF-16 code unit decoded from a `\uXXXX` escape. Surrogate pairs are
+  // combined here (and a dangling high surrogate is held back) so the streaming value never
+  // ends on a lone surrogate that a delta consumer would slice in half.
+  #appendCodeUnit(unit: number): void {
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      if (this.#pendingHighSurrogate !== null) {
+        this.#decodedValue += String.fromCharCode(this.#pendingHighSurrogate);
+      }
+      this.#pendingHighSurrogate = unit;
+      return;
+    }
+    if (unit >= 0xdc00 && unit <= 0xdfff && this.#pendingHighSurrogate !== null) {
+      this.#decodedValue += String.fromCharCode(this.#pendingHighSurrogate, unit);
+      this.#pendingHighSurrogate = null;
+      return;
+    }
+    if (this.#pendingHighSurrogate !== null) {
+      this.#decodedValue += String.fromCharCode(this.#pendingHighSurrogate);
+      this.#pendingHighSurrogate = null;
+    }
+    this.#decodedValue += String.fromCharCode(unit);
+  }
+
+  // Emit a high surrogate that turned out to be unpaired (malformed JSON) so the final
+  // streaming value matches what the previous behaviour produced for such input.
+  #flushPendingHighSurrogate(): void {
+    if (this.#pendingHighSurrogate !== null) {
+      this.#decodedValue += String.fromCharCode(this.#pendingHighSurrogate);
+      this.#pendingHighSurrogate = null;
+    }
+  }
+
   // Decode the streaming field's string value incrementally.  Only processes characters
   // from #pos onward; escape sequences that straddle a chunk boundary are retried on
   // the next append() by leaving #pos at the '\'.
@@ -241,6 +278,7 @@ export class StreamingToolInputParser {
     while (this.#pos < this.#buffer.length) {
       let ch = this.#buffer[this.#pos];
       if (ch === '"') {
+        this.#flushPendingHighSurrogate();
         if (this.#pos > start) {
           this.#decodedValue += this.#buffer.slice(start, this.#pos);
         }
@@ -250,21 +288,24 @@ export class StreamingToolInputParser {
         return;
       }
       if (ch === '\\') {
-        // Flush any plain text accumulated before this escape.
+        // Flush any plain text accumulated before this escape, after any pending high
+        // surrogate that preceded it (a low surrogate can only arrive as an escape).
         if (this.#pos > start) {
+          this.#flushPendingHighSurrogate();
           this.#decodedValue += this.#buffer.slice(start, this.#pos);
         }
         if (this.#pos + 1 >= this.#buffer.length) return;
         let esc = this.#buffer[this.#pos + 1];
         let decoded = JSON_SIMPLE_ESCAPES[esc];
         if (decoded !== undefined) {
+          this.#flushPendingHighSurrogate();
           this.#decodedValue += decoded;
           this.#pos += 2;
         } else if (esc === 'u') {
           if (this.#pos + 6 > this.#buffer.length) return;
           let hex = this.#buffer.slice(this.#pos + 2, this.#pos + 6);
           if (!/^[0-9a-fA-F]{4}$/.test(hex)) { this.#phase = "error"; return; }
-          this.#decodedValue += String.fromCharCode(parseInt(hex, 16));
+          this.#appendCodeUnit(parseInt(hex, 16));
           this.#pos += 6;
         } else {
           this.#phase = "error";
@@ -275,8 +316,9 @@ export class StreamingToolInputParser {
       }
       this.#pos++;
     }
-    // Flush remaining plain text.
+    // Flush remaining plain text, after any pending high surrogate that preceded it.
     if (this.#pos > start) {
+      this.#flushPendingHighSurrogate();
       this.#decodedValue += this.#buffer.slice(start, this.#pos);
     }
   }
