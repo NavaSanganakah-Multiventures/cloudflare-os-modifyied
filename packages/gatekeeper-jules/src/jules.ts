@@ -84,7 +84,7 @@ function escapeHtml(text: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
+    .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
 
@@ -395,7 +395,7 @@ export class JulesUserImpl extends WorkerEntrypoint<Env, JulesUserImplProps> imp
     try {
       parsed = new URL(url);
     } catch (e: any) {
-      throw new Error("Invalid Google Jules URL \"" + url + "\": " + (e?.message ?? e));
+      throw new Error("Invalid Google Jules URL \"" + url + "\": " + (e?.message ?? e), { cause: e });
     }
     if (parsed.hostname !== "jules.google.com") {
       throw new Error("Unsupported URL for Google Jules: " + parsed.hostname + ". Use " + JULES_URL + ".");
@@ -457,7 +457,13 @@ type JulesAction =
   | { id: number; type: "unarchiveSession"; session: string }
   | { id: number; type: "deleteSession"; session: string };
 
-type SubmitWriteBody = Omit<JulesAction, "id">;
+type SubmitWriteBody =
+  | { type: "createSession"; input: JulesCreateSessionInput }
+  | { type: "sendMessage"; session: string; prompt: string }
+  | { type: "approvePlan"; session: string }
+  | { type: "archiveSession"; session: string }
+  | { type: "unarchiveSession"; session: string }
+  | { type: "deleteSession"; session: string };
 
 type JulesRevertInfo =
   | { type: "createdSession"; name: string }
