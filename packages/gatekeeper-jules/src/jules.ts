@@ -31,6 +31,8 @@ import {
 } from "@gadgets/workshop-shared/gatekeeper";
 import ACCOUNT_CONFIGURATOR_HTML from "./generated/account-configurator-ui.txt";
 import type { JulesAccountConfiguratorRpc } from "./configurator/account-configurator-types";
+import REPO_CONFIGURATOR_HTML from "./generated/repo-configurator-ui.txt";
+import type { JulesConfiguratorOption, JulesRepoConfiguratorRpc } from "./configurator/repo-configurator-types";
 import { JulesError, JulesRest, type JulesCredentials } from "./jules-api";
 import type {
   JulesActivity,
@@ -108,14 +110,26 @@ const JULES_ICON: AvatarImage = {
   url: "data:image/svg+xml;utf8," + encodeURIComponent(JULES_LOGO_SVG),
 };
 
-const JULES_RESOURCE: SupportedResource = {
-  urlPattern: "https://jules.google.com/*",
+// Whole-account resource. We deliberately use `https://*` as a catch-all pattern (the same
+// technique gatekeeper-homeassistant and gatekeeper-notion use) so the resource picker treats it
+// as the "any URL / whole account" option and still offers the finer-grained repository resource.
+const JULES_INSTANCE_RESOURCE: SupportedResource = {
+  urlPattern: "https://*",
   title: "Google Jules",
-  description: "Access to your Google Jules account: sources, coding sessions, plans, activities, and pull requests.",
+  description: "Access to your whole Google Jules account: every source, coding session, plan, activity, and pull request.",
   icon: JULES_ICON,
 };
 
-const SUPPORTED_RESOURCES: SupportedResource[] = [JULES_RESOURCE];
+// A single GitHub repository connected to Jules (a Jules "source"). Its URL uses a
+// jules.google.com marker so it routes separately from the whole-instance catch-all above.
+const JULES_REPO_RESOURCE: SupportedResource = {
+  urlPattern: "https://jules.google.com/sources/:source",
+  title: "Google Jules Repository",
+  description: "Access to a single GitHub repository connected to Jules: its sessions, plans, activities, and pull requests.",
+  icon: JULES_ICON,
+};
+
+const SUPPORTED_RESOURCES: SupportedResource[] = [JULES_INSTANCE_RESOURCE, JULES_REPO_RESOURCE];
 
 // --- Connect form ---
 
@@ -393,10 +407,14 @@ export class JulesUserImpl extends WorkerEntrypoint<Env, JulesUserImplProps> imp
   }
 
   async startResourceConfigurator(resourceUrlPattern: string): Promise<ResourceConfiguratorFrame> {
-    if (resourceUrlPattern !== JULES_RESOURCE.urlPattern) {
-      throw new Error("Unsupported resource configurator type: " + resourceUrlPattern);
+    if (resourceUrlPattern === JULES_INSTANCE_RESOURCE.urlPattern) {
+      return { iframeHtml: ACCOUNT_CONFIGURATOR_HTML, ui: new RpcStub(new AccountConfiguratorUI()) };
     }
-    return { iframeHtml: ACCOUNT_CONFIGURATOR_HTML, ui: new RpcStub(new AccountConfiguratorUI()) };
+    if (resourceUrlPattern === JULES_REPO_RESOURCE.urlPattern) {
+      const credsGetter = async () => await this.#userAccount().getCredentials();
+      return { iframeHtml: REPO_CONFIGURATOR_HTML, ui: new RpcStub(new JulesRepoConfiguratorUI(credsGetter)) };
+    }
+    throw new Error("Unsupported resource configurator type: " + resourceUrlPattern);
   }
 
   async getGatekeeperClassFor(url: string): Promise<{ class: DurableObjectClass<Gatekeeper<any>>; resource: SupportedResource }> {
@@ -406,12 +424,23 @@ export class JulesUserImpl extends WorkerEntrypoint<Env, JulesUserImplProps> imp
     } catch (e: any) {
       throw new Error("Invalid Google Jules URL \"" + url + "\": " + (e?.message ?? e), { cause: e });
     }
-    if (parsed.hostname !== "jules.google.com") {
-      throw new Error("Unsupported URL for Google Jules: " + parsed.hostname + ". Use " + JULES_URL + ".");
+    const userObjectId = this.ctx.props.userObjectId;
+
+    if (parsed.hostname === "jules.google.com") {
+      const segments = parsed.pathname.split("/").filter(Boolean);
+      if (segments[0] === "sources" && segments.length >= 2) {
+        const sourceName = "sources/" + decodeURIComponent(segments[1]);
+        return {
+          class: this.ctx.exports.JulesGatekeeperImpl({ props: { userObjectId, resourceKind: "source", sourceName } }),
+          resource: JULES_REPO_RESOURCE,
+        };
+      }
     }
+
+    // Any other URL (or a jules.google.com URL without a source path) is whole-account access.
     return {
-      class: this.ctx.exports.JulesGatekeeperImpl({ props: { userObjectId: this.ctx.props.userObjectId } }),
-      resource: JULES_RESOURCE,
+      class: this.ctx.exports.JulesGatekeeperImpl({ props: { userObjectId, resourceKind: "instance" } }),
+      resource: JULES_INSTANCE_RESOURCE,
     };
   }
 
@@ -446,6 +475,49 @@ class AccountConfiguratorUI extends RpcTarget implements JulesAccountConfigurato
 
   async describeAccount(): Promise<{ name: string; url: string }> {
     return { name: "Google Jules", url: JULES_URL };
+  }
+}
+
+// --- Configurator UI capability passed into the repository configurator iframe ---
+
+const julesRepoConfiguratorCreds = new WeakMap<object, () => Promise<JulesCredentials>>();
+
+@validateRpc()
+class JulesRepoConfiguratorUI extends RpcTarget implements JulesRepoConfiguratorRpc {
+  constructor(getCredentials: () => Promise<JulesCredentials>) {
+    super();
+    julesRepoConfiguratorCreds.set(this, getCredentials);
+  }
+
+  async listSources(query: string): Promise<JulesConfiguratorOption[]> {
+    const creds = await julesRepoConfiguratorCreds.get(this)!();
+    const sources = await new JulesRest(creds).listSources({ pageSize: 100 });
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return sources
+      .filter((source) => {
+        const g = source.githubRepo;
+        const fullName = g?.owner && g?.repo ? g.owner + "/" + g.repo : source.name;
+        const haystack = [source.name, source.id, g?.owner, g?.repo, fullName]
+          .filter(Boolean).join(" ").toLowerCase();
+        return terms.every((term) => haystack.includes(term));
+      })
+      .slice(0, 100)
+      .map((source) => {
+        const g = source.githubRepo;
+        const fullName = g?.owner && g?.repo ? g.owner + "/" + g.repo : source.name;
+        return {
+          value: source.name,
+          title: fullName,
+          subtitle: source.name === fullName ? undefined : "Source: " + source.id,
+          meta: g ? (g.isPrivate ? "private" : "public") : undefined,
+        };
+      });
+  }
+
+  async resourceUrl(sourceName: string | null | undefined): Promise<string> {
+    if (!sourceName) throw new Error("No repository selected.");
+    const id = sourceName.startsWith("sources/") ? sourceName.slice("sources/".length) : sourceName;
+    return JULES_URL + "/sources/" + encodeURIComponent(id);
   }
 }
 
@@ -571,11 +643,18 @@ interface SessionContext {
   noteAuthError: () => Promise<void>;
   dispose: () => void;
   submitWrite: (body: SubmitWriteBody) => Promise<void>;
+  /** When the binding is scoped to a single source, that source's full resource name. */
+  scopeSourceName?: string;
 }
 
 // --- Gatekeeper DO (per resource binding) ---
 
-type JulesGatekeeperImplProps = { userObjectId: string };
+type JulesGatekeeperImplProps = {
+  userObjectId: string;
+  resourceKind: "instance" | "source";
+  /** For resourceKind "source": the full source resource name, e.g. "sources/<id>". */
+  sourceName?: string;
+};
 
 @validateRpc()
 export class JulesGatekeeperImpl extends DurableObject<Env, JulesGatekeeperImplProps> implements Gatekeeper<JulesSessionIface> {
@@ -592,6 +671,27 @@ export class JulesGatekeeperImpl extends DurableObject<Env, JulesGatekeeperImplP
   }
 
   async describe(): Promise<ResourceDescription> {
+    if (this.ctx.props.resourceKind === "source") {
+      const sourceName = this.ctx.props.sourceName!;
+      const rest = await this.#rest();
+      let title = "Google Jules Repository";
+      let url = JULES_URL + "/sources/" + encodeURIComponent(sourceName.replace(/^sources\//, ""));
+      let snippet = "A single GitHub repository connected to Jules: its sessions, plans, activities, and pull requests.";
+      try {
+        const source = await rest.getSource(sourceName);
+        const g = source.githubRepo;
+        if (g?.owner && g?.repo) {
+          title = g.owner + "/" + g.repo;
+          url = "https://github.com/" + encodeURIComponent(g.owner) + "/" + encodeURIComponent(g.repo);
+          snippet = "Google Jules source \"" + sourceName + "\" (" + g.owner + "/" + g.repo + ").";
+        } else {
+          snippet = "Google Jules source \"" + sourceName + "\".";
+        }
+      } catch {
+        // Best-effort decoration only; fall back to the source URL above.
+      }
+      return { url, title, snippet, suggestedBindingName: "JULES_REPO", tsType: "JulesSession" };
+    }
     return {
       url: JULES_URL,
       title: "Google Jules",
@@ -620,6 +720,7 @@ export class JulesGatekeeperImpl extends DurableObject<Env, JulesGatekeeperImplP
     const sessionCtx: SessionContext = {
       approvalQueue,
       rest: await this.#rest(),
+      scopeSourceName: this.ctx.props.resourceKind === "source" ? this.ctx.props.sourceName : undefined,
       noteAuthError: () => self.#userAccount().noteCredentialsExpired(),
       dispose() {
         if (disposed) return;
@@ -767,7 +868,36 @@ class JulesSessionImpl extends RpcTarget implements JulesSessionIface {
     }
   }
 
+  #scopeSourceName(): string | undefined {
+    return this.#ctx.scopeSourceName;
+  }
+
+  #assertSourceInScope(sourceName: string): void {
+    const scope = this.#scopeSourceName();
+    if (scope && sourceName !== scope) {
+      throw new Error("This binding is scoped to Google Jules source \"" + scope + "\", not \"" + sourceName + "\".");
+    }
+  }
+
+  async #assertSessionInScope(sessionName: string): Promise<void> {
+    const scope = this.#scopeSourceName();
+    if (!scope) return;
+    const session = await this.#call((r) => r.getSession(sessionName));
+    if (session.sourceContext?.source !== scope) {
+      throw new Error("Google Jules session \"" + sessionName + "\" does not belong to the scoped source \"" + scope + "\".");
+    }
+  }
+
   async listSources(options?: JulesListSourcesOptions): Promise<JulesSource[]> {
+    const scope = this.#scopeSourceName();
+    if (scope) {
+      const result = await this.#call((r) => r.getSource(scope));
+      await this.#ctx.approvalQueue.authorizeObservation({
+        title: "List Google Jules sources",
+        description: "Listed the scoped source \"" + scope + "\".",
+      });
+      return [result];
+    }
     const result = await this.#call((r) => r.listSources(options));
     await this.#ctx.approvalQueue.authorizeObservation({
       title: "List Google Jules sources",
@@ -778,6 +908,7 @@ class JulesSessionImpl extends RpcTarget implements JulesSessionIface {
 
   async getSource(name: string): Promise<JulesSource> {
     const fullName = expandResourceName(name, "sources");
+    this.#assertSourceInScope(fullName);
     const result = await this.#call((r) => r.getSource(fullName));
     await this.#ctx.approvalQueue.authorizeObservation({
       title: "Get Google Jules source",
@@ -788,16 +919,22 @@ class JulesSessionImpl extends RpcTarget implements JulesSessionIface {
 
   async listSessions(options?: JulesListSessionsOptions): Promise<JulesSessionInfo[]> {
     const result = await this.#call((r) => r.listSessions(options));
+    const scope = this.#scopeSourceName();
+    const filtered = scope ? result.filter((s) => s.sourceContext?.source === scope) : result;
     await this.#ctx.approvalQueue.authorizeObservation({
       title: "List Google Jules sessions",
-      description: "Listed " + result.length + " session" + (result.length === 1 ? "" : "s") + ".",
+      description: "Listed " + filtered.length + " session" + (filtered.length === 1 ? "" : "s") + ".",
     });
-    return result;
+    return filtered;
   }
 
   async getSession(name: string): Promise<JulesSessionInfo> {
     const fullName = expandResourceName(name, "sessions");
     const result = await this.#call((r) => r.getSession(fullName));
+    const scope = this.#scopeSourceName();
+    if (scope && result.sourceContext?.source !== scope) {
+      throw new Error("Google Jules session \"" + fullName + "\" does not belong to the scoped source \"" + scope + "\".");
+    }
     await this.#ctx.approvalQueue.authorizeObservation({
       title: "Get Google Jules session",
       description: "Read session \"" + fullName + "\".",
@@ -807,6 +944,13 @@ class JulesSessionImpl extends RpcTarget implements JulesSessionIface {
 
   async createSession(input: JulesCreateSessionInput): Promise<void> {
     validateCreateSessionInput(input);
+    const scope = this.#scopeSourceName();
+    if (scope) {
+      if (input.sourceContext && input.sourceContext.source !== scope) {
+        throw new Error("This binding is scoped to Google Jules source \"" + scope + "\"; cannot create a session against \"" + input.sourceContext.source + "\".");
+      }
+      if (!input.sourceContext) input = { ...input, sourceContext: { source: scope } };
+    }
     await this.#ctx.submitWrite({ type: "createSession", input });
   }
 
@@ -814,27 +958,38 @@ class JulesSessionImpl extends RpcTarget implements JulesSessionIface {
     if (typeof prompt !== "string" || prompt.trim().length === 0) {
       throw new TypeError("sendMessage() requires a non-empty string prompt.");
     }
-    await this.#ctx.submitWrite({ type: "sendMessage", session: expandResourceName(session, "sessions"), prompt });
+    const fullName = expandResourceName(session, "sessions");
+    await this.#assertSessionInScope(fullName);
+    await this.#ctx.submitWrite({ type: "sendMessage", session: fullName, prompt });
   }
 
   async approvePlan(session: string): Promise<void> {
-    await this.#ctx.submitWrite({ type: "approvePlan", session: expandResourceName(session, "sessions") });
+    const fullName = expandResourceName(session, "sessions");
+    await this.#assertSessionInScope(fullName);
+    await this.#ctx.submitWrite({ type: "approvePlan", session: fullName });
   }
 
   async archiveSession(session: string): Promise<void> {
-    await this.#ctx.submitWrite({ type: "archiveSession", session: expandResourceName(session, "sessions") });
+    const fullName = expandResourceName(session, "sessions");
+    await this.#assertSessionInScope(fullName);
+    await this.#ctx.submitWrite({ type: "archiveSession", session: fullName });
   }
 
   async unarchiveSession(session: string): Promise<void> {
-    await this.#ctx.submitWrite({ type: "unarchiveSession", session: expandResourceName(session, "sessions") });
+    const fullName = expandResourceName(session, "sessions");
+    await this.#assertSessionInScope(fullName);
+    await this.#ctx.submitWrite({ type: "unarchiveSession", session: fullName });
   }
 
   async deleteSession(session: string): Promise<void> {
-    await this.#ctx.submitWrite({ type: "deleteSession", session: expandResourceName(session, "sessions") });
+    const fullName = expandResourceName(session, "sessions");
+    await this.#assertSessionInScope(fullName);
+    await this.#ctx.submitWrite({ type: "deleteSession", session: fullName });
   }
 
   async listActivities(session: string, options?: JulesListActivitiesOptions): Promise<JulesActivity[]> {
     const fullName = expandResourceName(session, "sessions");
+    await this.#assertSessionInScope(fullName);
     const result = await this.#call((r) => r.listActivities(fullName, options));
     await this.#ctx.approvalQueue.authorizeObservation({
       title: "List Google Jules activities",
@@ -845,6 +1000,8 @@ class JulesSessionImpl extends RpcTarget implements JulesSessionIface {
 
   async getActivity(name: string): Promise<JulesActivity> {
     const fullName = expandActivityName(name);
+    const sessionName = fullName.slice(0, fullName.indexOf("/activities/"));
+    await this.#assertSessionInScope(sessionName);
     const result = await this.#call((r) => r.getActivity(fullName));
     await this.#ctx.approvalQueue.authorizeObservation({
       title: "Get Google Jules activity",
