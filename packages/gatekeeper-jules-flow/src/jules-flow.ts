@@ -3,7 +3,7 @@
 // Auto-provisioned singleton gatekeeper (like the Context Library) that tracks the
 // "GitHub -> Google Jules" coding workflow as a durable state machine. The agent (Aarya)
 // drives the workflow with its own GitHub and Jules connections and records progress here;
-// the gatekeeper validates phase transitions and keeps the single source of truth for a run.
+// the gatekeeper guards terminal phases (DONE/CANCELLED), the initial AWAITING_APPROVAL phase, and keeps the single source of truth for a run.
 //
 // Single-approval model: startFlow() is the only manually-approved write. updateWorkflow()
 // and cancelFlow() are auto-approvable action kinds, so after the workflow is started the
@@ -157,7 +157,6 @@ interface SessionContext {
   approvalQueue: RpcStub<ApprovalQueue>;
   getWorkflow: (id: string) => WorkflowInfo | undefined;
   listWorkflows: () => WorkflowInfo[];
-  assertWorkflowExists: (id: string) => void;
   submitWrite: (body: SubmitWriteBody) => Promise<void>;
   dispose: () => void;
 }
@@ -206,6 +205,8 @@ export class JulesFlowGatekeeperImpl extends DurableObject<Env, JulesFlowAccount
           title: action.input.title,
           request: action.input.request,
           planSummary: action.input.planSummary,
+          julesPrompt: action.input.julesPrompt,
+          officialDocs: action.input.officialDocs,
           githubRepo: action.input.githubRepo,
           julesSource: action.input.julesSource,
           updatedAt: nowIso(),
@@ -223,7 +224,12 @@ export class JulesFlowGatekeeperImpl extends DurableObject<Env, JulesFlowAccount
       case "cancel": {
         const existing = this.#getWorkflow(action.workflowId);
         if (!existing) throw new Error("No Jules Flow workflow exists with id " + action.workflowId + ".");
-        this.ctx.storage.kv.put(workflowKey(action.workflowId), { ...existing, phase: "CANCELLED", updatedAt: nowIso() });
+        if (existing.phase === "DONE") {
+          throw new Error("Workflow " + action.workflowId + " is already DONE; it cannot be cancelled.");
+        }
+        if (existing.phase !== "CANCELLED") {
+          this.ctx.storage.kv.put(workflowKey(action.workflowId), { ...existing, phase: "CANCELLED", updatedAt: nowIso() });
+        }
         break;
       }
     }
@@ -245,9 +251,6 @@ export class JulesFlowGatekeeperImpl extends DurableObject<Env, JulesFlowAccount
       approvalQueue,
       getWorkflow: (id) => self.#getWorkflow(id),
       listWorkflows: () => self.#listWorkflows(),
-      assertWorkflowExists: (id) => {
-        if (!self.#getWorkflow(id)) throw new Error("No Jules Flow workflow exists with id \"" + id + "\".");
-      },
       async submitWrite(body) {
         const id = self.#nextActionId();
         const action = { ...body, id } as JulesFlowAction;
@@ -331,6 +334,8 @@ class JulesFlowSessionImpl extends RpcTarget implements JulesFlowSession {
       title: input.title,
       request: input.request,
       planSummary: input.planSummary,
+      julesPrompt: input.julesPrompt,
+      officialDocs: input.officialDocs,
       githubRepo: input.githubRepo,
       julesSource: input.julesSource,
       updatedAt: nowIso(),
@@ -363,15 +368,24 @@ class JulesFlowSessionImpl extends RpcTarget implements JulesFlowSession {
   }
 
   async updateWorkflow(id: string, patch: WorkflowPatch): Promise<WorkflowInfo> {
-    this.#ctx.assertWorkflowExists(id);
+    const existing = this.#ctx.getWorkflow(id);
+    if (!existing) throw new Error("No Jules Flow workflow exists with id " + id + ".");
+    const projected = applyPatch(existing, patch);
     await this.#ctx.submitWrite({ type: "update", workflowId: id, patch });
-    return this.#ctx.getWorkflow(id)!;
+    return projected;
   }
 
   async cancelFlow(id: string): Promise<WorkflowInfo> {
-    this.#ctx.assertWorkflowExists(id);
+    const existing = this.#ctx.getWorkflow(id);
+    if (!existing) throw new Error("No Jules Flow workflow exists with id " + id + ".");
+    if (existing.phase === "DONE") {
+      throw new Error("Workflow " + id + " is already DONE; it cannot be cancelled.");
+    }
+    const projected = existing.phase === "CANCELLED"
+      ? existing
+      : { ...existing, phase: "CANCELLED", updatedAt: nowIso() };
     await this.#ctx.submitWrite({ type: "cancel", workflowId: id });
-    return this.#ctx.getWorkflow(id)!;
+    return projected;
   }
 }
 
