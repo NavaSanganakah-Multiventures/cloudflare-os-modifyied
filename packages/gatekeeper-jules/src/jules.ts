@@ -901,6 +901,16 @@ class JulesSessionImpl extends RpcTarget implements JulesSessionIface {
     if (typeof sourceName !== "string" || sourceName.trim().length === 0) {
       throw new TypeError("createSession() requires a non-empty \"sourceContext.source\" (the Jules source to work against).");
     }
+
+    // Ensure the source name is expanded to "sources/id" format if necessary.
+    input = {
+      ...input,
+      sourceContext: {
+        ...input.sourceContext,
+        source: expandResourceName(sourceName, "sources"),
+      },
+    };
+
     await this.#ctx.submitWrite({ type: "createSession", input });
   }
 

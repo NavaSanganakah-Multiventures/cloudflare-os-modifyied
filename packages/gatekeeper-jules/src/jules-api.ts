@@ -206,7 +206,7 @@ export class JulesRest {
 
   async approvePlan(session: string): Promise<void> {
     // The approvePlan REST method requires an empty request body.
-    await this.post("v1alpha/" + encodeName(session) + ":approvePlan");
+    await this.post("v1alpha/" + encodeName(session) + ":approvePlan", {});
   }
 
   async listActivities(
