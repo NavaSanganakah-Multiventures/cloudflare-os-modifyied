@@ -473,3 +473,14 @@ export class GatekeeperVendor extends WorkerEntrypoint<Env> implements Gatekeepe
     return TYPES_CODE;
   }
 }
+
+// --- Fetch handler (module-format marker) ---
+//
+// This worker is reached only through the Router's service binding with
+// `entrypoint: "GatekeeperVendor"`. The default export exists so Wrangler
+// builds the worker as an ES Module, which Durable Object migrations require.
+export default {
+  async fetch(_req: Request) {
+    return new Response("Not found", { status: 404 });
+  },
+};
