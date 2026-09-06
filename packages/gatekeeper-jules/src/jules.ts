@@ -533,23 +533,14 @@ export class JulesVerifier extends WorkerEntrypoint<Env> implements GatekeeperUs
 type JulesAction =
   | { id: number; type: "createSession"; input: JulesCreateSessionInput }
   | { id: number; type: "sendMessage"; session: string; prompt: string }
-  | { id: number; type: "approvePlan"; session: string }
-  | { id: number; type: "archiveSession"; session: string }
-  | { id: number; type: "unarchiveSession"; session: string }
-  | { id: number; type: "deleteSession"; session: string };
+  | { id: number; type: "approvePlan"; session: string };
 
 type SubmitWriteBody =
   | { type: "createSession"; input: JulesCreateSessionInput }
   | { type: "sendMessage"; session: string; prompt: string }
-  | { type: "approvePlan"; session: string }
-  | { type: "archiveSession"; session: string }
-  | { type: "unarchiveSession"; session: string }
-  | { type: "deleteSession"; session: string };
+  | { type: "approvePlan"; session: string };
 
-type JulesRevertInfo =
-  | { type: "createdSession"; name: string }
-  | { type: "archiveToggle"; session: string }
-  | { type: "noRevert" };
+type JulesRevertInfo = { type: "noRevert" };
 
 type PendingActionRow = { id: number; action: JulesAction; submittedAt: number };
 type AppliedActionRow = { id: number; action: JulesAction; revertInfo: JulesRevertInfo; appliedAt: number };
@@ -591,11 +582,11 @@ function describeAction(action: JulesAction): ActionDescription {
     case "createSession": {
       const prompt = truncate(action.input.prompt, 160);
       const title = action.input.title ? " (title: " + truncate(action.input.title, 80) + ")" : "";
-      const source = action.input.sourceContext ? " against source " + truncate(action.input.sourceContext.source, 80) : "";
+      const source = " against source " + truncate(action.input.sourceContext.source, 80);
       return {
         title: "Create Google Jules session",
         description: "Starts a new Jules session with prompt \"" + prompt + "\"" + title + source + ".",
-        implementsRevert: true,
+        implementsRevert: false,
         awaitDecision: true,
       };
     }
@@ -610,27 +601,6 @@ function describeAction(action: JulesAction): ActionDescription {
       return {
         title: "Approve Jules plan",
         description: "Approves the pending plan in " + action.session + ".",
-        implementsRevert: false,
-        awaitDecision: true,
-      };
-    case "archiveSession":
-      return {
-        title: "Archive Jules session",
-        description: "Archives " + action.session + ".",
-        implementsRevert: true,
-        awaitDecision: true,
-      };
-    case "unarchiveSession":
-      return {
-        title: "Unarchive Jules session",
-        description: "Unarchives " + action.session + ".",
-        implementsRevert: true,
-        awaitDecision: true,
-      };
-    case "deleteSession":
-      return {
-        title: "Delete Jules session",
-        description: "Permanently deletes " + action.session + ". This cannot be undone.",
         implementsRevert: false,
         awaitDecision: true,
       };
@@ -753,8 +723,8 @@ export class JulesGatekeeperImpl extends DurableObject<Env, JulesGatekeeperImplP
     try {
       switch (action.type) {
         case "createSession": {
-          const created = await rest.createSession(action.input);
-          revertInfo = { type: "createdSession", name: created.name };
+          await rest.createSession(action.input);
+          revertInfo = { type: "noRevert" };
           break;
         }
         case "sendMessage":
@@ -763,18 +733,6 @@ export class JulesGatekeeperImpl extends DurableObject<Env, JulesGatekeeperImplP
           break;
         case "approvePlan":
           await rest.approvePlan(action.session);
-          revertInfo = { type: "noRevert" };
-          break;
-        case "archiveSession":
-          await rest.archiveSession(action.session);
-          revertInfo = { type: "archiveToggle", session: action.session };
-          break;
-        case "unarchiveSession":
-          await rest.unarchiveSession(action.session);
-          revertInfo = { type: "archiveToggle", session: action.session };
-          break;
-        case "deleteSession":
-          await rest.deleteSession(action.session);
           revertInfo = { type: "noRevert" };
           break;
       }
@@ -794,20 +752,8 @@ export class JulesGatekeeperImpl extends DurableObject<Env, JulesGatekeeperImplP
   async revertAction(actionId: number): Promise<void | { message?: string; canRetry?: boolean; restart?: boolean }> {
     const applied = this.#getApplied(actionId);
     if (!applied) throw new Error("No applied Google Jules action exists with id " + actionId + ".");
-    const rest = await this.#rest();
-    const info = applied.revertInfo;
-    switch (info.type) {
-      case "createdSession":
-        await rest.deleteSession(info.name);
-        return;
-      case "archiveToggle": {
-        if (applied.action.type === "archiveSession") await rest.unarchiveSession(info.session);
-        else await rest.archiveSession(info.session);
-        return;
-      }
-      default:
-        throw new Error("This action cannot be reverted.");
-    }
+    // The documented Jules REST API has no undo endpoints (no delete/archive/unarchive), so no write is revertible.
+    throw new Error("This action cannot be reverted.");
   }
 
   // Google Jules has no per-user ACL: a single API key grants all-or-nothing access to the
@@ -951,6 +897,10 @@ class JulesSessionImpl extends RpcTarget implements JulesSessionIface {
       }
       if (!input.sourceContext) input = { ...input, sourceContext: { source: scope } };
     }
+    const sourceName = input.sourceContext?.source;
+    if (typeof sourceName !== "string" || sourceName.trim().length === 0) {
+      throw new TypeError("createSession() requires a non-empty \"sourceContext.source\" (the Jules source to work against).");
+    }
     await this.#ctx.submitWrite({ type: "createSession", input });
   }
 
@@ -967,24 +917,6 @@ class JulesSessionImpl extends RpcTarget implements JulesSessionIface {
     const fullName = expandResourceName(session, "sessions");
     await this.#assertSessionInScope(fullName);
     await this.#ctx.submitWrite({ type: "approvePlan", session: fullName });
-  }
-
-  async archiveSession(session: string): Promise<void> {
-    const fullName = expandResourceName(session, "sessions");
-    await this.#assertSessionInScope(fullName);
-    await this.#ctx.submitWrite({ type: "archiveSession", session: fullName });
-  }
-
-  async unarchiveSession(session: string): Promise<void> {
-    const fullName = expandResourceName(session, "sessions");
-    await this.#assertSessionInScope(fullName);
-    await this.#ctx.submitWrite({ type: "unarchiveSession", session: fullName });
-  }
-
-  async deleteSession(session: string): Promise<void> {
-    const fullName = expandResourceName(session, "sessions");
-    await this.#assertSessionInScope(fullName);
-    await this.#ctx.submitWrite({ type: "deleteSession", session: fullName });
   }
 
   async listActivities(session: string, options?: JulesListActivitiesOptions): Promise<JulesActivity[]> {
