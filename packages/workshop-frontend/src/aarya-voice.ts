@@ -88,11 +88,18 @@ export async function createMicCapture(
   };
 
   source.connect(processor);
-  processor.connect(audioContext.destination);
+
+  // Route the processor through a muted gain node so captured mic audio does not loop back
+  // to the speakers (which triggers acoustic echo suppression and dampens mic sensitivity).
+  const muteNode = audioContext.createGain();
+  muteNode.gain.value = 0;
+  processor.connect(muteNode);
+  muteNode.connect(audioContext.destination);
 
   return {
     stop: () => {
       processor.disconnect();
+      muteNode.disconnect();
       source.disconnect();
       stream.getTracks().forEach((track) => track.stop());
       void audioContext.close();
