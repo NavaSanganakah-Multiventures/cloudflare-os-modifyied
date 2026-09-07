@@ -5,6 +5,14 @@
 // drives the workflow with its own GitHub and Jules connections and records progress here;
 // the gatekeeper guards terminal phases (DONE/CANCELLED), the initial AWAITING_APPROVAL phase, and keeps the single source of truth for a run.
 //
+// CONNECTIONS FIRST: this gatekeeper only tracks a run -- it does NOT do GitHub or Google
+// Jules work itself. Before calling startFlow(), the driving agent MUST already hold BOTH
+// connections in its env:
+//   - a GitHub repo connection for the repository being modified (githubRepo), and
+//   - a Google Jules (JulesSession) connection for the source Jules works against (julesSource).
+// If either connection is missing, request it first (requestConnection) and do NOT start the
+// flow until both connections are present.
+//
 // Single-approval model: startFlow() is the only manually-approved write. updateWorkflow()
 // and cancelFlow() are auto-approvable action kinds, so after the workflow is started the
 // agent can advance it without further approvals.
@@ -118,11 +126,14 @@ function validateStartFlowInput(input: StartFlowInput): void {
   if (typeof input.julesPrompt !== "string" || input.julesPrompt.trim().length === 0) {
     throw new TypeError("startFlow() requires a non-empty string \"julesPrompt\".");
   }
-  if (typeof input.githubRepo !== "string" || input.githubRepo.trim().length === 0) {
-    throw new TypeError("startFlow() requires a non-empty string \"githubRepo\" (owner/repo).");
+  const githubRepo = typeof input.githubRepo === "string" ? input.githubRepo.trim() : "";
+  const repoParts = githubRepo.split("/");
+  if (repoParts.length !== 2 || repoParts[0].length === 0 || repoParts[1].length === 0) {
+    throw new TypeError("startFlow() requires \"githubRepo\" in the form \"owner/repo\" (e.g. \"acme/widgets\").");
   }
-  if (typeof input.julesSource !== "string" || input.julesSource.trim().length === 0) {
-    throw new TypeError("startFlow() requires a non-empty string \"julesSource\".");
+  const julesSource = typeof input.julesSource === "string" ? input.julesSource.trim() : "";
+  if (!julesSource.startsWith("sources/") || julesSource.length === "sources/".length) {
+    throw new TypeError("startFlow() requires \"julesSource\" in the form \"sources/<id>\" (use the source name returned by listSources()).");
   }
   if (input.officialDocs !== undefined && !Array.isArray(input.officialDocs)) {
     throw new TypeError("startFlow() requires \"officialDocs\" to be an array.");

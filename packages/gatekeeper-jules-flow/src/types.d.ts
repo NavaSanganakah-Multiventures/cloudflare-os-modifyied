@@ -1,3 +1,21 @@
+// =====================================================================================
+// CONNECTIONS FIRST -- MANDATORY PRECONDITION
+// =====================================================================================
+//
+// Jules Flow is only a *tracker* (a durable record book for one run). It does NOT perform
+// GitHub or Google Jules work itself; the driving agent does the real work with its own
+// connections and records progress here.
+//
+// Before calling startFlow(), the agent MUST already hold BOTH of these connections in its
+// environment:
+//
+//   1. GitHub       - a repo connection for the repository being modified (githubRepo).
+//   2. Google Jules - a JulesSession connection for the source Jules works against (julesSource).
+//
+// If either connection is missing, REQUEST IT FIRST (requestConnection) and wait until it
+// is granted. Do NOT call startFlow() until both connections are present. startFlow() is the
+// only manually-approved action; after it, updateWorkflow()/cancelFlow() auto-advance the run.
+// =====================================================================================
 /** Jules Flow workflow phases. */
 export type FlowPhase =
   | "AWAITING_APPROVAL"
