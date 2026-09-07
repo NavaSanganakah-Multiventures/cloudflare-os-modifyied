@@ -26,7 +26,7 @@ export const MANIFEST_VERSION = 1;
 // on a deployable worker needs an explicit decision about how customer instances get it.
 const HANDLED_CONFIG_KEYS = new Set([
   "$schema", "name", "main", "build", "compatibility_date", "compatibility_flags", "rules",
-  "migrations", "observability", "kv_namespaces", "r2_buckets", "worker_loaders", "services",
+  "migrations", "observability", "kv_namespaces", "r2_buckets", "vectorize", "triggers", "worker_loaders", "services",
   "assets", "vars",
   // Browser Rendering (Gadget PDF exports). Unlike artifacts it is generally available, so it
   // passes through to customer instances as a placeholder-free binding, like the AI binding.
@@ -43,6 +43,8 @@ const ARTIFACTS_CUT_ALLOWED = new Set(["gatekeeper-context"]);
 const NO_DEFAULT_CRED_INPUTS = new Set([
   "gatekeeper-context",       // no third-party service; uses its own storage
   "gatekeeper-homeassistant", // users connect their own Home Assistant URL + token in-app
+  "gatekeeper-jules",         // users connect their own Google Jules API key in-app
+  "gatekeeper-jules-flow",    // ambient flow ledger; no credentials (work via agent passed stubs)
   "gatekeeper-scheduler",     // auto-provisioned; no third-party OAuth app
   "gatekeeper-mcp",           // MCP OAuth uses dynamic client registration, not a static app
   "gatekeeper-mcp-portal",    // same MCP OAuth chain as gatekeeper-mcp
@@ -55,7 +57,7 @@ const NOT_INSTALLABLE = new Set(["gatekeeper-email"]);
 // Ambient gatekeepers the deploy service installs on every fresh core deploy, server-side with
 // no user interaction. Members must take no inputs of any kind (enforced below): a preinstall
 // has nobody to ask.
-const PREINSTALL = new Set(["gatekeeper-context", "gatekeeper-scheduler"]);
+const PREINSTALL = new Set(["gatekeeper-context", "gatekeeper-jules-flow", "gatekeeper-scheduler"]);
 
 // Gatekeepers that may be installed at most once per instance; the deploy service enforces this
 // at install time. The giveaway is the account declaring an agent singleton
@@ -64,7 +66,7 @@ const PREINSTALL = new Set(["gatekeeper-context", "gatekeeper-scheduler"]);
 // ambient gatekeeper, so a second install would hand every user a duplicate ambient capsule.
 // Independent of PREINSTALL in principle; the two sets coincide today only because every ambient
 // gatekeeper we ship is also preinstalled.
-const SINGLETON = new Set(["gatekeeper-context", "gatekeeper-scheduler"]);
+const SINGLETON = new Set(["gatekeeper-context", "gatekeeper-jules-flow", "gatekeeper-scheduler"]);
 
 export const DEFAULT_CRED_INPUTS = [
   {
@@ -79,10 +81,16 @@ export const DEFAULT_CRED_INPUTS = [
   },
 ];
 
-// Discover the deployable set: every public package with a wrangler.jsonc.
+// Packages with a wrangler.jsonc that are not released through the manifest
+// generator (e.g. container-based workers deployed separately by a gatekeeper).
+const RELEASE_MANIFEST_EXCLUDED = new Set(["build-runner"]);
+
+// Discover the deployable set: every public package with a wrangler.jsonc, minus
+// explicitly excluded packages.
 export function findDeployablePackages(packagesDir) {
   return readdirSync(packagesDir)
       .filter((name) => {
+    if (RELEASE_MANIFEST_EXCLUDED.has(name)) return false;
     try {
       return statSync(join(packagesDir, name, "wrangler.jsonc")).isFile();
     } catch {
@@ -143,6 +151,13 @@ export function buildWorkerEntry({ pkgName, config, mainModule, modules, deployI
       type: "r2_bucket",
       name: r2.binding,
       bucket_name: `$R2_${r2.binding}_NAME`,
+    });
+  }
+  for (const v of config.vectorize ?? []) {
+    bindings.push({
+      type: "vectorize",
+      name: v.binding,
+      index_name: `$VECTORIZE_${v.binding}_NAME`,
     });
   }
   if (config.browser) {
@@ -243,6 +258,7 @@ export function buildWorkerEntry({ pkgName, config, mainModule, modules, deployI
     bindings,
     vars,
     observability: config.observability ?? { enabled: false },
+    ...(config.triggers ? { triggers: config.triggers } : {}),
     ...(gatekeeperBindingExpansion ? { gatekeeperBindingExpansion } : {}),
     ...(assetsConfig ? { assetsConfig } : {}),
     ...(inputs ? { inputs } : {}),

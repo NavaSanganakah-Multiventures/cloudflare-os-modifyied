@@ -8,10 +8,13 @@ import { createTypedStorage, collection } from "@gadgets/typed-storage";
 import { createWorkshopLogger } from "./observability";
 import { getAiGatewayConfig } from "./ai-gateway.js";
 import { utcDayKey, nextUtcMidnightIso, DailyQuotaResult } from "./ai-gateway-billing/limits/config.js";
+import { getUsdToInrRate, getWalletStartBalance } from "./ai-gateway-billing/config.js";
+import { DEFAULT_WALLET_START_BALANCE_USD } from "@gadgets/workshop-shared/limits";
 import type { AdminSettings } from "./admin-settings.js";
 import { isReservedBlueprintKey, readBlueprintKvRecord } from "./blueprint-archive.js";
 import { filterEnabledResources, isResourceDisabled, readAdminConfig } from "./admin-config.js";
 import { buildGatekeeperVendorMap } from "./auth/auth-vendors.js";
+import type { AaryaNotification, AaryaReminder } from "./aarya/aarya-reminders";
 
 const logger = createWorkshopLogger("workshop.user");
 
@@ -179,6 +182,17 @@ function makeUserStorage(storage: DurableObjectStorage) {
           byWorkspace(record: OutputRecord) { return record.workspaceId; },
         },
       }),
+      // Aarya reminders + the notification inbox. Reminders are swept into the inbox when they
+      // become due and are surfaced the next time the user starts an Aarya voice call.
+      reminders: collection<AaryaReminder>()({
+        primaryKey: "id",
+        nonUniqueIndexes: {
+          byDueAt(record: AaryaReminder) { return record.dueAt; },
+        },
+      }),
+      notifications: collection<AaryaNotification>()({
+        primaryKey: "id",
+      }),
     },
     singletons: {
       // AI Gateway billing state (selected account + cached balance) for the optional top-up flow;
@@ -194,6 +208,13 @@ function makeUserStorage(storage: DurableObjectStorage) {
       quickModel: <string | null>null,
       preferredModel: <string | null>null,
       onboardingCompleted: false,
+
+      walletBalance: <number>DEFAULT_WALLET_START_BALANCE_USD, // seeded starting balance (USD) for System AI
+      // One-time flag: converts legacy "credits"-denominated balances into USD on first wallet
+      // access (new accounts are marked migrated at creation, so this only touches old ones).
+      walletUnitsMigrated: false,
+      processedRazorpayPayments: <string[]>[],
+      aiPreference: <"system" | "custom">"system",
 
       // Set once the user's pre-existing workspaces have been asked to populate the outputs index
       // (see #backfillOutputs()). Workspaces created since push on their own.
@@ -215,6 +236,10 @@ function makeUserStorage(storage: DurableObjectStorage) {
       //
       // null = password disabled (e.g. because some other auth mechanism is used)
       passwordHashHash: <Uint8Array | null>null,
+
+      // User-scoped Gemini API key for the Aarya voice assistant. Never returned to the client;
+      // only a masked hint is shown in the Settings page.
+      aaryaGeminiKey: <string | null>null,
     }
   });
 }
@@ -273,6 +298,16 @@ async function checkGatekeeperVendorFilter(
 }
 
 // Durable Object that stores information about a user.
+/** Soonest due time (ms epoch) among reminders, or null when there are none. Used to arm the
+ * per-user reminder alarm so due reminders become notifications without a live voice call. */
+function nextReminderAlarmTime(reminders: Iterable<AaryaReminder>): number | null {
+  let soonest: number | null = null;
+  for (const reminder of reminders) {
+    if (soonest === null || reminder.dueAt < soonest) soonest = reminder.dueAt;
+  }
+  return soonest;
+}
+
 export class UserDurableObject extends DurableObject<Cloudflare.Env> {
   private storage: UserStorage;
   private vendors: Map<string, Service<GatekeeperVendor>>;
@@ -315,6 +350,8 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
       }
       // Create on first use.
       this.storage.created.put(true);
+      this.storage.walletBalance.put(getWalletStartBalance(this.env));
+      this.storage.walletUnitsMigrated.put(true);
       this.storage.profile.put({
         type: "user",
         name: email.split("@")[0],
@@ -372,6 +409,8 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     }
 
     this.storage.created.put(true);
+    this.storage.walletBalance.put(getWalletStartBalance(this.env));
+    this.storage.walletUnitsMigrated.put(true);
     this.storage.profile.put({
       type: "user",
       name: displayName,
@@ -400,6 +439,8 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     if (!this.storage.created.get()) {
       if (!allowCreate) return null;
       this.storage.created.put(true);
+      this.storage.walletBalance.put(getWalletStartBalance(this.env));
+      this.storage.walletUnitsMigrated.put(true);
       this.storage.profile.put({
         type: "user",
         name: email.split("@")[0],
@@ -502,6 +543,110 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     this.storage.profile.put(profile);
   }
 
+  // ---- Aarya reminders & notification inbox ---------------------------------------------
+  // Stored per-user; Aarya's call room sweeps due reminders into the inbox and surfaces the
+  // notifications in the assistant's system prompt at the start of each call.
+
+  async addReminder(message: string, dueAt: number): Promise<AaryaReminder> {
+    const reminder: AaryaReminder = {
+      id: crypto.randomUUID(),
+      message,
+      dueAt,
+      createdAt: Date.now(),
+    };
+    this.storage.reminders.put(reminder);
+    await this.scheduleNextReminderAlarm();
+    return reminder;
+  }
+
+  async listReminders(): Promise<AaryaReminder[]> {
+    return Array.from(this.storage.reminders.byDueAt.list())
+      .toSorted((a, b) => a.dueAt - b.dueAt);
+  }
+
+  async cancelReminder(id: string): Promise<boolean> {
+    const removed = this.storage.reminders.delete(id);
+    await this.scheduleNextReminderAlarm();
+    return removed;
+  }
+
+  /** Move due reminders into the notification inbox; returns how many were swept. */
+  async sweepDueReminders(now: number = Date.now()): Promise<number> {
+    const due: AaryaReminder[] = [];
+    for (const reminder of this.storage.reminders.byDueAt.list()) {
+      if (reminder.dueAt > now) break;
+      due.push(reminder);
+    }
+    for (const reminder of due) {
+      this.storage.reminders.delete(reminder.id);
+      this.storage.notifications.put({
+        id: crypto.randomUUID(),
+        kind: "reminder",
+        title: "Reminder",
+        detail: reminder.message,
+        createdAt: now,
+      });
+    }
+    return due.length;
+  }
+
+  async listNotifications(): Promise<AaryaNotification[]> {
+    return Array.from(this.storage.notifications.list())
+      .toSorted((a, b) => a.createdAt - b.createdAt);
+  }
+
+  /** Clear notifications (all of them, or just the given ids); returns how many were removed. */
+  async clearNotifications(ids?: string[]): Promise<number> {
+    let removed = 0;
+    if (ids) {
+      for (const id of ids) {
+        if (this.storage.notifications.delete(id)) removed++;
+      }
+    } else {
+      for (const notification of Array.from(this.storage.notifications.list())) {
+        if (this.storage.notifications.delete(notification.id)) removed++;
+      }
+    }
+    return removed;
+  }
+
+  /** Schedule (or clear) the per-user reminder alarm for the soonest pending reminder. Background
+   * delivery relies on this alarm rather than a global cron sweep: each user DO wakes itself. */
+  private async scheduleNextReminderAlarm(): Promise<void> {
+    const soonest = nextReminderAlarmTime(this.storage.reminders.byDueAt.list());
+    if (soonest === null) {
+      await this.ctx.storage.deleteAlarm();
+    } else {
+      await this.ctx.storage.setAlarm(soonest);
+    }
+  }
+
+  /** Background reminder delivery: move due reminders into the notification inbox, then arm the
+   * next alarm for the soonest remaining reminder (or clear it when none remain). */
+  async alarm(): Promise<void> {
+    await this.sweepDueReminders(Date.now());
+    await this.scheduleNextReminderAlarm();
+  }
+
+  getAaryaGeminiKey(): Promise<string | null> {
+    return Promise.resolve(this.storage.aaryaGeminiKey.get());
+  }
+
+  getAaryaGeminiKeyStatus(): Promise<{ set: boolean; masked: string | null }> {
+    const key = this.storage.aaryaGeminiKey.get();
+    if (!key) return Promise.resolve({ set: false, masked: null });
+    const masked = key.length > 8 ? key.slice(0, 4) + "..." + key.slice(-4) : "****";
+    return Promise.resolve({ set: true, masked });
+  }
+
+  async setAaryaGeminiKey(key: string): Promise<void> {
+    this.storage.aaryaGeminiKey.put(key.trim() || null);
+  }
+
+  async clearAaryaGeminiKey(): Promise<void> {
+    this.storage.aaryaGeminiKey.put(null);
+  }
+
   async listModels(): Promise<AiChatAuthorInfo[]> {
     let result: AiChatAuthorInfo[] = [];
 
@@ -585,6 +730,40 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     this.storage.onboardingCompleted.put(true);
   }
 
+  // One-time migration from the pre-price-model "credits" wallet unit to USD. The old unit was
+  // effectively INR (recharges were added as payment.amount/100 = rupees, and the free seed was
+  // 100), so the remaining balance is converted at the configured USD->INR rate. New accounts are
+  // marked migrated at creation (their balance is already USD), so this only touches legacy
+  // balances, exactly once. Reads/writes here are synchronous under the DO input gate.
+  #migrateWalletIfNeeded(): void {
+    if (this.storage.walletUnitsMigrated.get()) return;
+
+    // Only migrate if this is an already-created legacy user.
+    // If they aren't created yet, they are a new user and get the full USD default start balance
+    // without migration.
+    if (!this.storage.created.get()) {
+      this.storage.walletUnitsMigrated.put(true);
+      return;
+    }
+
+    const oldBalance = this.storage.walletBalance.get();
+    this.storage.walletBalance.put(oldBalance / getUsdToInrRate(this.env));
+    this.storage.walletUnitsMigrated.put(true);
+  }
+
+  async getWalletBalance(): Promise<number> {
+    this.#migrateWalletIfNeeded();
+    return this.storage.walletBalance.get();
+  }
+
+  async getAiPreference(): Promise<"system" | "custom"> {
+    return this.storage.aiPreference.get();
+  }
+
+  async setAiPreference(pref: "system" | "custom"): Promise<void> {
+    this.storage.aiPreference.put(pref);
+  }
+
   // ---------------------------------------------------------------------------------------------
   // Cloudflare account connection (optional top-up flow).
   // ---------------------------------------------------------------------------------------------
@@ -662,6 +841,92 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
              resetAt: nextUtcMidnightIso() };
   }
 
+  async consumeWalletBalance(cost: number): Promise<boolean> {
+    if (!Number.isFinite(cost) || cost < 0) {
+      throw new TypeError("Invalid wallet cost: " + String(cost));
+    }
+    this.#migrateWalletIfNeeded();
+    let current = this.storage.walletBalance.get();
+    // Always record the charge so the balance accurately reflects spend. This prevents a stale
+    // small positive balance from letting unlimited free turns through the gate. Returns false
+    // when the charge overdrew the wallet; the next gate check will then block further System AI.
+    this.storage.walletBalance.put(current - cost);
+    return current >= cost;
+  }
+
+  async addWalletBalance(amount: number): Promise<void> {
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new TypeError("Invalid wallet top-up amount: " + String(amount));
+    }
+    this.#migrateWalletIfNeeded();
+    let current = this.storage.walletBalance.get();
+    this.storage.walletBalance.put(current + amount);
+  }
+
+  async createRazorpayOrder(amountRupee: number): Promise<{ orderId: string; amount: number; currency: string; keyId: string }> {
+    if (!Number.isFinite(amountRupee) || amountRupee < 1) {
+      throw new TypeError("Recharge amount must be at least 1 INR, got: " + String(amountRupee));
+    }
+    const keyId = this.env.RAZORPAY_KEY_ID;
+    const keySecret = this.env.RAZORPAY_KEY_SECRET;
+    if (!keyId || !keySecret) {
+      throw new Error("Razorpay is not configured on this deployment.");
+    }
+    const amountPaise = Math.round(amountRupee * 100);
+    const auth = btoa(keyId + ":" + keySecret);
+    const receipt = "topup-" + Date.now();
+    const response = await fetch("https://api.razorpay.com/v1/orders", {
+      method: "POST",
+      headers: { "Authorization": "Basic " + auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: amountPaise, currency: "INR", receipt, notes: { userId: this.ctx.id.toString() } }),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error("Razorpay order creation failed: " + response.status + " " + body.slice(0, 200));
+    }
+    const order = await response.json() as { id: string; amount: number; currency: string };
+    return { orderId: order.id, amount: order.amount, currency: order.currency, keyId };
+  }
+
+  async verifyRazorpayPaymentAndTopUp(orderId: string, paymentId: string, signature: string): Promise<void> {
+    if (!orderId || !paymentId || !signature) {
+      throw new TypeError("orderId, paymentId, and signature are required");
+    }
+    const keyId = this.env.RAZORPAY_KEY_ID;
+    const keySecret = this.env.RAZORPAY_KEY_SECRET;
+    if (!keyId || !keySecret) {
+      throw new Error("Razorpay is not configured on this deployment.");
+    }
+    const processed = this.storage.processedRazorpayPayments.get();
+    if (processed.includes(paymentId)) {
+      return;
+    }
+    const valid = await verifyRazorpaySignature(keySecret, orderId, paymentId, signature);
+    if (!valid) {
+      throw new Error("Invalid Razorpay payment signature");
+    }
+    const auth = btoa(keyId + ":" + keySecret);
+    const response = await fetch("https://api.razorpay.com/v1/payments/" + paymentId, {
+      headers: { "Authorization": "Basic " + auth },
+    });
+    if (!response.ok) {
+      throw new Error("Failed to verify Razorpay payment: " + response.status);
+    }
+    const payment = await response.json() as { status: string; amount: number; order_id: string };
+    if (payment.status !== "captured") {
+      throw new Error("Razorpay payment not captured; status=" + payment.status);
+    }
+    if (payment.order_id !== orderId) {
+      throw new Error("Razorpay payment order_id mismatch");
+    }
+    // Razorpay charges in INR paise; convert to USD at the configured rate before crediting the
+    // (USD-denominated) wallet, so the balance stays in a single currency.
+    const inrAmount = payment.amount / 100;
+    const usdAmount = inrAmount / getUsdToInrRate(this.env);
+    await this.addWalletBalance(usdAmount);
+    this.storage.processedRazorpayPayments.put([...processed, paymentId]);
+  }
+
   // DO NOT MAKE PUBLIC -- returns API keys.
   async getChatContext(modelId: string | null): Promise<UserChatContext> {
     let gwConfig = getAiGatewayConfig(this.env);
@@ -706,7 +971,7 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return this.getChatContext(selectedModel?.id ?? null);
   }
 
-  async listGadgets(): Promise<GadgetMetadataWithTimestamps[]> {
+  async listWorkspaces(): Promise<GadgetMetadataWithTimestamps[]> {
     let result: GadgetMetadataWithTimestamps[] = [];
     for (let gadget of this.storage.gadgets.list()) {
       if (isFullyCreated(gadget)) {
@@ -738,14 +1003,14 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return this.storage.gadgets.get(id) || null;
   }
 
-  async newGadget(id: string, title: string): Promise<void> {
+  async newWorkspace(id: string, title: string): Promise<void> {
     let created = new Date();
     this.storage.gadgets.put({id, title, created});
   }
 
   async ensureGadgetRegistered(id: string, title: string): Promise<void> {
     if (this.storage.gadgets.get(id)) return;
-    await this.newGadget(id, title);
+    await this.newWorkspace(id, title);
   }
 
   async setGadgetLastActive(id: string, time: Date, totalCost: number | undefined): Promise<void> {
@@ -1674,6 +1939,34 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return account ? account.description : null;
   }
 
+  /**
+   * Resolve the owner's connected Google account to a full-mailbox Gmail gatekeeper DO class, so the
+   * Aarya voice assistant can send email on the owner's behalf. Returns null when no usable Google
+   * account (with Gmail) is connected, or when an administrator has disabled Gmail. The first
+   * Google account is used; multiple Google accounts are not currently distinguished.
+   */
+  /**
+   * Resolve one of the owner's connected accounts to a gatekeeper DO class for the given resource
+   * URL, so the Aarya voice assistant can act on the owner's behalf (Gmail, GitHub, ...). Uses the
+   * first connected account for the vendor. Returns null when no usable account is connected, or
+   * when an administrator has disabled the resource.
+   */
+  async getAaryaGatekeeperClass(vendorId: string, url: string)
+      : Promise<{ class: DurableObjectClass<Gatekeeper<any>>, accountId: number } | null> {
+    for (const rec of this.#connectedAccountRecords()) {
+      if (rec.vendorId !== vendorId) continue;
+      try {
+        const { class: cls } = await this.getGatekeeperClassFor(rec.id, url);
+        return { class: cls, accountId: rec.id };
+      } catch (error) {
+        logger.warn("aarya: failed to resolve gatekeeper class for account", {
+          event: "aarya.gatekeeper.class.resolve.failed", vendorId, accountId: rec.id, error,
+        });
+      }
+    }
+    return null;
+  }
+
 }
 
 type GatekeeperConnectCallbackProps = {
@@ -1721,4 +2014,13 @@ export function normalizeUsername(username: string) {
   }
 
   return username;
+}
+
+
+async function verifyRazorpaySignature(secret: string, orderId: string, paymentId: string, signature: string): Promise<boolean> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(orderId + "|" + paymentId));
+  const hex = Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
+  return signature.toLowerCase() === hex.toLowerCase();
 }

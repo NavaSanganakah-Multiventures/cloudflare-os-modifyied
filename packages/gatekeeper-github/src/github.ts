@@ -36,6 +36,9 @@ import {
 import { assertIssueSearchResultsInRepo, buildIssueSearchQuery } from "./github-search";
 import GITHUB_LOGO_SVG from "./github-logo.svg";
 import type {
+  BuildCommand,
+  BuildExecutorStrategy,
+  BuildResult,
   GitHubActor,
   GitHubBranch,
   GitHubCommit,
@@ -98,10 +101,15 @@ const logger = obsContext.createLogger({
   component: "gatekeeper.github", vendorId: VENDOR_ID,
 });
 
+interface BuildRunner extends WorkerEntrypoint {
+  runBuild(request: { repoUrl: string; branch: string; commands: string[] }): Promise<BuildResult>;
+}
+
 type Env = Cloudflare.Env & {
   BASE_URL?: string;
   CLIENT_ID?: string;
   CLIENT_SECRET?: string;
+  BUILD_RUNNER?: Fetcher<BuildRunner>;
 };
 
 type StoredNonce = {
@@ -288,6 +296,17 @@ type DispatchWorkflowAction = BaseAction & {
   inputs?: Record<string, any>;
 };
 
+type DisableWorkflowAction = BaseAction & {
+  type: "disableWorkflow";
+  workflowId: string | number;
+};
+
+type ExecuteBuildAction = BaseAction & {
+  type: "executeBuild";
+  branch: string;
+  commands: BuildCommand[];
+};
+
 type GitHubAction =
   | CreateIssueAction
   | CreatePullRequestAction
@@ -303,7 +322,9 @@ type GitHubAction =
   | CreateBranchAction
   | WriteFileAction
   | DeleteFileAction
-  | DispatchWorkflowAction;
+  | DispatchWorkflowAction
+  | DisableWorkflowAction
+  | ExecuteBuildAction;
 
 type StoredActionRecord = {
   action: GitHubAction;
@@ -314,6 +335,8 @@ type StoredActionRecord = {
   // The real commit produced by an applied writeFile/deleteFile action, for resolving
   // GitHubCommitHandle.getResult().
   commitResult?: GitHubCommit;
+  // The result of an applied executeBuild action, for waitForBuildResult().
+  buildResult?: BuildResult;
 };
 
 const NONCE_BYTES = 32;
@@ -325,6 +348,9 @@ const VIEWER_CACHE_TTL_MS = 5 * 60 * 1000;
 const DISCUSSION_SYNC_OVERLAP_MS = 5 * 1000;
 const DISCUSSION_SYNC_BAIL_LIMIT = 500;
 const MAX_REPLY_TARGET_HOPS = 50;
+
+// KV key prefix for per-repository build executor overrides chosen by the user in the resource configurator.
+const REPO_BUILD_EXECUTOR_PREFIX = "repoBuildExecutor:";
 
 const GITHUB_LOGO_URL = `data:image/svg+xml,${encodeURIComponent(GITHUB_LOGO_SVG)}`;
 
@@ -381,6 +407,30 @@ const DELETE_REPO_FILE_ACTION: ActionKind = {
   label: "Delete repository files",
   branchScoped: true,
 };
+
+// Editing a GitHub Actions workflow file (.github/workflows/*.{yml,yaml}) is its own action kind.
+// Workflow files can execute arbitrary code in CI, so they warrant a distinct approval card and a
+// separate auto-approval toggle in the UI. Without this, a workflow file edit is categorized as an
+// ordinary "Write repository files" action: if the user enables auto-approval for file writes, a
+// workflow edit is silently auto-applied (the card never appears) and the user has no way to
+// control workflow edits independently. One kind covers create, update, and delete of workflow
+// files so the user sees a single "Edit GitHub Actions workflow files" control.
+const EDIT_WORKFLOW_FILE_ACTION: ActionKind = {
+  tag: "githubEditWorkflowFile",
+  label: "Edit GitHub Actions workflow files",
+  branchScoped: true,
+};
+
+// True when `path` points at a GitHub Actions workflow definition. GitHub only recognizes files
+// *directly* under `.github/workflows/` (no nested subdirectories) with a `.yml`/`.yaml` extension
+// as workflows, so this is the precise set that warrants the dedicated action kind. Exported for
+// unit testing.
+export function isWorkflowFilePath(path: string): boolean {
+  const normalized = path.replace(/^\/+/, "");
+  if (!normalized.startsWith(".github/workflows/")) return false;
+  const suffix = normalized.slice(".github/workflows/".length);
+  return (suffix.endsWith(".yml") || suffix.endsWith(".yaml")) && !suffix.includes("/");
+}
 
 const CREATE_BRANCH_ACTION: ActionKind = {
   tag: "githubCreateBranch",
@@ -457,6 +507,18 @@ const MERGE_PULL_REQUEST_ACTION: ActionKind = {
 const DISPATCH_WORKFLOW_ACTION: ActionKind = {
   tag: "githubDispatchWorkflow",
   label: "Dispatch workflow",
+  branchScoped: true,
+};
+
+const DISABLE_WORKFLOW_ACTION: ActionKind = {
+  tag: "githubDisableWorkflow",
+  label: "Disable workflow",
+  branchScoped: false,
+};
+
+const EXECUTE_BUILD_ACTION: ActionKind = {
+  tag: "githubExecuteBuild",
+  label: "Execute build in Cloudflare Containers",
   branchScoped: true,
 };
 
@@ -601,7 +663,7 @@ function branchFromResponse(branch: GitHubBranchResponse, owner: string, repo: s
 function commitResultFromResponse(commit: GitHubCommitResponse["commit"]): GitHubCommit {
   return {
     sha: commit.sha,
-    // html_url is the web URL (https://github.com/owner/repo/commit/ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦); url is the API URL.
+    // html_url is the web URL (https://github.com/owner/repo/commit/…); url is the API URL.
     url: commit.html_url ?? commit.url,
   };
 }
@@ -1376,6 +1438,23 @@ export class UserAccount extends DurableObject<Env> {
     }
   }
 
+  async getRepoBuildExecutor(repoFullName: string): Promise<BuildExecutorStrategy | null> {
+    const value = this.ctx.storage.kv.get<string>(`${REPO_BUILD_EXECUTOR_PREFIX}${repoFullName}`);
+    if (value === "githubActions" || value === "cloudflareContainers" || value === "auto") {
+      return value;
+    }
+    return null;
+  }
+
+  async setRepoBuildExecutor(repoFullName: string, strategy: BuildExecutorStrategy | null): Promise<void> {
+    const key = `${REPO_BUILD_EXECUTOR_PREFIX}${repoFullName}`;
+    if (strategy === null || strategy === "auto") {
+      this.ctx.storage.kv.delete(key);
+    } else {
+      this.ctx.storage.kv.put(key, strategy);
+    }
+  }
+
   async alarm(): Promise<void> {
     // Drop the account if the flow never completed, or if this was a transient auth-only sign-in
     // grant (used once to read the email for login).
@@ -1492,9 +1571,15 @@ export class GatekeeperUserImpl extends WorkerEntrypoint<Env, GatekeeperUserImpl
     };
 
     if (resourceUrlPattern === REPO_RESOURCE.urlPattern) {
+      const getAccount = () => this.ctx.exports.UserAccount.get(
+        this.ctx.exports.UserAccount.idFromString(this.ctx.props.userObjectId));
       return {
         iframeHtml: GITHUB_REPO_CONFIGURATOR_HTML,
-        ui: new RpcStub(new GitHubRepoConfiguratorUI(getToken)),
+        ui: new RpcStub(new GitHubRepoConfiguratorUI(getToken, {
+          get: (repoFullName: string) => getAccount().getRepoBuildExecutor(repoFullName),
+          set: (repoFullName: string, buildExecutor: string | null) =>
+            getAccount().setRepoBuildExecutor(repoFullName, buildExecutor as BuildExecutorStrategy | null),
+        })),
       };
     }
 
@@ -1579,7 +1664,7 @@ export class GitHubVerifier extends WorkerEntrypoint<Env, GitHubVerifierProps>
       return true;
     } catch (error) {
       // GitHub returns 404 for private repos the token cannot see (to avoid leaking existence), and
-      // 403 in some org-policy cases ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ either way the observer lacks read access.
+      // 403 in some org-policy cases — either way the observer lacks read access.
       if (error instanceof GitHubApiError && (error.status === 404 || error.status === 403)) {
         return false;
       }
@@ -2189,6 +2274,8 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       case "writeFile":
       case "deleteFile":
       case "dispatchWorkflow":
+      case "disableWorkflow":
+      case "executeBuild":
         // These actions affect the repo, not a specific issue/PR entity, so no pending action
         // depends on a provisional issue/PR resource.
         return false;
@@ -2259,7 +2346,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         return this.#entityIdMatches(action.pullId, logicalId);
       }
 
-      if (action.type === "createBranch" || action.type === "writeFile" || action.type === "deleteFile" || action.type === "dispatchWorkflow") {
+      if (action.type === "createBranch" || action.type === "writeFile" || action.type === "deleteFile" || action.type === "dispatchWorkflow" || action.type === "disableWorkflow" || action.type === "executeBuild") {
         // Repo-level actions are never attached to an issue/PR entity.
         return false;
       }
@@ -3121,7 +3208,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
           if (reviewBuf.length < 100) reviewsDone = true;
         }
 
-        // Both sources empty ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ done.
+        // Both sources empty → done.
         if (commentBuf.length === 0 && reviewBuf.length === 0) break;
 
         // Take the entry with the earlier createdAt.
@@ -3407,6 +3494,23 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     return [...byThread.values()].toSorted((a, b) => a.comments[0].createdAt.getTime() - b.comments[0].createdAt.getTime());
   }
 
+  #account() {
+    return this.ctx.exports.UserAccount.get(
+      this.ctx.exports.UserAccount.idFromString(this.ctx.props.userObjectId));
+  }
+
+  /**
+   * Resolves the build executor strategy for this repository. Uses the user's per-repo override
+   * when set; otherwise falls back to GitHub Actions for public repos and Cloudflare Containers
+   * for private/internal repos.
+   */
+  async resolveBuildStrategy(): Promise<BuildExecutorStrategy> {
+    const metadata = await this.repoMetadata();
+    const override = await this.#account().getRepoBuildExecutor(metadata.fullName);
+    if (override) return override;
+    return metadata.visibility === "public" ? "githubActions" : "cloudflareContainers";
+  }
+
   async describe(): Promise<ResourceDescription> {
     switch (this.ctx.props.resourceKind) {
       case "repo": {
@@ -3449,6 +3553,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
   async getAutoApprovableActions(): Promise<ActionKind[]> {
     return [
       WRITE_REPO_FILE_ACTION,
+      EDIT_WORKFLOW_FILE_ACTION,
       DELETE_REPO_FILE_ACTION,
       CREATE_BRANCH_ACTION,
       CREATE_PULL_REQUEST_ACTION,
@@ -3463,7 +3568,14 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       REPLY_DIFF_COMMENT_ACTION,
       MERGE_PULL_REQUEST_ACTION,
       DISPATCH_WORKFLOW_ACTION,
+      EXECUTE_BUILD_ACTION,
     ];
+  }
+
+  async getDefaultAutoApproveBranchPatterns(): Promise<string[]> {
+    const metadata = await this.repoMetadata();
+    const defaultBranch = defaultBranchFromMetadata(metadata);
+    return ['fix/*', 'feature/*', 'agent/*', '*', `!${defaultBranch}`];
   }
 
   async submitActionForApproval(
@@ -3745,6 +3857,79 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
         this.#markActionApproved(action);
         return;
       }
+      case "disableWorkflow": {
+        await this.#withApi(api => api.disableWorkflow(
+          action.owner,
+          action.repo,
+          action.workflowId
+        ));
+        // No #clearCaches(): disabling a workflow does not mutate cached entities
+        // (issues/PRs/branches/files).
+        this.#markActionApproved(action);
+        return;
+      }
+      case "executeBuild": {
+        const result = await this.#executeBuildInContainer(action.branch, action.commands);
+        record.buildResult = result;
+        this.#markActionApproved(action);
+        return;
+      }
+    }
+  }
+
+  async getActionStatus(actionId: number): Promise<{ status: string, logs?: string } | null> {
+    const record = this.#requireActionRecord(actionId);
+    if (!record || record.state !== "approved") return null;
+
+    const action = record.action;
+    if (action.type !== "dispatchWorkflow") return null;
+
+    try {
+      const runsResponse = await this.#withApi(api => api.listWorkflowRuns(action.owner, action.repo, action.workflowId, {
+        branch: action.ref,
+        event: "workflow_dispatch"
+      }));
+
+      if (runsResponse.total_count === 0 || !runsResponse.workflow_runs.length) {
+        return { status: "Queued (Waiting for GitHub...)" };
+      }
+
+      // Find the most recent run
+      const run = runsResponse.workflow_runs[0];
+      const status = run.status;
+      const conclusion = run.conclusion;
+
+      let displayStatus = "";
+      if (status === "completed") {
+        displayStatus = conclusion === "success" ? "Success" : (conclusion || "Completed");
+      } else {
+        displayStatus = status || "Running";
+      }
+
+      // Title case it
+      displayStatus = displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1);
+
+      let logs = "";
+      if (status === "completed" && conclusion !== "success") {
+        try {
+          const jobsResponse = await this.#withApi(api => api.listWorkflowJobs(action.owner, action.repo, run.id));
+          const failedJob = jobsResponse.jobs.find(j => j.conclusion === "failure");
+          if (failedJob) {
+            logs = await this.#withApi(api => api.getWorkflowJobLogs(action.owner, action.repo, failedJob.id));
+          }
+        } catch (e) {
+          logs = `Failed to fetch logs: ${e}`;
+        }
+      }
+
+      return {
+        status: displayStatus,
+        logs: logs || undefined
+      };
+    } catch (error: any) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("failed to get action status from GitHub", { event: "get_action_status_failed", error: message });
+      return { status: "Error checking status", logs: message };
     }
   }
 
@@ -3871,6 +4056,7 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
       case "createBranch":
       case "writeFile":
       case "deleteFile":
+      case "disableWorkflow":
         return {
           message: "This GitHub action cannot be automatically reverted.",
           canRetry: false,
@@ -4209,8 +4395,73 @@ export class GitHubGatekeeperImpl extends DurableObject<Env, GitHubGatekeeperImp
     };
   }
 
-  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ repo,
-  // issue, or pull request ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ is scoped to one repository, and issues/PRs inherit the repo's
+  async prepareDisableWorkflow(
+    workflowId: string | number,
+  ): Promise<DisableWorkflowAction> {
+    return {
+      type: "disableWorkflow",
+      approvalId: this.#nextActionId(),
+      submittedAt: Date.now(),
+      owner: this.ctx.props.owner,
+      repo: this.ctx.props.repo,
+      workflowId,
+    };
+  }
+
+  async prepareExecuteBuild(
+    branch: string,
+    commands: BuildCommand[],
+  ): Promise<ExecuteBuildAction> {
+    return {
+      type: "executeBuild",
+      approvalId: this.#nextActionId(),
+      submittedAt: Date.now(),
+      owner: this.ctx.props.owner,
+      repo: this.ctx.props.repo,
+      branch,
+      commands,
+    };
+  }
+
+  async waitForBuildResult(actionId: number): Promise<BuildResult> {
+    // Poll for up to ~5 minutes. Container builds (especially Flutter) can take several minutes.
+    for (let i = 0; i < 300; i++) {
+      const record = this.#getActionRecord(actionId);
+      if (record?.buildResult) {
+        return record.buildResult;
+      }
+      if (record?.state === "rejected") {
+        throw new Error(`Build action ${actionId} was rejected.`);
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    throw new Error(`Timed out waiting for build action ${actionId} result. Cloudflare Containers builds longer than 5 minutes may need an async/polling API instead.`);
+  }
+
+  async #executeBuildInContainer(branch: string, commands: BuildCommand[]): Promise<BuildResult> {
+    const strategy = await this.resolveBuildStrategy();
+    if (strategy === "githubActions") {
+      throw new Error(
+        `Cannot executeBuild() when the resolved build strategy is githubActions. ` +
+        `Use dispatchWorkflow() instead.`)
+    }
+    if (!this.env.BUILD_RUNNER) {
+      throw new Error(
+        `BUILD_RUNNER service binding is not configured. ` +
+        `Deploy the cloudflareos-build-runner worker and wire it into the GitHub gatekeeper.`);
+    }
+    const metadata = await this.repoMetadata();
+    const token = this.#account().getAccessToken();
+    const repoUrl = `https://x-access-token:${token}@github.com/${metadata.owner}/${metadata.name}`;
+    return await (this.env.BUILD_RUNNER as Fetcher<BuildRunner>).runBuild({
+      repoUrl,
+      branch,
+      commands: commands.map(c => c.command),
+    });
+  }
+
+  // Observer tracking: GitHub uses the "ACL check (single unit)" strategy. Every binding — repo,
+  // issue, or pull request — is scoped to one repository, and issues/PRs inherit the repo's
   // permissions, so the repository is the atomic ACL unit. To admit an observer we simply confirm
   // they can read that repo, using their own token via the verifier (see GitHubVerifier).
   //
@@ -4282,7 +4533,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     return metadata;
   }
 
-  async createIssue(options: GitHubCreateIssueOptions): Promise<GitHubIssue> {
+  async createIssue(options: GitHubCreateIssueOptions & { _awaitDecision?: boolean }): Promise<GitHubIssue> {
     const action = await this.#gatekeeper.prepareCreateIssue(options);
     await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
       title: `Create issue ${options.title}`,
@@ -4290,11 +4541,12 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       implementsRevert: false,
       actionKind: CREATE_ISSUE_ACTION,
       autoApprovable: true,
+      awaitDecision: options._awaitDecision ?? true,
     });
     return new GitHubIssueImpl(this.#gatekeeper, this.#approvalQueue.dup(), action.provisionalId, "issue");
   }
 
-  async createPullRequest(options: GitHubCreatePullRequestOptions): Promise<GitHubPullRequest> {
+  async createPullRequest(options: GitHubCreatePullRequestOptions & { _awaitDecision?: boolean }): Promise<GitHubPullRequest> {
     const action = await this.#gatekeeper.prepareCreatePullRequest(options);
     await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
       title: `Create pull request ${options.title}`,
@@ -4303,6 +4555,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       actionKind: CREATE_PULL_REQUEST_ACTION,
       autoApprovable: true,
       branchRef: options.head,
+      awaitDecision: options._awaitDecision ?? true,
     });
     return new GitHubPullRequestImpl(this.#gatekeeper, this.#approvalQueue.dup(), action.provisionalId);
   }
@@ -4389,7 +4642,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     return this.#gatekeeper.listDirectory(path, ref);
   }
 
-  async createBranch(name: string, sha: string): Promise<GitHubBranch> {
+  async createBranch(name: string, sha: string, _awaitDecision = true): Promise<GitHubBranch> {
     const action = await this.#gatekeeper.prepareCreateBranch(name, sha);
     await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
       title: `Create branch ${name}`,
@@ -4397,7 +4650,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       implementsRevert: false,
       // The gatekeeper doesn't simulate branch creation, so the agent should wait for the
       // decision before proceeding (otherwise its reads won't reflect the new branch).
-      awaitDecision: true,
+      awaitDecision: _awaitDecision,
       actionKind: CREATE_BRANCH_ACTION,
       autoApprovable: true,
       branchRef: action.branchName,
@@ -4405,7 +4658,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     return { name, sha, url: branchTreeUrl(action.owner, action.repo, name) };
   }
 
-  async writeFile(options: GitHubWriteFileOptions): Promise<GitHubCommitHandle> {
+  async writeFile(options: GitHubWriteFileOptions & { _awaitDecision?: boolean }): Promise<GitHubCommitHandle> {
     const metadata = await this.getMetadata();
     const defaultBranch = defaultBranchFromMetadata(metadata);
     const targetBranch = options.branch ?? defaultBranch;
@@ -4422,20 +4675,20 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Write file ${options.path} in ${action.owner}/${action.repo}` +
         `${action.branch ? ` on branch ${action.branch}` : " on the default branch"}.` +
         (options.content !== undefined
-          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\nÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¦" : ""}\n\`\`\``
+          ? ` Content (${options.content.length} chars):\n\`\`\`\n${preview}${preview.length < options.content.length ? "\n…" : ""}\n\`\`\``
           : " Content is provided as base64 (binary)."),
       implementsRevert: false,
-      awaitDecision: true,
-      actionKind: WRITE_REPO_FILE_ACTION,
+      awaitDecision: options._awaitDecision ?? true,
+      actionKind: isWorkflowFilePath(options.path) ? EDIT_WORKFLOW_FILE_ACTION : WRITE_REPO_FILE_ACTION,
       autoApprovable: true,
-      branchRef: action.branch,
+      branchRef: action.branch ?? targetBranch,
     });
     // The commit is only created on GitHub once the action is approved. Use the returned
     // handle's getResult() to learn the real commit SHA and URL after the decision.
     return new GitHubCommitHandleImpl(this.#gatekeeper, action.approvalId);
   }
 
-  async deleteFile(options: GitHubDeleteFileOptions): Promise<GitHubCommitHandle> {
+  async deleteFile(options: GitHubDeleteFileOptions & { _awaitDecision?: boolean }): Promise<GitHubCommitHandle> {
     const metadata = await this.getMetadata();
     const defaultBranch = defaultBranchFromMetadata(metadata);
     const targetBranch = options.branch ?? defaultBranch;
@@ -4451,10 +4704,10 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Delete file ${options.path} from ${action.owner}/${action.repo}` +
         `${action.branch ? ` on branch ${action.branch}` : " on the default branch"}.`,
       implementsRevert: false,
-      awaitDecision: true,
-      actionKind: DELETE_REPO_FILE_ACTION,
+      awaitDecision: options._awaitDecision ?? true,
+      actionKind: isWorkflowFilePath(options.path) ? EDIT_WORKFLOW_FILE_ACTION : DELETE_REPO_FILE_ACTION,
       autoApprovable: true,
-      branchRef: action.branch,
+      branchRef: action.branch ?? targetBranch,
     });
     // Same as writeFile: resolve the real commit via getResult() after the decision.
     return new GitHubCommitHandleImpl(this.#gatekeeper, action.approvalId);
@@ -4469,7 +4722,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     }
 
     const defaultBranchRef = await this.getBranch(defaultBranch);
-    const branch = await this.createBranch(options.branchName, defaultBranchRef.sha);
+    const branch = await this.createBranch(options.branchName, defaultBranchRef.sha, false);
 
     const commitHandle = await this.writeFile({
       path: options.path,
@@ -4478,6 +4731,7 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       contentBase64: options.contentBase64,
       branch: options.branchName,
       sha: options.sha,
+      _awaitDecision: false,
     });
 
     const pullRequest = await this.createPullRequest({
@@ -4499,13 +4753,14 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
     }
 
     const defaultBranchRef = await this.getBranch(defaultBranch);
-    const branch = await this.createBranch(options.branchName, defaultBranchRef.sha);
+    const branch = await this.createBranch(options.branchName, defaultBranchRef.sha, false);
 
     const commitHandle = await this.deleteFile({
       path: options.path,
       message: options.message,
       sha: options.sha,
       branch: options.branchName,
+      _awaitDecision: false,
     });
 
     const pullRequest = await this.createPullRequest({
@@ -4532,6 +4787,19 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       actionKind: DISPATCH_WORKFLOW_ACTION,
       autoApprovable: true,
       branchRef: ref,
+    });
+  }
+
+  async disableWorkflow(workflowId: string | number): Promise<void> {
+    const action = await this.#gatekeeper.prepareDisableWorkflow(workflowId);
+    const description = `Disable GitHub Actions workflow ${workflowId}.`;
+    await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
+      title: `Disable workflow ${workflowId}`,
+      description,
+      implementsRevert: false,
+      awaitDecision: true,
+      actionKind: DISABLE_WORKFLOW_ACTION,
+      autoApprovable: false, // Disabling a workflow should require explicit manual approval
     });
   }
 
@@ -4584,6 +4852,29 @@ class GitHubRepoSessionImpl extends RpcTarget implements GitHubRepoSession {
       description: `Read the log output of GitHub Actions job ${jobId}.`,
     });
     return this.#gatekeeper.getWorkflowJobLogs(jobId);
+  }
+
+  async getResolvedBuildStrategy(): Promise<BuildExecutorStrategy> {
+    await this.#approvalQueue.authorizeObservation({
+      title: `Read resolved build strategy`,
+      description: `Read the resolved build executor strategy for this repository.`,
+    });
+    return this.#gatekeeper.resolveBuildStrategy();
+  }
+
+  async executeBuild(branch: string, commands: BuildCommand[]): Promise<BuildResult> {
+    const action = await this.#gatekeeper.prepareExecuteBuild(branch, commands);
+    const commandList = commands.map(c => c.label ? `${c.label}: ${c.command}` : c.command).join("\n");
+    await this.#gatekeeper.submitActionForApproval(this.#approvalQueue, action, {
+      title: `Execute build in Cloudflare Containers`,
+      description: `Run commands on branch ${branch}:\n${commandList}`,
+      implementsRevert: false,
+      awaitDecision: true,
+      actionKind: EXECUTE_BUILD_ACTION,
+      autoApprovable: true,
+      branchRef: branch,
+    });
+    return await this.#gatekeeper.waitForBuildResult(action.approvalId);
   }
 }
 

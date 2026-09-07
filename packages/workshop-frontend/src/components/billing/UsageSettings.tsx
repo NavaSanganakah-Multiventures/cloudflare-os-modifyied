@@ -1,86 +1,53 @@
 import { useCallback, useEffect, useState } from 'react'
-import { CloudflareUsageInfo, CloudflareAccountOption } from '@gadgets/workshop-shared/api'
-import { Button, useKumoToastManager } from '@cloudflare/kumo'
-import { Lightning, CloudCheck, Warning } from '@phosphor-icons/react'
-import CloudflareLogo from '../auth/CloudflareLogo'
+import { Button } from '@cloudflare/kumo'
+import { Wallet, Brain, Plus } from '@phosphor-icons/react'
 import { useAuthenticatedApi } from '../../AuthContext'
-import { useCloudflareLimitsEnabled } from '../../ServerConfigContext'
-import { buildAddCreditsUrl } from './creditsUrl'
-import ResetCountdown from './ResetCountdown'
+import { useServerConfig } from '../../ServerConfigContext'
+import { DEFAULT_USD_TO_INR_RATE } from '@gadgets/workshop-shared/limits'
+import { useWalletRecharge } from './useWalletRecharge'
 
-// Shows the user's free-tier usage and Cloudflare connection / credit status on the profile page.
-// Renders nothing unless the Cloudflare limits flow is enabled server-side.
+const RUPEE = '\u20B9'
+
+// Shows the user's wallet balance (the System AI meter) and a Razorpay recharge control on the
+// profile page. Renders nothing unless the wallet/limits flow is enabled server-side.
 export default function UsageSettings() {
-  const limitsEnabled = useCloudflareLimitsEnabled()
+  const serverConfig = useServerConfig()
+  const limitsEnabled = serverConfig?.cloudflareLimitsEnabled ?? false
+  const rate = serverConfig?.usdToInrRate ?? DEFAULT_USD_TO_INR_RATE
   const { authenticatedApi } = useAuthenticatedApi()
-  const toasts = useKumoToastManager()
-  const [usage, setUsage] = useState<CloudflareUsageInfo | null>(null)
+  const [balance, setBalance] = useState<number | null>(null)
+  const [aiPref, setAiPref] = useState<'system' | 'custom'>('system')
   const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState(false)
+  const [amount, setAmount] = useState('')
 
-  // Account-selection state (only used when the user has multiple Cloudflare accounts).
-  const [accounts, setAccounts] = useState<CloudflareAccountOption[] | null>(null)
-  const [selecting, setSelecting] = useState<string | null>(null)
-
-  const refresh = useCallback(() => {
-    authenticatedApi.getCloudflareUsage()
-      .then((u: CloudflareUsageInfo) => setUsage(u))
-      .catch(() => {})
-      .finally(() => setLoading(false))
+  // refresh must be declared before useWalletRecharge, which receives it as the
+  // post-recharge callback (using it before its const declaration is a TDZ error).
+  const refresh = useCallback(async () => {
+    try {
+      const [bal, pref] = await Promise.all([
+        authenticatedApi.getWalletBalance(),
+        authenticatedApi.getAiPreference(),
+      ])
+      setBalance(bal)
+      setAiPref(pref)
+    } catch (e) {
+      console.error('Failed to load wallet data', e)
+    } finally {
+      setLoading(false)
+    }
   }, [authenticatedApi])
 
+  const { recharge, loading: recharging, error, success } = useWalletRecharge(refresh)
+
   useEffect(() => {
-    if (!limitsEnabled) {
-      setLoading(false)
-      return
-    }
+    if (!limitsEnabled) { setLoading(false); return }
     refresh()
-    // Re-check when the tab regains focus (e.g. after connecting / topping up elsewhere).
     const onFocus = () => refresh()
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [limitsEnabled, refresh])
 
-  // When the server says the user must pick an account, load the list of accounts to choose from.
-  useEffect(() => {
-    if (usage?.connected && usage.needsAccountSelection && accounts === null) {
-      authenticatedApi.listCloudflareAccounts()
-        .then((list: CloudflareAccountOption[]) => setAccounts(list))
-        .catch(() => setAccounts([]))
-    }
-  }, [usage, accounts, authenticatedApi])
-
-  // Hidden entirely when the feature is off, or while the unlimited (self-hosted) default applies.
-  if (!limitsEnabled || (usage && usage.unlimited)) return null
-
-  const connect = async () => {
-    setBusy(true)
-    try {
-      // Connecting (or signing in with) Cloudflare is handled by the Cloudflare gatekeeper. Open its
-      // OAuth popup; the connected-accounts subscription + focus refresh pick up the result.
-      const { url } = await authenticatedApi.connectAccount('cloudflare')
-      window.open(url, '_blank', 'noopener,noreferrer')
-    } catch {
-      toasts.add({ title: 'Failed to start Cloudflare connection', variant: 'error' })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const selectAccount = async (accountId: string) => {
-    setSelecting(accountId)
-    try {
-      await authenticatedApi.selectCloudflareAccount(accountId)
-      toasts.add({ title: 'Cloudflare account selected', variant: 'success' })
-      setAccounts(null)
-      refresh()
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to select account'
-      toasts.add({ title: msg, variant: 'error' })
-    } finally {
-      setSelecting(null)
-    }
-  }
+  if (!limitsEnabled) return null
 
   return (
     <section className="flex flex-col gap-3">
@@ -88,127 +55,63 @@ export default function UsageSettings() {
         Usage &amp; billing
       </h2>
       <div className="rounded-xl border border-kumo-line bg-kumo-base p-5">
-      {loading || !usage ? (
-        <p className="text-sm text-kumo-subtle">Loading usage…</p>
-      ) : (
-        <div className="space-y-6">
-          {/* Free daily allowance */}
-          <div>
-            <p className="text-xs font-medium text-kumo-subtle mb-1">Free daily allowance</p>
-            <p className="text-sm text-kumo-default">
-              {usage.remaining} of {usage.dailyLimit}{' '}
-              {usage.dailyLimit === 1 ? 'request' : 'requests'} remaining today
+        {loading || balance === null ? (
+          <p className="text-sm text-kumo-subtle">Loading wallet...</p>
+        ) : (
+          <div className="space-y-6">
+            <div>
+              <p className="text-xs font-medium text-kumo-subtle mb-1">Wallet balance</p>
+              <div className="flex items-center gap-2 text-sm text-kumo-default">
+                <Wallet size={16} className="text-kumo-subtle" />
+                <strong>{'$' + balance.toFixed(2)}</strong>
+                <span className="text-kumo-subtle">({RUPEE}{(balance * rate).toFixed(2)})</span>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-medium text-kumo-subtle mb-1">AI mode</p>
+              <div className="flex items-center gap-2 text-sm text-kumo-default">
+                <Brain size={16} className="text-kumo-brand" />
+                {aiPref === 'system' ? 'System AI (billed to wallet)' : 'Custom AI (your own API keys)'}
+              </div>
+            </div>
+
+            <p className="text-xs text-kumo-subtle">
+              Each System AI request is billed at the model's real per-call cost (USD), deducted
+              after it completes — so cheap models cost less and expensive ones more. Top up with
+              Razorpay (INR) below.
             </p>
-            {usage.resetAt && (
-              <p className="text-xs text-kumo-subtle mt-1">
-                Resets at 00:00 UTC, in{' '}
-                <ResetCountdown resetAt={usage.resetAt} onElapsed={refresh} />.
-              </p>
-            )}
+
+            <div className="pt-1">
+              <div className="flex items-center gap-2 mb-1">
+                <Plus size={14} className="text-kumo-brand" />
+                <span className="text-xs font-medium text-kumo-default">Recharge wallet</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  placeholder="INR"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className="w-24 h-8 px-2 text-sm bg-kumo-elevated border border-kumo-line rounded focus:border-kumo-brand outline-none"
+                />
+                <Button variant="primary" size="sm" onClick={() => recharge(Number(amount))} loading={recharging}>
+                  <Wallet size={14} weight="bold" className="mr-1" />
+                  Pay
+                </Button>
+              </div>
+              {amount && Number(amount) > 0 && (
+                <p className="text-[11px] text-kumo-subtle mt-1">
+                  {'~$' + (Number(amount) / rate).toFixed(2) + ' added to your wallet'}
+                </p>
+              )}
+              {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+              {success && <p className="text-xs text-green-600 mt-1">Wallet recharged! Balance updated.</p>}
+            </div>
           </div>
-
-          {/* Cloudflare connection / credits */}
-          <div>
-            <p className="text-xs font-medium text-kumo-subtle mb-1">Cloudflare account</p>
-            {!usage.connected ? (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm text-kumo-subtle">
-                  <CloudflareLogo size={16} />
-                  <span>Not connected</span>
-                </div>
-                <p className="text-sm text-kumo-subtle">
-                  Connect your Cloudflare account to keep building once your free allowance runs
-                  out. Usage beyond the free tier is billed to your own Cloudflare AI Gateway
-                  credits.
-                </p>
-                <div className="pt-1">
-                  <Button variant="primary" size="sm" onClick={connect} loading={busy}>
-                    <Lightning size={14} weight="bold" className="mr-1" />
-                    Connect Cloudflare
-                  </Button>
-                </div>
-              </div>
-            ) : usage.needsAccountSelection ? (
-              // Connected, but multiple accounts — force the user to choose which one to bill.
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm text-kumo-default">
-                  <Warning size={18} weight="bold" className="text-kumo-warning" />
-                  <span>Choose which Cloudflare account to bill</span>
-                </div>
-                <p className="text-sm text-kumo-subtle">
-                  Your connection has access to multiple Cloudflare accounts. Select the one whose
-                  AI Gateway credits should be used.
-                </p>
-                {accounts === null ? (
-                  <p className="text-sm text-kumo-subtle">Loading accounts…</p>
-                ) : accounts.length === 0 ? (
-                  <p className="text-sm text-kumo-subtle">
-                    No accounts available on this connection.
-                  </p>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {accounts.map((a) => (
-                      <Button
-                        key={a.accountId}
-                        variant="secondary"
-                        size="sm"
-                        className="justify-start"
-                        onClick={() => selectAccount(a.accountId)}
-                        loading={selecting === a.accountId}
-                        disabled={selecting !== null}
-                      >
-                        {a.accountName}
-                      </Button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm text-kumo-default">
-                  <CloudCheck size={18} weight="bold" className="text-kumo-success" />
-                  <span>
-                    Connected
-                    {usage.accountName && <> — {usage.accountName}</>}
-                  </span>
-                </div>
-                <p className="text-sm text-kumo-default">
-                  Account balance:{' '}
-                  {usage.balance !== null ? (
-                    <strong>${usage.balance.toFixed(2)}</strong>
-                  ) : (
-                    <span className="text-kumo-subtle">unknown</span>
-                  )}
-                </p>
-
-                <div className="flex items-center gap-2 pt-1">
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => window.open(buildAddCreditsUrl(usage.accountId), '_blank')}
-                  >
-                    <Lightning size={14} weight="bold" className="mr-1" />
-                    Add credits
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <p className="text-xs text-kumo-subtle border-t border-kumo-line pt-3">
-            Learn more about{' '}
-            <a
-              href="https://developers.cloudflare.com/ai-gateway/features/unified-billing/"
-              target="_blank"
-              rel="noreferrer"
-              className="underline"
-            >
-              AI Gateway unified billing
-            </a>
-            .
-          </p>
-        </div>
-      )}
+        )}
       </div>
     </section>
   )

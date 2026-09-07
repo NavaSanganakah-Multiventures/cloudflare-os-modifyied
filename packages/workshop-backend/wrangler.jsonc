@@ -56,6 +56,18 @@
       // login back to the waiting browser.
       "tag": "v2",
       "new_sqlite_classes": [ "PendingLogin" ]
+    },
+    {
+      // Arya voice calls: one room per call for WebSocket signaling and audio relay.
+      "tag": "v3",
+      "new_sqlite_classes": [ "AryaCallRoom" ]
+    }
+  ],
+
+  "vectorize": [
+    {
+      "binding": "VECTOR_MEMORY",
+      "index_name": "memory_index"
     }
   ],
 
@@ -93,6 +105,9 @@
   //   "not_found_handling": "single-page-application",
   //   "run_worker_first": ["/api", "/api/*", "/blueprint-screenshot/*"]
   // },
+  "triggers": {
+    "crons": ["*/30 * * * *"]
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,

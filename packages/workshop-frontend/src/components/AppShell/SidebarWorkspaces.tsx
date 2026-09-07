@@ -90,7 +90,7 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
   useEffect(() => {
     let cancelled = false
     setGadgetsLoading(true)
-    authenticatedApi.listGadgets()
+    authenticatedApi.listWorkspaces()
       .then((list) => {
         if (cancelled) return
         setGadgets(list)
@@ -140,7 +140,7 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
   const onTogglePin = useCallback(async (g: GadgetMetadataWithTimestamps) => {
     const newPinned = !g.pinned
     setGadgets((prev) => prev.map((x) => (x.id === g.id ? { ...x, pinned: newPinned } : x)))
-    const overseer = authenticatedApi.openGadget(g.id) // pipelining
+    const overseer = authenticatedApi.openWorkspace(g.id) // pipelining
     try {
       await overseer.setPinned(newPinned)
     } catch (err) {
@@ -154,7 +154,7 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
 
   const onRename = useCallback(async (g: GadgetMetadataWithTimestamps, newTitle: string) => {
     setGadgets((prev) => prev.map((x) => (x.id === g.id ? { ...x, title: newTitle } : x)))
-    const overseer = authenticatedApi.openGadget(g.id)
+    const overseer = authenticatedApi.openWorkspace(g.id)
     try {
       await overseer.setTitle(newTitle)
     } catch (err) {
@@ -169,7 +169,7 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
   const onShare = useCallback(async (g: GadgetMetadataWithTimestamps) => {
     let overseer: RpcStub<Overseer> | null = null
     try {
-      overseer = authenticatedApi.openGadget(g.id)
+      overseer = authenticatedApi.openWorkspace(g.id)
       const metadata = await overseer.getMetadata()
       setShareOverseer({ stub: overseer })
       setShareTarget({ ...g, ...metadata })
@@ -188,7 +188,7 @@ export function SidebarWorkspacesProvider({ children }: { children: ReactNode })
       if (deleteTarget.owner) {
         await authenticatedApi.dismissSharedGadget(deleteTarget.id)
       } else {
-        const overseer = authenticatedApi.openGadget(deleteTarget.id) // pipelining
+        const overseer = authenticatedApi.openWorkspace(deleteTarget.id) // pipelining
         try {
           await overseer.deleteSelf()
         } finally {

@@ -83,6 +83,43 @@ declare global {
       // Minimum connected-account balance (USD) to proceed via BYOK. Defaults to
       // MINIMUM_CLOUDFLARE_BALANCE.
       MINIMUM_CLOUDFLARE_BALANCE?: string;
+
+      // Razorpay payment gateway credentials for wallet recharge.
+      RAZORPAY_KEY_ID?: string;
+      RAZORPAY_KEY_SECRET?: string;
+
+      // USD->INR exchange rate used to display wallet balances in both currencies. Defaults to
+      // DEFAULT_USD_TO_INR_RATE.
+      USD_TO_INR_RATE?: string;
+
+      // Starting wallet balance (USD) granted to new users. Defaults to
+      // DEFAULT_WALLET_START_BALANCE_USD.
+      WALLET_START_BALANCE?: string;
+
+      // Minimum wallet balance (USD) required to start a new System AI agent turn. Defaults to
+      // DEFAULT_MIN_WALLET_BALANCE_USD.
+      MIN_WALLET_BALANCE?: string;
+
+      // Aarya voice assistant: signing secret for voice-call tokens (HS256). Voice calls are
+      // disabled until this is configured.
+      AARYA_SIGNING_SECRET?: string;
+
+      // Optional comma-separated list of user ids allowed to join Aarya voice calls. Absent/empty
+      // means any caller with a validly-signed token (the token itself is the authority).
+      AARYA_AUTHORIZED_MEMBERS?: string;
+
+      // Dev-only: set to "true" to enable GET /api/aarya/dev-token for local testing. Never set in
+      // production.
+      AARYA_ALLOW_DEV_TOKEN?: string;
+
+      // Gemini Live primary AI bridge.
+      AARYA_GEMINI_API_KEY?: string;
+      AARYA_GEMINI_MODEL?: string;          // default "models/gemini-3.1-flash-live-preview"
+      AARYA_GEMINI_SYSTEM_PROMPT?: string;
+      // Workers AI fallback configuration.
+      AARYA_WORKERS_AI_LLM?: string;        // default "@cf/meta/llama-3.1-8b-instruct-fast"
+      AARYA_WORKERS_AI_STT?: string;        // default "@cf/openai/whisper-large-v3-turbo"
+      AARYA_WORKERS_AI_TTS?: string;        // default "@cf/deepgram/aura-1"
     }
   }
 }

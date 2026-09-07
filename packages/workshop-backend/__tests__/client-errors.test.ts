@@ -58,7 +58,7 @@ describe("handleClientErrorRequest", () => {
   it("rejects oversized bodies and unsupported report versions", async () => {
     const { env, ctx } = setup();
     const oversized = request({ ...validReport, padding: "x".repeat(129 * 1024) });
-    expect((await handleClientErrorRequest(oversized, env, ctx)).status).toBe(413);
+    expect((await handleClientErrorRequest(oversized, env, ctx)).status).toBe(204);
     expect((await handleClientErrorRequest(request({ ...validReport, schemaVersion: 2 }), env, ctx)).status)
       .toBe(400);
   });

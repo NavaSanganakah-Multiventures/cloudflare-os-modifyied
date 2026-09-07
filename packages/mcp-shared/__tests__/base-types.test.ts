@@ -9,6 +9,6 @@ describe("MCP_BASE_TYPES", () => {
     // a package boundary. `types.d.ts` is the copy TypeScript actually checks, so if they diverge the
     // agents get a type surface nobody reviewed. Editing one and not the other fails here.
     const authoritative = readFileSync(join(import.meta.dirname, "../src/types.d.ts"), "utf8");
-    expect(MCP_BASE_TYPES).toBe(authoritative);
+    expect(MCP_BASE_TYPES.replaceAll('\r\n', '\n')).toBe(authoritative.replaceAll('\r\n', '\n'));
   });
 });

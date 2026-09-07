@@ -12,6 +12,12 @@ import type { GitHubRepoConfiguratorRpc } from "./configurator/github-repo-confi
 
 type ConfiguratorOption = { value: string; title: string; subtitle?: string; meta?: string };
 
+/** Accessor for reading and writing a per-repository build executor preference stored in the account DO. */
+type BuildExecutorAccessor = {
+  get(repoFullName: string): Promise<string | null>;
+  set(repoFullName: string, buildExecutor: string | null): Promise<void>;
+};
+
 const AUTOCOMPLETE_OPTION_LIMIT = 100;
 const GITHUB_OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/;
 const GITHUB_REPO_PATTERN = /^[A-Za-z0-9._-]+$/;
@@ -120,9 +126,12 @@ function pullRequestSearchOption(pullRequest: GitHubIssueResponse) {
 // Capability exposed to the configurator iframe.
 @validateRpc()
 export class GitHubRepoConfiguratorUI extends RpcTarget implements GitHubRepoConfiguratorRpc {
-  constructor(getToken: () => Promise<string>) {
+  #buildExecutorAccessor: BuildExecutorAccessor | null;
+
+  constructor(getToken: () => Promise<string>, buildExecutorAccessor: BuildExecutorAccessor | null = null) {
     super();
     githubTokenGetters.set(this, getToken);
+    this.#buildExecutorAccessor = buildExecutorAccessor;
   }
 
   async listRepos(query: string): Promise<ConfiguratorOption[]> {
@@ -167,6 +176,15 @@ export class GitHubRepoConfiguratorUI extends RpcTarget implements GitHubRepoCon
     return matches.slice(0, AUTOCOMPLETE_OPTION_LIMIT);
   }
 
+  async getSavedBuildExecutor(repoFullName: string): Promise<string | null> {
+    if (!this.#buildExecutorAccessor) return null;
+    return this.#buildExecutorAccessor.get(repoFullName);
+  }
+
+  async saveBuildExecutor(repoFullName: string, buildExecutor: string | null): Promise<void> {
+    if (!this.#buildExecutorAccessor) return;
+    await this.#buildExecutorAccessor.set(repoFullName, buildExecutor);
+  }
 }
 
 @validateRpc()

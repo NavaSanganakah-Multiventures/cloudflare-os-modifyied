@@ -240,6 +240,11 @@
     "gatekeeper-github": {
       "bindings": [
         {
+          "name": "BUILD_RUNNER",
+          "service": "$WORKER_NAME(cloudflareos-build-runner)",
+          "type": "service"
+        },
+        {
           "name": "CLIENT_ID",
           "text": "$SECRET(CLIENT_ID)",
           "type": "secret_text"
@@ -443,6 +448,87 @@
       "shortName": "homeassistant",
       "vars": {
         "BASE_URL": "$PUBLIC_BASE_URL/gatekeeper/homeassistant"
+      }
+    },
+    "gatekeeper-jules": {
+      "bindings": [],
+      "compatibilityDate": "2026-02-02",
+      "compatibilityFlags": [
+        "allow_irrevocable_stub_storage"
+      ],
+      "inputs": [],
+      "installable": true,
+      "kind": "gatekeeper",
+      "mainModule": "jules.js",
+      "migrations": [
+        {
+          "new_sqlite_classes": [
+            "UserAccount",
+            "JulesGatekeeperImpl"
+          ],
+          "tag": "v0"
+        }
+      ],
+      "modules": [
+        {
+          "name": "jules.js",
+          "r2Key": "blobs/modules/96b78a8ff64f41328685c8352a1fde015f8fb4452a5005ba4c847657ea50f56e",
+          "sha256": "96b78a8ff64f41328685c8352a1fde015f8fb4452a5005ba4c847657ea50f56e",
+          "size": 58,
+          "type": "esm"
+        }
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "logs": {
+          "invocation_logs": false
+        }
+      },
+      "shortName": "jules",
+      "vars": {
+        "BASE_URL": "$PUBLIC_BASE_URL/gatekeeper/jules"
+      }
+    },
+    "gatekeeper-jules-flow": {
+      "bindings": [],
+      "compatibilityDate": "2026-02-02",
+      "compatibilityFlags": [
+        "allow_irrevocable_stub_storage"
+      ],
+      "inputs": [],
+      "installable": true,
+      "kind": "gatekeeper",
+      "mainModule": "jules-flow.js",
+      "migrations": [
+        {
+          "new_sqlite_classes": [
+            "JulesFlowGatekeeperImpl"
+          ],
+          "tag": "v0"
+        }
+      ],
+      "modules": [
+        {
+          "name": "jules-flow.js",
+          "r2Key": "blobs/modules/3ebe85675768680c3451c96f2eb9de8a3404bbca3451d7b32cb53058e87ced75",
+          "sha256": "3ebe85675768680c3451c96f2eb9de8a3404bbca3451d7b32cb53058e87ced75",
+          "size": 63,
+          "type": "esm"
+        }
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "logs": {
+          "invocation_logs": false
+        }
+      },
+      "preinstall": true,
+      "shortName": "jules-flow",
+      "singleton": true,
+      "vars": {
+        "BASE_URL": "$PUBLIC_BASE_URL/gatekeeper/jules-flow"
       }
     },
     "gatekeeper-linear": {
@@ -1050,6 +1136,11 @@
           "type": "r2_bucket"
         },
         {
+          "index_name": "$VECTORIZE_VECTOR_MEMORY_NAME",
+          "name": "VECTOR_MEMORY",
+          "type": "vectorize"
+        },
+        {
           "name": "BROWSER",
           "type": "browser"
         },
@@ -1099,6 +1190,12 @@
             "PendingLogin"
           ],
           "tag": "v2"
+        },
+        {
+          "new_sqlite_classes": [
+            "AryaCallRoom"
+          ],
+          "tag": "v3"
         }
       ],
       "modules": [
@@ -1120,6 +1217,11 @@
           "enabled": true,
           "head_sampling_rate": 0.5
         }
+      },
+      "triggers": {
+        "crons": [
+          "*/30 * * * *"
+        ]
       },
       "vars": {
         "PUBLIC_BASE_URL": "$PUBLIC_BASE_URL"

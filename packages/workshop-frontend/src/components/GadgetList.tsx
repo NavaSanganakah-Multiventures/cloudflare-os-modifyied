@@ -194,7 +194,7 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
     setLoading(true)
     setLoadError(false)
     let cancelled = false
-    authenticatedApi.listGadgets().then((list) => {
+    authenticatedApi.listWorkspaces().then((list) => {
       if (cancelled) return
       const sorted = [...list].toSorted((a, b) => {
         if (a.pinned && !b.pinned) return -1
@@ -239,7 +239,7 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
         await authenticatedApi.dismissSharedGadget(deleteTarget.id)
         toasts.add({ title: 'Workspace removed from list', variant: 'success' })
       } else {
-        const overseer = await authenticatedApi.openGadget(deleteTarget.id)
+        const overseer = await authenticatedApi.openWorkspace(deleteTarget.id)
         try {
           await overseer.deleteSelf()
         } finally {
@@ -260,7 +260,7 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
   const handleShare = async (gadget: GadgetMetadataWithTimestamps) => {
     let overseer: RpcStub<Overseer> | null = null
     try {
-      overseer = authenticatedApi.openGadget(gadget.id)
+      overseer = authenticatedApi.openWorkspace(gadget.id)
       const metadata = await overseer.getMetadata()
       setShareOverseer({ stub: overseer })
       setShareTarget({ ...gadget, ...metadata })
@@ -283,8 +283,8 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
         return b.lastActive.getTime() - a.lastActive.getTime()
       })
     })
-    // Use promise pipelining — call setPinned without awaiting openGadget first
-    const overseer = authenticatedApi.openGadget(gadget.id)
+    // Use promise pipelining — call setPinned without awaiting openWorkspace first
+    const overseer = authenticatedApi.openWorkspace(gadget.id)
     try {
       await overseer.setPinned(newPinned)
     } catch (err) {
@@ -306,8 +306,8 @@ export default function GadgetList({ showHeader = true }: { showHeader?: boolean
   const handleRename = async (gadget: GadgetMetadataWithTimestamps, newTitle: string) => {
     // Optimistically update
     setGadgets(prev => prev.map(g => g.id === gadget.id ? { ...g, title: newTitle } : g))
-    // Use promise pipelining — call setTitle without awaiting openGadget first
-    const overseer = authenticatedApi.openGadget(gadget.id)
+    // Use promise pipelining — call setTitle without awaiting openWorkspace first
+    const overseer = authenticatedApi.openWorkspace(gadget.id)
     try {
       await overseer.setTitle(newTitle)
     } catch (err) {

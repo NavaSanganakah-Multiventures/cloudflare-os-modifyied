@@ -23,7 +23,11 @@ import type { AiGatewayConfig } from "./ai-gateway";
 // The bits of the Workers AI binding and gateway config that `webFetch` needs. Kept narrow
 // so the caller can pass a stub in tests without constructing a full Cloudflare.Env.
 export type WebFetchEnv = {
-  ai: Ai;
+  // Optional at runtime: the WORKERS_AI binding is dynamically injected (dev:
+  // --use-workers-ai-binding flag; prod: generate-wrangler-prod / deploy script) and may be
+  // absent in self-hosted or minimal deployments. When absent, document-to-Markdown conversion
+  // is skipped and the raw decoded body is returned instead.
+  ai?: Ai;
   gateway: AiGatewayConfig | null;
 };
 
@@ -192,6 +196,14 @@ async function convertToMarkdown(
 ): Promise<string | null> {
   const mime = baseContentType(contentType);
   if (!TO_MARKDOWN_MIME_TYPES.has(mime)) {
+    return null;
+  }
+
+  // If the Workers AI binding is not configured (e.g. dev server started without
+  // --use-workers-ai-binding, or a self-hosted deployment that omits the binding),
+  // fall back to returning the raw decoded text instead of crashing with
+  // "Cannot read properties of undefined (reading 'toMarkdown')".
+  if (!env.ai) {
     return null;
   }
 

@@ -1,6 +1,6 @@
 import { RpcCompatible, RpcStub, RpcTarget } from "capnweb";
 import { validateRpc } from "capnweb-validate";
-import { Overseer, GadgetMetadata, UiBundle, WorkpieceId, WorkpieceSummary, WorkpiecesSubscriber, GadgetClient, GadgetBindingInfo, GatekeeperClient, ActionState, ActionLogEntry, ActionsSubscriber, CodeUpdate, CodeSubscriber, AiChatMetadata, AiChatMessage, AiChatHistoryPage, AiChatSubscriber, AiChatAuthorInfo, AiModelConfig, AiChatMessageBody, AgentSpawnerConfig, ConsoleLogSubscriber, ConsoleLogEvent, CapsuleSpecifier, CollaboratorInfo, CollaboratorRole, AffectedCollaborator, ShareLinkInfo, GatekeeperCreationSpec, ObserverConfigCallback, ObserverBindingNeed, ObserverBindingFailure, BlueprintBindingAnnotation, BlueprintBinding, BlueprintMetadata, BlueprintOutput, MessageFormatRef, isOutputIcon, SpawnerEnvTarget, BlueprintGadgetSummary, AiChatStreamEvent, BlueprintScreenshotUpload, BLUEPRINT_SCREENSHOT_R2_PREFIX, blueprintScreenshotUrl, ChatAttachmentUpload, ChatAttachmentHandle, ChatAttachmentRef, BoundHookInfo, PreApprovableAction, PresenceParticipant, PresenceSubscriber, SlashCommandChoice, SlashCommandRequest, validateBindingName, createOpenGadgetError, OPEN_GADGET_ERROR_CODES, resolveSiteName } from '@gadgets/workshop-shared/api';
+import { Overseer, GadgetMetadata, UiBundle, WorkpieceId, WorkpieceSummary, WorkpiecesSubscriber, GadgetClient, GadgetBindingInfo, GatekeeperClient, ActionState, ActionLogEntry, ActionsSubscriber, CodeUpdate, CodeSubscriber, AiChatMetadata, AiChatMessage, AiChatHistoryPage, AiChatSubscriber, AiChatAuthorInfo, AiModelConfig, AiChatMessageBody, AgentSpawnerConfig, ConsoleLogSubscriber, ConsoleLogEvent, CapsuleSpecifier, CollaboratorInfo, CollaboratorRole, AffectedCollaborator, ShareLinkInfo, GatekeeperCreationSpec, ObserverConfigCallback, ObserverBindingNeed, ObserverBindingFailure, BlueprintBindingAnnotation, BlueprintBinding, BlueprintMetadata, BlueprintOutput, MessageFormatRef, isOutputIcon, SpawnerEnvTarget, BlueprintGadgetSummary, AiChatStreamEvent, BlueprintScreenshotUpload, BLUEPRINT_SCREENSHOT_R2_PREFIX, blueprintScreenshotUrl, ChatAttachmentUpload, ChatAttachmentHandle, ChatAttachmentRef, BoundHookInfo, PreApprovableAction, PresenceParticipant, PresenceSubscriber, SlashCommandChoice, SlashCommandRequest, validateBindingName, createOpenWorkspaceError, OPEN_WORKSPACE_ERROR_CODES, resolveSiteName } from '@gadgets/workshop-shared/api';
 import { Gatekeeper, HookInitiator, ResourceDescription, ApprovalQueue, ActionDescription, ObservationAuthorizer, ObservationDescription, VendorDescription, SupportedResource, resolveRequestedResource, HookController, HookDescription, AGENT_CATALOG_MAX_ENTRIES, ActionKind } from "@gadgets/workshop-shared/gatekeeper";
 import {
   DurableObject, WorkerEntrypoint, RpcStub as NativeRpcStub,
@@ -11,16 +11,18 @@ import * as Y from "yjs";
 import {
   LanguageModelGatekeeperProps,
   getModel,
+  getFallbackModelHandle,
+  FALLBACK_MODEL_ID,
   UserGatewayRouting,
 } from "./ai-models";
-import { AgentTurnError, completeText } from "./ai-invoke";
+import { AgentTurnError, completeText, isRetryableProviderFailure, providerRetryDelayMs } from "./ai-invoke";
 import {
   AiGatewayLogRetryableError,
   getAiGatewayConfig,
   getAiGatewayLogCost,
   type AiGatewayLogRoute,
 } from "./ai-gateway";
-import { AgentGadgetInfo, AgentHooks, AiChatAgentContext, ChatBindingEntry, SeedBindingInfo, runAgent, makeStorableArgs, summarizeArgs, type AiChatMessageBodyWithModelData, type CompactionCheckpoint, type StoredAssistantMessage } from "./agent";
+import { AgentGadgetInfo, AgentHooks, AiChatAgentContext, ChatBindingEntry, SeedBindingInfo, runAgent, makeStorableArgs, summarizeArgs, type AiChatMessageBodyWithModelData, type CompactionCheckpoint, type RunAgentResult, type StoredAssistantMessage } from "./agent";
 import { deploymentOutputForBlueprint, FormatOffer, listFormatOffers, readAdminConfig } from "./admin-config";
 import { foldProposedChanges, isCompactionTurn, type ChangeBatch } from "./agent-compaction";
 import { ambientGatekeeperMode } from "./provisioning-policy";
@@ -48,6 +50,15 @@ import { renderGadgetPdf } from "./browser-export";
 
 const logger = createWorkshopLogger("workshop.overseer");
 export const AGENT_RUNNING_ERROR_MESSAGE = "Agent is running, wait for it to finish.";
+
+// How many times the backend transparently re-runs an agent turn whose model request failed with
+// a transient provider error (503, 429, gateway 5xx, network failure) before surfacing the error
+// to the user. The initial run plus these retries bounds total spend on a failing model.
+const MAX_AGENT_PROVIDER_RETRIES = 4;
+
+// Maximum number of 30-turn chunks the agent is allowed to run automatically before surfacing a
+// "max turns" message. This keeps runaway spend bounded while still letting long tasks continue.
+const MAX_AGENT_CHUNKS = 3;
 
 let CODE_MODE_HARNESS =
 `import { WorkerEntrypoint, restore, RpcStub, RpcTarget } from "cloudflare:workers";
@@ -439,6 +450,7 @@ export type ActionRecord = {
   description: ActionDescription;
   resolvedBy?: AiChatAuthorInfo;  // set when resolved (approved/rejected); absent while pending (or legacy)
   autoApproved?: boolean;         // set when applied by an auto-approval rule rather than a human
+  error?: string;                 // set when application fails
 } | {
   type: "observation";
   description: ObservationDescription;
@@ -598,6 +610,24 @@ function stringifyError(err: unknown): string {
   } catch {
     return String(err);
   }
+}
+
+// Abort-aware sleep for retry backoff. Rejects with the signal's reason (typically the user's
+// "stop" abort) so a retry delay never outlives a cancellation.
+function sleepMs(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new Error("Aborted"));
+    };
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 // Compute a unique value to use as session affinity for a chat thread. Workers AI in particular
@@ -1043,6 +1073,11 @@ class OverseerImpl implements AgentHooks {
   // If `alarm()` is currently waiting for all agents to finish, this resolves its wait. Invoked
   // when the running-agent count drops to zero.
   #allAgentsIdleWaiters: (() => void)[] = [];
+
+  // Set for the duration of a System AI agent turn so per-call inference costs get charged to the
+  // owner's USD wallet as they are incurred (see addChatMessages). False for BYOK (Custom AI)
+  // turns, which bill the user's own provider and never touch the wallet.
+  #walletChargeActive = false;
 
   // How long to set the keep-alive alarm into the future. Whenever the agent count goes from zero
   // to one, we schedule an alarm this far out; whenever it drops back to zero, we clear it. The
@@ -2497,7 +2532,17 @@ class OverseerImpl implements AgentHooks {
   async applyPendingAction(record: ActionRecord & {type: "action"},
                            resolvedBy: AiChatAuthorInfo, autoApproved: boolean): Promise<void> {
     let gatekeeper = this.getGatekeeperFacet(record.gatekeeperId);
-    await gatekeeper.applyAction(record.action);
+    try {
+      await gatekeeper.applyAction(record.action);
+    } catch (e: any) {
+      record.state = "failed";
+      record.error = e.message || String(e);
+      record.appliedAt = new Date();
+      record.resolvedBy = resolvedBy;
+      this.storage.actions.put(record);
+      throw e;
+    }
+    
     record.state = "approved";
     record.appliedAt = new Date();
     record.resolvedBy = resolvedBy;
@@ -2877,7 +2922,7 @@ class OverseerImpl implements AgentHooks {
 
   // Record an observation that originated from a built-in agent tool (not a gatekeeper).
   // The `gatekeeperId` is set to the BUILTIN_TOOL_GATEKEEPER_ID sentinel so that downstream
-  // code (which expects a gatekeeper to dereference for approve/reject) never touches it — built-in
+  // code (which expects a gatekeeper to dereference for approve/reject) never touches it ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ built-in
   // observations bypass the approve/reject paths anyway.
   async recordAgentObservation(
       chatId: number,
@@ -3544,6 +3589,34 @@ class OverseerImpl implements AgentHooks {
     return chatId;
   }
 
+  async triggerBackgroundAnalysis(clientUser: DurableObjectStub<UserDurableObject>): Promise<void> {
+    let userMeta = await clientUser.getChatContext(null);
+    if (!userMeta.aiModel) {
+      logger.warn("Cannot run background analysis: no configured AI model", { event: "agent.background.skip" });
+      return;
+    }
+
+    // Replace the user profile name with "Jules" to indicate it's the background agent.
+    let julesMeta: UserChatContext = {
+      ...userMeta,
+      profile: {
+        ...userMeta.profile,
+        name: "Jules (Background Agent)",
+      }
+    };
+
+    let prompt = `Please review this codebase for potential bugs, security issues, and optimization opportunities. If you find something that should be changed, use your code modification tools to propose the change.
+
+ALSO, if you have a GitHub repository bound in your env, please check for Pull Request merge conflicts!
+1. Use \`executeCode\` to call \`env.YOUR_GITHUB_BINDING.listPullRequests()\` and loop through them to call \`getPullRequest(id)\`.
+2. If \`mergeable === false\`, the PR has a conflict.
+3. Determine the conflicted files, use \`readFile(path, baseBranch)\` and \`readFile(path, headBranch)\` to understand the conflict.
+4. Perform a semantic 3-way merge using your reasoning.
+5. Use \`writeFile\` on the PR's head branch to commit the resolved code.`;
+
+    await this.newChat(clientUser, julesMeta, prompt);
+  }
+
   async sendChatMessage(
     clientUser: DurableObjectStub<UserDurableObject>,
     userMeta: UserChatContext,
@@ -3967,6 +4040,10 @@ class OverseerImpl implements AgentHooks {
         if (usage.shouldUseByok) {
           byokRouting = usage.byokRouting;
           if (byokRouting) byokOwnerStub = ownerStub;
+        } else if (usage.shouldChargeWallet) {
+          // System AI with the wallet flow enabled: charge this turn's real per-call costs to the
+          // owner's USD wallet as they are incurred (see addChatMessages).
+          this.#walletChargeActive = true;
         }
       }
 
@@ -3982,27 +4059,102 @@ class OverseerImpl implements AgentHooks {
       controller.signal.throwIfAborted();
 
       let hasBeenNudged = false;
-      let outcome: "ok" | "callbacks_stalled" = "ok";
+      let outcome: "ok" | "callbacks_stalled" | "max_turns" = "ok";
+      let attempt = 0;
+      let chunksUsed = 0;
+      let usingFallbackModel = false;
       while (true) {
         let checkpoint = this.getActiveChatCompaction(chatId);
         let chatMessages = this.#listChatTail(chatId, checkpoint);
         let callbackCountBefore = liveChat.activeAgentCallbacks.size;
 
         let compactionTurn = isCompactionTurn(chatMessages);
-        let newCheckpoint = await runAgent(
-            this, chosenModel, chatId, aiModel.profile, chatMessages, controller.signal,
-            initiator, callbackInitiated, {
-              checkpoint,
-              modelConfig: aiModel.config,
-              measuredTokens: this.getChatMetaOrThrow(chatId).totalTokens ?? 0,
+        let runResult: RunAgentResult;
+        try {
+          runResult = await runAgent(
+              this, chosenModel, chatId, aiModel.profile, chatMessages, controller.signal,
+              initiator, callbackInitiated, {
+                checkpoint,
+                modelConfig: aiModel.config,
+                measuredTokens: this.getChatMetaOrThrow(chatId).totalTokens ?? 0,
+              });
+        } catch (err) {
+          // Transient provider failures (503, 429, gateway 5xx, network errors) are retried
+          // transparently with exponential backoff. Nothing from a failed turn was persisted, so
+          // re-entering the loop replays the same tail and resumes where the agent left off.
+          if (isRetryableProviderFailure(err) && attempt < MAX_AGENT_PROVIDER_RETRIES) {
+            const statusCode = err instanceof AgentTurnError ? err.statusCode : undefined;
+            const delayMs = providerRetryDelayMs(attempt);
+            this.emitChatStreamEvent(chatId, {
+              type: "agentRetry",
+              attempt: attempt + 1,
+              maxAttempts: MAX_AGENT_PROVIDER_RETRIES,
+              delayMs,
+              statusCode,
             });
-        if (newCheckpoint) this.#commitChatCompaction(chatId, newCheckpoint);
+            turnLogger.warn(
+                `retrying agent turn after provider failure (attempt ${attempt + 1}/${MAX_AGENT_PROVIDER_RETRIES}, delay ${delayMs}ms)`, {
+              event: "agent.run.retrying",
+              statusCode,
+              failureCount: attempt + 1,
+              error: err,
+            });
+            await sleepMs(delayMs, controller.signal);
+            attempt++;
+            continue;
+          }
+          // Primary retries exhausted. Try the deployment's fallback (cheap Workers AI model) to
+          // keep working instead of immediately failing. Only try once per session; if the fallback
+          // also runs out of retries, surface the final error.
+          if (!usingFallbackModel && aiModel.config.model !== FALLBACK_MODEL_ID) {
+            const fallbackHandle = getFallbackModelHandle(this.env, initiator, {
+              sessionAffinity,
+              userGateway: byokRouting,
+              metadata: { source: "chat", gadgetId: this.ctx.id.toString(), chatId },
+            });
+            if (fallbackHandle) {
+              turnLogger.warn(
+                  `switching to fallback model ${FALLBACK_MODEL_ID} after primary model ${aiModel.profile.id} exhausted retries`, {
+                event: "agent.run.fallback",
+                modelId: FALLBACK_MODEL_ID,
+                failureCount: attempt + 1,
+                error: err,
+              });
+              this.addChatMessages(chatId, aiModel.profile, [{
+                type: "message",
+                message: "The main model is temporarily unavailable. Using the fallback model to keep working.",
+              }]);
+              chosenModel = fallbackHandle;
+              usingFallbackModel = true;
+              attempt = 0;
+              continue;
+            }
+          }
+          throw err;
+        }
+        attempt = 0;
+        if (runResult.checkpoint) this.#commitChatCompaction(chatId, runResult.checkpoint);
         // `/compact` is done once it has compacted. An automatic compaction returned before
         // prompting the model, so rerun the turn now that the history is shorter. Each compaction
         // moves the boundary strictly forward and can never pass the newest turn start, so this
         // reruns a bounded number of times.
         if (compactionTurn) break;
-        if (newCheckpoint) continue;
+        if (runResult.checkpoint) continue;
+
+        // If the agent hit the per-call turn cap, transparently continue with a fresh runAgent
+        // call (which resets its own turn counter). Cap total chunks to avoid runaway spend, then
+        // surface a clear message instead of stopping silently.
+        if (runResult.turnCapReached) {
+          if (chunksUsed >= MAX_AGENT_CHUNKS - 1) {
+            this.postAgentErrorMessage(chatId, aiModel.profile,
+                "Agent reached the maximum number of steps for this turn. Send a message to continue.",
+                "max_turns");
+            outcome = "max_turns";
+            break;
+          }
+          chunksUsed++;
+          continue;
+        }
 
         // If not callback-initiated, or all callbacks are resolved, we're done.
         if (!callbackInitiated || liveChat.activeAgentCallbacks.size === 0) {
@@ -4096,6 +4248,7 @@ class OverseerImpl implements AgentHooks {
       }
       liveChat.activeAgentCallbacks.clear();
     } finally {
+      this.#walletChargeActive = false;
       // If this turn billed the user's own Cloudflare account, refresh their cached balance now (in
       // the background) so the next turn's billing decision reflects the spend just incurred. Runs
       // on both the success and error paths so the
@@ -4335,6 +4488,18 @@ class OverseerImpl implements AgentHooks {
     }
   }
 
+  getEnv(): Env {
+    return this.env as Env;
+  }
+
+  async getWalletBalance(): Promise<number> {
+    return await this.#ownerUserStub().getWalletBalance();
+  }
+
+  async createRechargeOrder(amountINR: number): Promise<{ keyId: string; amount: number; currency: string; orderId: string }> {
+    return await this.#ownerUserStub().createRazorpayOrder(amountINR);
+  }
+
   getChatAgentContext(chatId: number): AiChatAgentContext {
     return this.storage.chatContext.get(chatId) || {chatId};
   }
@@ -4422,9 +4587,21 @@ class OverseerImpl implements AgentHooks {
         if (!cls) return;
         // Provision as an unnamed record: it reaches the agent through each chat's env (named at
         // seed time from the gatekeeper's suggested binding name), not as any gadget's binding.
-        await this.addGatekeeper(
+        let capsule = await this.addGatekeeper(
             cls,
             {type: "ambient", vendorId: account.vendorId, accountId: account.accountId});
+        // Auto-enable approval rules for the capsule's auto-approvable action kinds, matching the
+        // single-approval model used for GitHub repo connections. Read-only singletons (Context,
+        // Scheduler) return [] from getAutoApprovableActions() and are unaffected.
+        try {
+          let ownerProfile = await ownerDo.whoami();
+          await this.autoEnableDefaultApprovalRules(await capsule.getId(), ownerProfile, []);
+        } catch (err) {
+          this.logger.warn("failed to auto-enable ambient capsule approval rules", {
+            event: "ambient.capsule.auto.approval.enable.failed",
+            vendorId: account.vendorId, accountId: account.accountId, error: err,
+          });
+        }
       } catch (err) {
         this.logger.error("failed to provision ambient capsule", {
           event: "ambient.capsule.provision.failed",
@@ -5350,6 +5527,15 @@ class OverseerImpl implements AgentHooks {
     meta.lastActive = this.getChatTimestamp();
     this.storage.chatMeta.put(meta);
 
+    // Wallet billing (System AI): charge the deterministic catalog-priced estimate (USD) for this
+    // step to the owner's wallet. Independent of the AI-Gateway cost lookup below (best-effort UI
+    // accounting); the estimate is always available synchronously, so failed turns aren't
+    // over-charged and cheap/expensive models are billed accurately.
+    if (estimatedCost && this.#walletChargeActive && this.ownerId) {
+      this.ctx.waitUntil(
+        this.users.get(this.users.idFromString(this.ownerId)).consumeWalletBalance(estimatedCost));
+    }
+
     if (aiGatewayLogId && aiGatewayLogRoute) {
       // Best-effort UI accounting only. The log ID is not persisted, so a DO restart can lose
       // this update. Do not use this total as a billing source of truth.
@@ -5636,7 +5822,7 @@ class OverseerImpl implements AgentHooks {
     }
     let lines = [`Resource types offered by "${vendorId}" (${vendor.description.displayName}):`];
     for (let r of vendor.supportedResources) {
-      lines.push(`* ${r.title} — ${r.urlPattern}`)
+      lines.push(`* ${r.title} ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ${r.urlPattern}`)
     }
     lines.push(
         `\nTo request one, call requestConnection with vendorId="${vendorId}" and a resourceUrl ` +
@@ -5741,7 +5927,7 @@ class OverseerImpl implements AgentHooks {
       seen.add(id);
       let lines = [
         `* blueprintId: ${id}`,
-        `  ${JSON.stringify(title)} — ${source}`,
+        `  ${JSON.stringify(title)} ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ${source}`,
       ];
       let bindingNames = Object.entries(bindings ?? {});
       if (bindingNames.length > 0) {
@@ -5802,7 +5988,7 @@ class OverseerImpl implements AgentHooks {
         `about already *is* one of these, work on that one instead: asking to change an existing ` +
         `output is not a request for a second one.\n\n` +
         formats.map(format =>
-            `* ${format.output.noun} (plural: ${format.output.plural}) — ` +
+            `* ${format.output.noun} (plural: ${format.output.plural}) ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ` +
             `${format.blueprintId}` + (format.agentHint ? `; ${format.agentHint}` : ``)).join("\n");
   }
 
@@ -5846,7 +6032,7 @@ class OverseerImpl implements AgentHooks {
     }
 
     // Apply the deployment's overrides, so a gadget the agent builds is labelled the same as one
-    // the user makes from the New menu (see newGadgetFromBlueprint, which does the same).
+    // the user makes from the New menu (see newWorkspaceFromBlueprint, which does the same).
     let output = deploymentOutputForBlueprint(await readAdminConfig(this.env), blueprintId,
         sanitizeBlueprintOutput(kvRecord.metadata.output));
 
@@ -5895,7 +6081,7 @@ class OverseerImpl implements AgentHooks {
             details = `unknown`;
             break;
         }
-        lines.push(`* ${name} — ${JSON.stringify(binding.title)} (${details})` +
+        lines.push(`* ${name} ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ${JSON.stringify(binding.title)} (${details})` +
             (binding.description ? `: ${binding.description}` : ``));
       }
     }
@@ -5911,6 +6097,24 @@ class OverseerImpl implements AgentHooks {
         sub[Symbol.dispose]();
         this.#tailSubscribers.delete(sub);
       });
+    }
+
+    // Auto-Debugging: Feed runtime errors into the chat context
+    if (chatId !== null) {
+      const errorLogs = logs.filter(log => log.level === "error");
+      if (errorLogs.length > 0) {
+        const meta = this.storage.chatMeta.get(chatId);
+        if (meta && meta.activeAgent) {
+          const errorMessage = errorLogs.map(l => l.message).join("\n");
+          const prepared = await this.#prepareChatMessage(`[Auto-Debug] The following runtime errors occurred:\n\n\`\`\`\n${errorMessage}\n\`\`\`\n\nPlease analyze and fix these errors.`, false);
+          
+          this.ctx.storage.transactionSync(() => {
+            this.#commitPreparedChatMessage(
+              chatId, new Date(), { name: "System (Auto-Debug)", type: "user", id: "system" }, prepared, undefined, undefined, undefined
+            );
+          });
+        }
+      }
     }
   }
 
@@ -6236,7 +6440,7 @@ class OverseerImpl implements AgentHooks {
   }
 
   // Render the observer verification failures as one line per binding, naming the connection and the
-  // account that was refused: `<resourceTitle> (<account label>) — <reason>.` Cold path only (we're
+  // account that was refused: `<resourceTitle> (<account label>) ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ <reason>.` Cold path only (we're
   // about to deny the open), so the extra User DO round trip per failure is fine. Discloses nothing
   // new: the reason was either already thrown to this same user or authored by us, and the account is
   // their own.
@@ -6267,7 +6471,7 @@ class OverseerImpl implements AgentHooks {
         });
       }
 
-      return `${observerBindingTitle(gk)} (${label}) — ${failure.reason}`;
+      return `${observerBindingTitle(gk)} (${label}) ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ${failure.reason}`;
     }));
 
     return lines.join("\n");
@@ -6391,7 +6595,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   // `notifyClosed` should be invoked when the return `Overseer` stub is disposed, which is used
-  // by AuthenticatedApiImpl.#openGadgetInternal() to detect Durable Object disconnects.
+  // by AuthenticatedApiImpl.#openWorkspaceInternal() to detect Durable Object disconnects.
   async open(userId: string, profileId: string,
              notifyClosed: NativeRpcStub<() => void>,
              shareKey?: string,
@@ -6405,7 +6609,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
         let owner = this.impl.users.get(this.impl.users.idFromString(userId));
         let meta = await owner.getGadget(this.ctx.id.toString());
         if (!meta) {
-          throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceNotFound);
+          throw createOpenWorkspaceError(OPEN_WORKSPACE_ERROR_CODES.workspaceNotFound);
         }
         if (meta.owner) {
           // The user's DO contains a record indicating that this gadget was shared to them by
@@ -6413,7 +6617,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
           // which does not proactively clean up share recipient's references. We need to treat
           // this as missing otherwise we'll inadvertently create a new gadget with this ID
           // belonging to a different user than the original.
-          throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceNotFound);
+          throw createOpenWorkspaceError(OPEN_WORKSPACE_ERROR_CODES.workspaceNotFound);
         }
 
         // Owner says we exist, so let's initialize ourselves.
@@ -6464,7 +6668,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
         // `prohibitAllSharing` can only have been set when the gadget had no shares (see
         // `authorizeObservation`), and no new shares can be created while it's set, so any
         // non-owner reaching here is necessarily unauthorized.
-        throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceAccessDenied);
+        throw createOpenWorkspaceError(OPEN_WORKSPACE_ERROR_CODES.workspaceAccessDenied);
       }
 
       let sharing = await this.impl.getSharingManager();
@@ -6487,7 +6691,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
       // their session is force-restarted lands here and sees the terminal access-denied page.
       let effectiveRole = sharing.getEffectiveRole(profileId);
       if (!effectiveRole) {
-        throw createOpenGadgetError(OPEN_GADGET_ERROR_CODES.workspaceAccessDenied);
+        throw createOpenWorkspaceError(OPEN_WORKSPACE_ERROR_CODES.workspaceAccessDenied);
       }
       role = effectiveRole;
 
@@ -6658,7 +6862,7 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
   }
 
   // Initialize this workspace's default gadget from a blueprint's code snapshot. Called by
-  // AuthenticatedApi.newGadgetFromBlueprint() after creating (and opening) the DO.
+  // AuthenticatedApi.newWorkspaceFromBlueprint() after creating (and opening) the DO.
   async initializeFromBlueprint(code: Uint8Array, title: string, output?: BlueprintOutput)
       : Promise<void> {
     // Set the title. The default gadget (created just below) inherits it.
@@ -7520,9 +7724,17 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
       // For GitHub repository connections, automatically enable auto-approval for the
       // auto-approvable action kinds on non-default branches so agents can complete planned
       // work without requiring the user to sit at the device. Default-branch writes remain
-      // blocked by the GitHub gatekeeper itself, so main is still protected.
-      let patterns = this.impl.storage.defaultAutoApproveBranchPatterns.get() ??
-          ["fix/*", "feature/*", "agent/*", "*", "!main"];
+      // blocked by the GitHub gatekeeper itself, so the repo's default branch is still protected.
+      let patterns: string[] | undefined;
+      try {
+        patterns = await result.getGatekeeperDefaultAutoApproveBranchPatterns();
+      } catch {
+        patterns = undefined;
+      }
+      if (!patterns) {
+        patterns = this.impl.storage.defaultAutoApproveBranchPatterns.get() ??
+            ["fix/*", "feature/*", "agent/*", "*", "!main"];
+      }
       await this.impl.autoEnableDefaultApprovalRules(await result.getId(), await this.#getClientProfile(), patterns);
     }
     await this.recordConnectionCreated(result, "gatekeeper", vendorId);
@@ -7791,6 +8003,23 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     // sibling approval from resuming this turn.
   }
 
+  async getWorkflowStatus(id: number): Promise<{ status: string, logs?: string } | null> {
+    let action = this.impl.storage.actions.get(id);
+    if (!action) {
+      throw new Error(`No such action: ${id}`);
+    }
+    if (action.type !== "action") return null;
+    let gatekeeper = this.impl.getGatekeeperFacet(action.gatekeeperId) as
+        Fetcher<Required<Gatekeeper<any>>>;
+    try {
+      // `action.action` is the numeric gatekeeper action key assigned by submitAction.
+      return await gatekeeper.getActionStatus(action.action);
+    } catch (err: any) {
+      logger.warn("failed to get workflow status", { event: "workflow.status.failed", actionId: id, error: err?.message || String(err) });
+      return { status: "Error checking status", logs: err?.message || String(err) };
+    }
+  }
+
   // Enable auto-approval of actions carrying `actionKind` on the given gatekeeper. Stores the
   // opt-in rule (one of the two gates required to auto-apply -- the action's own `autoApprovable`
   // verdict is the other) with the kind's display label, and immediately drains any pending
@@ -7860,16 +8089,27 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     return this.impl.storage.defaultAutoApproveBranchPatterns.get();
   }
 
+  async getGatekeeperDefaultAutoApproveBranchPatterns(): Promise<string[] | undefined> {
+    return undefined;
+  }
+
   async setDefaultAutoApproveBranchPatterns(patterns: string[]): Promise<void> {
     this.impl.storage.defaultAutoApproveBranchPatterns.put(patterns);
   }
 
   async listPreApprovableActions(): Promise<PreApprovableAction[]> {
-    // Surface actions from every gatekeeper bound by some gadget (the connections the UI shows).
+    // Surface actions from every gatekeeper bound by some gadget (the connections the UI shows),
+    // plus ambient capsules (singleton gatekeepers like the Context Library and Jules Flow that are
+    // folded into chats rather than bound to a specific gadget).
     let boundIds = new Set<WorkpieceId>();
     for (let gadget of this.impl.storage.gadgets.list()) {
       for (let edge of Object.values(gadget.bindings)) {
         boundIds.add(edge.target);
+      }
+    }
+    for (let gk of this.impl.storage.gatekeepers.list()) {
+      if (gk.creationSpec?.type === "ambient") {
+        boundIds.add(gk.id);
       }
     }
 
@@ -8305,6 +8545,10 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
     let userMeta = await this.clientUser.getChatContext(chosenModelId);
     return this.impl.newChat(this.clientUser, userMeta, initialMessage, capsules, attachments,
                              undefined, undefined, formats);
+  }
+
+  async triggerBackgroundAnalysis(): Promise<void> {
+    return this.impl.triggerBackgroundAnalysis(this.clientUser);
   }
 
   async sendChatMessage(
@@ -8893,6 +9137,7 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
 // whether "use" callers may invoke it.
 @validateRpc()
 class UseOverseerInterface extends RpcTarget implements Overseer {
+  async getWorkflowStatus(_id: number): Promise<{ status: string, logs?: string } | null> { this.#deny(); }
   constructor(private impl: OverseerImpl,
               private owner: DurableObjectStub<UserDurableObject>,
               private clientUser: DurableObjectStub<UserDurableObject>,
@@ -8922,6 +9167,8 @@ class UseOverseerInterface extends RpcTarget implements Overseer {
 
   async getDefaultAutoApproveBranchPatterns(): Promise<undefined> { this.#deny(); }
   async setDefaultAutoApproveBranchPatterns(_patterns: string[]): Promise<void> { this.#deny(); }
+  async getGatekeeperDefaultAutoApproveBranchPatterns(): Promise<string[] | undefined> { this.#deny(); }
+  async triggerBackgroundAnalysis(): Promise<void> { this.#deny(); }
 
   // --- Allowed methods ---
 
@@ -9518,6 +9765,11 @@ class GatekeeperClientImpl<Session extends RpcCompatible<Session>>
       throw new Error("This gatekeeper has no creation spec (created before blueprint support).");
     }
     return record.creationSpec;
+  }
+
+  async getGatekeeperDefaultAutoApproveBranchPatterns(): Promise<string[] | undefined> {
+    // Default-deny fallback: individual gatekeepers may override this in the future.
+    return undefined;
   }
 }
 

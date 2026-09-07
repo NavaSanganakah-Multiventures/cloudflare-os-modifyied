@@ -1,0 +1,39 @@
+{
+  "name": "cloudflareos-build-runner",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-17",
+  "compatibility_flags": [
+    "nodejs_als"
+  ],
+  "containers": [
+    {
+      "class_name": "BuildRunnerContainer",
+      "image": "./Dockerfile",
+      "max_instances": 5,
+      "instance_type": "standard-3"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "BuildRunnerContainer",
+        "name": "BUILD_RUNNER_CONTAINER"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "new_sqlite_classes": [
+        "BuildRunnerContainer"
+      ],
+      "tag": "v1"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "invocation_logs": false
+    }
+  }
+}

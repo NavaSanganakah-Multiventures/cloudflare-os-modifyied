@@ -87,6 +87,7 @@ export type TextStyle = {
 // ---------------------------------------------------------------------------
 
 const DOCS_API_BASE = "https://docs.googleapis.com/v1/documents";
+const DRIVE_API_BASE = "https://www.googleapis.com/drive/v3/files";
 
 export class GoogleDocsApi {
   constructor(private getAccessToken: AccessTokenProvider) {}
@@ -128,6 +129,23 @@ export class GoogleDocsApi {
 
     let data = await response.json() as { revisionId: string };
     return data.revisionId;
+  }
+
+  /** Fetch the document's modified time from the Drive API. */
+  async getModifiedTime(documentId: string): Promise<Date> {
+    let response = await fetchWithAuthRetry(
+      `${DRIVE_API_BASE}/${encodeURIComponent(documentId)}?fields=modifiedTime`,
+      {},
+      this.getAccessToken,
+    );
+
+    if (!response.ok) {
+      let errorText = await response.text();
+      throw new Error(`Failed to get document modified time: ${response.status} ${errorText}`);
+    }
+
+    let data = await response.json() as { modifiedTime: string };
+    return new Date(data.modifiedTime);
   }
 
   /**

@@ -42,6 +42,42 @@ export function httpStatusFromError(errorMessage: string, handle: ModelHandle)
   return handle.lastResponse?.status;
 }
 
+/** HTTP statuses that indicate a transient provider/gateway failure worth retrying. */
+const RETRYABLE_PROVIDER_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+
+/**
+ * True when a failed agent request is transient and an automatic retry is expected to help:
+ * overload/rate-limit responses, gateway 5xx, and transport-level failures with no observed HTTP
+ * status. 4xx responses (auth, quota/billing, malformed input) are deliberately not retryable.
+ */
+export function isRetryableProviderFailure(err: unknown): boolean {
+  const statusCode = err instanceof AgentTurnError ? err.statusCode : undefined;
+  if (statusCode !== undefined) {
+    return RETRYABLE_PROVIDER_STATUSES.has(statusCode);
+  }
+
+  const flags = err as Record<string, unknown> | null | undefined;
+  if (flags?.["overloaded"] === true || flags?.["retryable"] === true) {
+    return true;
+  }
+
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  return /(?:^|\b)(?:408|429|500|502|503|504)\b/.test(message) ||
+      /service unavailable|temporarily unavailable|rate limit|too many requests|timed? ?out|\bECONNRESET\b|\bECONNREFUSED\b|socket hang up|network error|upstream/i.test(message);
+}
+
+/**
+ * Exponential backoff delay (with jitter) for an automatic provider retry. `attempt` is the
+ * 0-based retry index (0 = the first retry after the initial failure).
+ */
+export function providerRetryDelayMs(attempt: number): number {
+  const base = 1000;
+  const exponent = Math.min(Math.max(attempt, 0), 4);
+  const backoff = Math.min(base * 2 ** exponent, 15_000);
+  const jitter = Math.floor(Math.random() * (backoff * 0.25));
+  return backoff + jitter;
+}
+
 /**
  * Run a single non-streaming-style completion against a ModelHandle and return the response
  * text. Used for one-shot calls: title generation, binding naming, compaction summaries, and

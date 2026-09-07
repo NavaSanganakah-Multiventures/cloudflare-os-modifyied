@@ -614,6 +614,11 @@ export interface Gatekeeper<Session> extends DurableObject {
   // time. Gatekeepers with no auto-approvable actions return [].
   getAutoApprovableActions(): Promise<ActionKind[]>;
 
+  // Returns a set of branch patterns that should be used as the default for auto-approval
+  // rules on this gatekeeper. Repo-style gatekeepers can use this to exclude the repository's
+  // default branch. Returns undefined when the gatekeeper has no opinion.
+  getDefaultAutoApproveBranchPatterns?(): Promise<string[] | undefined>;
+
   // Get the capability representing this resource's RPC interface which will be provided to the
   // Gadget.
   //
@@ -730,6 +735,10 @@ export interface Gatekeeper<Session> extends DurableObject {
   // `restart` has the same meaning as for `rejectAction()`.
   revertAction(action: number):
       Promise<void | {message?: string, canRetry?: boolean, restart?: boolean}>;
+
+  // Fetches real-time status and logs for a previously approved action.
+  // Useful for tracking asynchronous operations like GitHub Workflow runs.
+  getActionStatus?(action: number): Promise<{ status: string, logs?: string } | null>;
 }
 
 export interface ObservationAuthorizer extends RpcTarget {

@@ -722,7 +722,6 @@ export class UserAccount extends DurableObject<Env> {
             : "google.token.mint.expiry",
       });
 
-      // TODO: If new refresh token returned, use it.
       let result = await getAccessToken(refreshToken, clientId, clientSecret,
           AbortSignal.timeout(TOKEN_MINT_TIMEOUT_MS));
       if (!result.ok) {
@@ -750,6 +749,15 @@ export class UserAccount extends DurableObject<Env> {
         let current = this.ctx.storage.kv.get<GoogleAccessToken>("accessToken");
         if (current) return current;
         throw new Error("Google credentials changed while refreshing. Please try again.");
+      }
+
+      // Google may rotate the refresh token on a refresh. Store the new one before publishing the
+      // access token so a later retry doesn't try to use the superseded token.
+      if (result.refreshToken) {
+        logger.info("Google refresh token rotated", {
+          event: "google.token.refresh.rotated",
+        });
+        this.ctx.storage.kv.put<string>("refreshToken", result.refreshToken);
       }
 
       this.ctx.storage.kv.put<GoogleAccessToken>("accessToken", result.token);
@@ -1290,7 +1298,9 @@ class GmailSessionImpl extends RpcTarget implements GmailSession {
     this.#ctx = ctx;
   }
 
-  // TODO: The dup'd approvalQueue RPC stub should be disposed when the session ends.
+  [Symbol.dispose](): void {
+    this.#ctx.approvalQueue[Symbol.dispose]();
+  }
 
   async listThreads(): Promise<Cursor<GmailThreadEntry>> {
     const scopeDescription = this.#ctx.searchQuery
@@ -2349,6 +2359,10 @@ class GoogleDocSessionImpl extends RpcTarget implements GoogleDocSession {
     this.#simulationCache = simulationCache;
   }
 
+  [Symbol.dispose](): void {
+    this.#approvalQueue[Symbol.dispose]();
+  }
+
   async #getSnapshot(forceRefresh?: boolean): Promise<DocSnapshot> {
     if (!forceRefresh) {
       let cached = await this.#storage.get<DocSnapshot>("docSnapshot");
@@ -2415,11 +2429,10 @@ class GoogleDocSessionImpl extends RpcTarget implements GoogleDocSession {
       description: "Read the title and modification time of the document.",
     });
 
-    // The Docs API doesn't return lastModified directly (that's a Drive API field).
-    // For now, use the fetch timestamp as an approximation.
-    // TODO: Use Drive API files.get for actual modifiedTime.
+    // The Docs API doesn't return lastModified directly; fetch it from Drive.
+    let driveModifiedTime = await this.#docsApi.getModifiedTime(this.#documentId);
     let lastModified = pendingActions.reduce(
-        (latest, action) => Math.max(latest, action.submittedAt), snapshot.fetchedAt);
+        (latest, action) => Math.max(latest, action.submittedAt), driveModifiedTime.getTime());
     return {
       title: snapshot.title ?? "Untitled document",
       lastModified: new Date(lastModified),
@@ -3087,6 +3100,10 @@ class GoogleCalendarSessionImpl extends RpcTarget implements GoogleCalendarSessi
     this.#observeAvailabilityCalendars = observeAvailabilityCalendars;
   }
 
+  [Symbol.dispose](): void {
+    this.#approvalQueue[Symbol.dispose]();
+  }
+
   async getCapabilities(): Promise<GoogleCalendarCapabilities> {
     return {availabilityMode: this.#availabilityMode};
   }
@@ -3447,6 +3464,10 @@ class BigQuerySessionImpl extends RpcTarget implements BigQuerySession {
     this.#scopedDatasetId = scopedDatasetId;
     this.#scopedTableId = scopedTableId;
     this.#observe = observe;
+  }
+
+  [Symbol.dispose](): void {
+    this.#approvalQueue[Symbol.dispose]();
   }
 
   // Authorize an observation that reveals data belonging to specific dataset(s), tracking them and

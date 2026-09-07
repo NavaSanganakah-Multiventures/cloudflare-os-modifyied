@@ -231,6 +231,7 @@ export function makeStoredAssistantMessage(message: AssistantMessage): StoredAss
 //   factor out some sort of chat context object here -- maybe merge with LiveChatContext in
 //   overseer.ts?
 export interface AgentHooks {
+  getEnv(): Env;
   getChatAgentContext(chatId: number): AiChatAgentContext;
   buildYDoc(version: number | "current"): {ydoc: Y.Doc, version: number};
 
@@ -317,6 +318,9 @@ export interface AgentHooks {
   // so the dependency surface stays explicit.
   getWebFetchEnv(): WebFetchEnv;
 
+  getWalletBalance(): Promise<number>;
+  createRechargeOrder(amountINR: number): Promise<{ keyId: string; amount: number; currency: string; orderId: string }>;
+
   // Deployment-wide, admin-authored instructions to append to the agent's system prompt. Returns
   // "" when none are set. Read on each turn so admin edits take effect promptly.
   getInstanceInstructions(): Promise<string>;
@@ -378,6 +382,17 @@ export interface AgentHooks {
 let SYSTEM_PROMPT = `
 You are a helpful coding assistant tasked with helping users write small personal applications known as "Gadgets". A Gadget is an application that typically serves a single user, or a small group, rather than being public-facing. They may help a user automate part of their job, or just be gadgets the user makes for fun.
 
+# Planning (योजना)
+
+For every user request, before making any changes, always produce a plan. The plan must be written in Hindi (हिंदी). While planning, do not make any changes: do not create gadgets, write or edit files, wire bindings, or perform any other modifying action.
+
+Your plan must, in Hindi:
+- restate what the user asked for;
+- list the steps you intend to take;
+- identify the gadgets, files, bindings, or resources that would be affected.
+
+Present the plan to the user in Hindi and wait for the user to confirm it before making any changes.
+
 # Workspaces
 
 You are working within a "workspace". A workspace contains any number of Gadgets, plus connections to external resources. Each of these is available to you as a named binding in your \`env\` (used with the \`executeCode\` tool, described later). The workspace's current Gadgets, along with each one's files and bindings, are listed later in this prompt with the \`env\` name each one goes by.
@@ -386,7 +401,7 @@ A new workspace contains no Gadgets: use the \`createGadget\` tool to create one
 
 When the user asks for a new Gadget, ALWAYS consider starting from a blueprint. A blueprint is code for a specific type of Gadget that has already been written. The \`listBlueprints\` tool returns a list of available blueprints. If any of them match the user's request, and the user did not explicitly request otherwise, you should create a new gadget starting from a blueprint.
 
-Note that users rarely ask for "a Gadget" in those words. They ask for a thing: a doc, a deck, a tracker, a tool that does X. Any of those is a request for a new Gadget, and so a request to consider a blueprint ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ including when the workspace already contains a Gadget, which does not make the request an edit to that one.
+Note that users rarely ask for "a Gadget" in those words. They ask for a thing: a doc, a deck, a tracker, a tool that does X. Any of those is a request for a new Gadget, and so a request to consider a blueprint Ã¢ÂÂ including when the workspace already contains a Gadget, which does not make the request an edit to that one.
 
 Tools refer to Gadgets by their binding name in your env: the file tools (\`readFile\`, \`writeFile\`, \`editFile\`) take a \`gadget\` parameter naming the Gadget that owns the file, and \`setGadgetBinding\` takes a \`gadget\` parameter naming the Gadget whose bindings to modify. Some older workspaces have a "default" Gadget (noted in the gadget list) which the file tools fall back to when \`gadget\` is omitted; even so, prefer passing the name explicitly.
 
@@ -520,6 +535,9 @@ env.SOME_BINDING.registerGreeter(greeter);
 \`\`\`
 
 In Gadget code, the \`ctx\` object is passed to the \`DurableObject\` constructor and is automatically available as \`this.ctx\` within the class. When writing code for the \`executeCode\` tool call, the \`ctx\` object is passed as a parameter to your function. You can call \`ctx.restore()\` from either location, though usually it's best to call it as part of \`executeCode\` as usually registering hooks is something you do one time, not programmatically.
+
+# Language and Encoding
+Never generate mojibakes (garbled text or malformed Unicode due to encoding errors). Always output clean, correctly encoded text in whichever language you are writing (Hindi, English, etc.). Ensure all special characters are rendered properly.
 `.trim();
 
 let SPAWNER_SYSTEM_PROMPT = `
@@ -530,22 +548,37 @@ Gadgets execute on a restricted and heavily-sandboxed variant of Cloudflare Work
 You were started programmatically by the Gadget to perform a task. The specific task will be described in the first message in this chat. The message is not directly from the user but rather from an automated system. If you receive any further messages after the first, then these additional messages are directly from a human user making additional requests regarding the task.
 
 Typically (but not always), you will need to use the \`executeCode\` tool to complete the task, invoking the available bindings (members of the env object) and other APIs available to you.
+
+# Language and Encoding
+Never generate mojibakes (garbled text or malformed Unicode due to encoding errors). Always output clean, correctly encoded text in whichever language you are writing (Hindi, English, etc.). Ensure all special characters are rendered properly.
 `.trim();
 
 let READ_FILE_TOOL_DESCRIPTION = `
 Read the content of a file owned by one of the workspace's gadgets. Note that you will be informed any time a file changes, so it is not necessary to read a file again after you have already read it once. This cannot read chat attachments; attachments are provided directly in the conversation.
 `.trim();
 
+let GREP_SEARCH_TOOL_DESCRIPTION = `
+Search for a string or regular expression pattern across all files in the given workpiece (gadget). Use this to quickly find usages, variable definitions, or error messages without having to read all files manually.
+`.trim();
+
+let SEARCH_MEMORY_TOOL_DESCRIPTION = `
+Search the user's semantic memory (Vector Database) for past context, code snippets, or architectural decisions using natural language queries.
+`.trim();
+
+let SAVE_TO_MEMORY_TOOL_DESCRIPTION = `
+Save important information, decisions, or code snippets to the user's semantic memory (Vector Database) so you can recall it in future chat sessions.
+`.trim();
+
 let CREATE_GADGET_TOOL_DESCRIPTION = `
 Create a new Gadget in this workspace. The new gadget immediately becomes available in your \`env\` under the \`bindingName\` you choose, which is also how you refer to it in other tools (the \`workpiece\` parameter of the file tools, etc.).
 
-Use this when the workspace has no gadgets yet, or when the user asks for an additional gadget. Always choose a short, descriptive title ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ the user will see it.
+Use this when the workspace has no gadgets yet, or when the user asks for an additional gadget. Always choose a short, descriptive title Ã¢ÂÂ the user will see it.
 
 By default the new gadget is empty. Pass \`blueprintId\` (discovered with the \`listBlueprints\` tool, or given by the user) to instead start the gadget from a blueprint's code; the result then also describes the bindings the blueprint expects you to wire up.
 `.trim();
 
 let LIST_BLUEPRINTS_TOOL_DESCRIPTION = `
-List the blueprints available to the user: their own published blueprints, their blueprint library, and this deployment's featured blueprints. A blueprint is a shareable snapshot of a Gadget's code; instantiate one as a new Gadget by passing its \`blueprintId\` to \`createGadget\`. There is no search ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ read the list and pick the best match yourself.
+List the blueprints available to the user: their own published blueprints, their blueprint library, and this deployment's featured blueprints. A blueprint is a shareable snapshot of a Gadget's code; instantiate one as a new Gadget by passing its \`blueprintId\` to \`createGadget\`. There is no search Ã¢ÂÂ read the list and pick the best match yourself.
 `.trim();
 
 let WRITE_FILE_TOOL_DESCRIPTION = `
@@ -598,7 +631,7 @@ The bindings in your \`env\` belong to this chat; a Gadget's code sees only the 
 
 The addition is part of your proposed changes: like code edits, it takes permanent effect when the user accepts your changes.
 
-NOTE: You do NOT need this tool to use a resource yourself with \`executeCode\` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ your own bindings are already available there. ONLY use it when a Gadget's code needs the resource.
+NOTE: You do NOT need this tool to use a resource yourself with \`executeCode\` Ã¢ÂÂ your own bindings are already available there. ONLY use it when a Gadget's code needs the resource.
 `.trim();
 
 let EXECUTE_CODE_TOOL_DESCRIPTION = `
@@ -620,11 +653,20 @@ List the resource types a gatekeeper vendor offers, so you can construct a resou
 `.trim();
 
 let REQUEST_CONNECTION_TOOL_DESCRIPTION = `
-Ask the user to connect a gatekeeper resource (e.g. a ClickHouse cluster, a GitHub repo). Pre-configure as much as you can: always pass vendorId, and pass resourceUrl when you can infer it (use listConnectableResources to learn the URL patterns). The request must resolve to a specific resource: if you pass a resourceUrl it must match one of the vendor's patterns, and if the vendor offers multiple resource types with no whole-instance option you MUST pass a matching resourceUrl. Otherwise the call is rejected with guidance and no card is shown ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ fix the request and try again. You also choose \`bindingName\`: the name the resource will have in your env once connected (you know why you want the resource, so pick a name that reflects its role). On success this shows the user an accept/deny card in the chat. It does NOT block: your turn ends after a successful call, and you will be resumed once the user accepts (the resource becomes available as \`env.<bindingName>\`, which you can describeBinding and use from executeCode; wire it into a Gadget with setGadgetBinding only if the Gadget's code needs it) or denies (your turn simply ends; wait for the user's next message).
+Ask the user to connect a gatekeeper resource (e.g. a ClickHouse cluster, a GitHub repo). Pre-configure as much as you can: always pass vendorId, and pass resourceUrl when you can infer it (use listConnectableResources to learn the URL patterns). The request must resolve to a specific resource: if you pass a resourceUrl it must match one of the vendor's patterns, and if the vendor offers multiple resource types with no whole-instance option you MUST pass a matching resourceUrl. Otherwise the call is rejected with guidance and no card is shown Ã¢ÂÂ fix the request and try again. You also choose \`bindingName\`: the name the resource will have in your env once connected (you know why you want the resource, so pick a name that reflects its role). On success this shows the user an accept/deny card in the chat. It does NOT block: your turn ends after a successful call, and you will be resumed once the user accepts (the resource becomes available as \`env.<bindingName>\`, which you can describeBinding and use from executeCode; wire it into a Gadget with setGadgetBinding only if the Gadget's code needs it) or denies (your turn simply ends; wait for the user's next message).
 `.trim();
 
 let GIVE_UP_TOOL_DESCRIPTION = `
 Gives up on handling the current callbacks, rejecting all outstanding callbacks with an error. Use this if you cannot fulfill the callbacks after attempting to do so.
+`.trim();
+
+let GET_WALLET_BALANCE_TOOL_DESCRIPTION = `
+Gets the user's current wallet balance in USD. Use this tool when the user asks for their wallet balance or remaining credits.
+`.trim();
+
+let CREATE_RECHARGE_ORDER_TOOL_DESCRIPTION = `
+Creates a Razorpay order to recharge the user's wallet. Use this when the user asks to add funds or recharge their wallet.
+You must pass the amount in INR (minimum 1). Returns the order details. Once created, ask the user to use the UI's wallet menu to complete the payment.
 `.trim();
 
 // =======================================================================================
@@ -636,7 +678,7 @@ type CodePreviewEntry = {
   parser: StreamingToolInputParser;
   // The edit's target workpiece, resolved from the streaming input's prefix fields once they are
   // complete. `null` means resolution failed (e.g. the agent omitted `workpiece` in a workspace
-  // with no default gadget) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ the tool call itself will fail, so no preview is shown.
+  // with no default gadget) Ã¢ÂÂ the tool call itself will fail, so no preview is shown.
   target?: {workpieceId: WorkpieceId, rootName: string} | null;
   // Whether we've already emitted the toolCallTarget event. To avoid emitting multiple times.
   targetEmitted?: boolean;
@@ -1061,7 +1103,16 @@ function defineTool<TParameters extends TSchema>(def: AgentTool<TParameters>): A
 
 // Runs one agent turn against the chat's history. Returns a checkpoint when the turn compacted
 // instead of prompting the model: the caller commits it, then reruns for a normal turn or stops for
-// `/compact`. Returns undefined when the turn ran.
+// `/compact`. Returns a result describing why the run ended; `turnCapReached` tells the overseer
+// whether it should automatically continue the session with a fresh call, and `checkpoint` carries
+// a compaction checkpoint when one was produced.
+export type RunAgentResult = {
+  // Compaction checkpoint produced by this run, if any.
+  checkpoint?: CompactionCheckpoint;
+  // True when the per-call hard turn cap (e.g. 30) was hit. The caller may continue the session.
+  turnCapReached?: boolean;
+};
+
 export async function runAgent(
     hooks: AgentHooks,
     handle: ModelHandle,
@@ -1071,7 +1122,7 @@ export async function runAgent(
     abortSignal: AbortSignal,
     initiator: AiChatAuthorInfo,
     callbackInitiated: boolean,
-    compaction: CompactionContext): Promise<CompactionCheckpoint | undefined> {
+    compaction: CompactionContext): Promise<RunAgentResult> {
   let checkpoint = compaction.checkpoint;
 
   // The workspace's gadget registry, snapshotted at the start of the turn (gadgets provisional
@@ -1483,7 +1534,7 @@ export async function runAgent(
                   // migration -- degrade to a text marker rather than failing the whole replay.
                   return [{
                     type: "text",
-                    text: `\n\n[Attached file${filename} (${attachment.mimeType}) omitted ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ` +
+                    text: `\n\n[Attached file${filename} (${attachment.mimeType}) omitted Ã¢ÂÂ ` +
                         `this file type is not supported by the current model]`,
                   }];
                 }
@@ -1911,7 +1962,7 @@ export async function runAgent(
               timestamp: msgTimestamp,
             });
           } else {
-            // Defensive: accept always records a gatekeeperId, so this shouldn't happen ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ but never
+            // Defensive: accept always records a gatekeeperId, so this shouldn't happen Ã¢ÂÂ but never
             // leave a resumed agent with no context about the outcome.
             modelMessages.push({
               role: "user",
@@ -2073,7 +2124,7 @@ export async function runAgent(
           "Aside from any resources described below, the `env` object is empty.";
     } else {
       let lines = namedSeeds.map(seed =>
-          `* env.${seed.name} ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ` +
+          `* env.${seed.name} Ã¢ÂÂ ` +
           (seed.isGadget
               ? `RPC stub to the server-side Durable Object of the Gadget ` +
                 `${JSON.stringify(seed.title)}.`
@@ -2156,8 +2207,8 @@ export async function runAgent(
             let chatName = chatNameFor(b.target);
             return `* ${b.name}: ${b.title}` +
                 (chatName !== undefined
-                    ? ` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ in your env as \`env.${chatName}\``
-                    : ` ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ (no binding for this in your env)`);
+                    ? ` Ã¢ÂÂ in your env as \`env.${chatName}\``
+                    : ` Ã¢ÂÂ (no binding for this in your env)`);
           }));
         }
         return lines.join("\n");
@@ -2185,7 +2236,7 @@ export async function runAgent(
           `for the user's next message.\n` +
           `If one of these services likely holds information relevant to the task, consider ` +
           `requesting a connection and reading from it before you answer, instead of answering from ` +
-          `guesswork ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ a connection often gives you the real information. Connectable vendors:\n` +
+          `guesswork Ã¢ÂÂ a connection often gives you the real information. Connectable vendors:\n` +
           `${connectableVendors.map(v => `* ${v.id}: ${v.displayName}`).join("\n")}`;
     }
 
@@ -2255,18 +2306,33 @@ export async function runAgent(
         // An empty summary would discard the compacted history, so keep the history instead.
         if (!summary) throw new Error("Compaction produced an empty summary.");
 
+        // SEMANTIC COMPACTION: Save the compacted history summary to Vector Memory
+        try {
+          let env = hooks.getEnv();
+          // @ts-ignore
+          let embeddingResponse = await env.WORKERS_AI.run("@cf/baai/bge-base-en-v1.5", { text: [summary] });
+          let vector = embeddingResponse.data[0];
+          let id = crypto.randomUUID();
+          // @ts-ignore
+          await env.VECTOR_MEMORY.insert([{ id, values: vector, metadata: { text: "Chat Compaction Summary:\\n" + summary } }]);
+        } catch (memErr) {
+          logger.warn("failed to save compaction to vector memory", { event: "agent.compaction.vector_memory_failed", error: memErr });
+        }
+
         return {
-          chatId,
-          compactedTo,
-          summary,
-          ...buildCompactionState(
-              chatMessages,
-              compactedTo,
-              seedBindings.map<[string, ChatBindingEntry]>(seed => [
-                seed.name,
-                {type: "workpiece", id: seed.target},
-              ]),
-              checkpoint),
+          checkpoint: {
+            chatId,
+            compactedTo,
+            summary,
+            ...buildCompactionState(
+                chatMessages,
+                compactedTo,
+                seedBindings.map<[string, ChatBindingEntry]>(seed => [
+                  seed.name,
+                  {type: "workpiece", id: seed.target},
+                ]),
+                checkpoint),
+          },
         };
       } catch (error) {
         // Compaction triggers below the limit, so the turn's own prompt still fits and a failed
@@ -2286,7 +2352,7 @@ export async function runAgent(
     }
   }
   // `/compact` ends the turn whether or not the boundary could advance; the model is never prompted.
-  if (compactionTurn) return;
+  if (compactionTurn) return { turnCapReached: false };
 
   // Wraps a plain-text tool result (the exact text the model sees) with optional recorded notes
   // (see AiToolCall: observedCodeVersion, recorded output) riding along as pi `details` for the
@@ -2307,6 +2373,106 @@ export async function runAgent(
   });
 
   let tools: Record<string, AgentTool> = {
+    getWalletBalance: defineTool({
+      name: "getWalletBalance",
+      label: "Get wallet balance",
+      description: GET_WALLET_BALANCE_TOOL_DESCRIPTION,
+      parameters: Type.Object({}),
+      execute: async (toolCallId) => {
+        try {
+          const balance = await hooks.getWalletBalance();
+          return toolResult(`Current wallet balance: $${balance.toFixed(2)} USD`);
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          return toolResult(toolErrorText(error), { error: toolErrorText(error) });
+        }
+      }
+    }),
+
+    createRechargeOrder: defineTool({
+      name: "createRechargeOrder",
+      label: "Create recharge order",
+      description: CREATE_RECHARGE_ORDER_TOOL_DESCRIPTION,
+      parameters: Type.Object({
+        amountINR: Type.Number({ description: "Amount in INR to recharge (e.g. 50, 100). Must be at least 1." }),
+      }),
+      execute: async (toolCallId, { amountINR }) => {
+        try {
+          const order = await hooks.createRechargeOrder(amountINR);
+          const details = `Order created! Order ID: ${order.orderId}, Amount: ${order.amount / 100} ${order.currency}. Please ask the user to use the UI to complete payment.`;
+          return toolResult(details, { output: order } as Partial<AiToolCall>);
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          return toolResult(toolErrorText(error), { error: toolErrorText(error) });
+        }
+      }
+    }),
+
+    searchMemory: defineTool({
+      name: "searchMemory",
+      label: "Search semantic memory",
+      description: SEARCH_MEMORY_TOOL_DESCRIPTION,
+      parameters: Type.Object({
+        query: Type.String({description: "Natural language query to search for in the vector database."}),
+      }),
+      execute: async (toolCallId, {query}) => {
+        try {
+          let env = hooks.getEnv();
+          // Generate embedding for the query
+          // @ts-ignore Cloudflare Workers AI types
+          let embeddingResponse = await env.WORKERS_AI.run("@cf/baai/bge-base-en-v1.5", { text: [query] });
+          if (!embeddingResponse || !embeddingResponse.data || embeddingResponse.data.length === 0) {
+            return toolResult("Failed to generate embedding for the query.");
+          }
+          let vector = embeddingResponse.data[0];
+
+          // Search the vectorize index
+          // @ts-ignore Cloudflare Vectorize types
+          let queryResponse = await env.VECTOR_MEMORY.query(vector, { topK: 5, returnMetadata: "all" });
+          
+          if (!queryResponse.matches || queryResponse.matches.length === 0) {
+            return toolResult("No relevant memory found.");
+          }
+
+          let results = queryResponse.matches.map((m: any) => m.metadata.text).join('\\n\\n--- \\n\\n');
+          return toolResult(`Found in memory:\\n\\n${results}`);
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          throw error;
+        }
+      }
+    }),
+
+    saveToMemory: defineTool({
+      name: "saveToMemory",
+      label: "Save to memory",
+      description: SAVE_TO_MEMORY_TOOL_DESCRIPTION,
+      parameters: Type.Object({
+        content: Type.String({description: "The information to save to memory."}),
+      }),
+      execute: async (toolCallId, {content}) => {
+        try {
+          let env = hooks.getEnv();
+          // Generate embedding
+          // @ts-ignore
+          let embeddingResponse = await env.WORKERS_AI.run("@cf/baai/bge-base-en-v1.5", { text: [content] });
+          if (!embeddingResponse || !embeddingResponse.data || embeddingResponse.data.length === 0) {
+            return toolResult("Failed to generate embedding for the content.");
+          }
+          let vector = embeddingResponse.data[0];
+
+          let id = crypto.randomUUID();
+          // @ts-ignore
+          await env.VECTOR_MEMORY.insert([{ id, values: vector, metadata: { text: content } }]);
+
+          return toolResult(`Successfully saved to memory with ID: ${id}`);
+        } catch (error) {
+          toolCallNotes.set(toolCallId, { error: toolErrorText(error) });
+          throw error;
+        }
+      }
+    }),
+
     readFile: defineTool({
       name: "readFile",
       label: "Read file",
@@ -2328,6 +2494,62 @@ export async function runAgent(
           }
           filesRead.add(fileKey(resolved.workpieceId, filename));
           return toolResult(text.toString(), {
+            observedCodeVersion: versionLock!
+          });
+        } catch (error) {
+          toolCallNotes.set(toolCallId, {
+            observedCodeVersion: versionLock!,
+            error: toolErrorText(error)
+          });
+          throw error;
+        }
+      }
+    }),
+
+    grepSearch: defineTool({
+      name: "grepSearch",
+      label: "Search code",
+      description: GREP_SEARCH_TOOL_DESCRIPTION,
+      parameters: Type.Object({
+        workpiece: workpieceParam,
+        query: Type.String({description: "The string or regex pattern to search for."}),
+        isRegex: Type.Optional(Type.Boolean({description: "Whether the query is a regular expression. Defaults to false."})),
+        caseInsensitive: Type.Optional(Type.Boolean({description: "Whether the search should be case insensitive. Defaults to false."}))
+      }),
+      execute: async (toolCallId, {workpiece, query, isRegex, caseInsensitive}) => {
+        try {
+          let resolved = hooks.resolveWorkpieceRoot(resolveToolWorkpieceId(workpiece), true, chatId);
+          let results: string[] = [];
+          
+          let regex: RegExp;
+          try {
+             let flags = "g";
+             if (caseInsensitive) flags += "i";
+             regex = new RegExp(isRegex ? query : query.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&'), flags);
+          } catch (e) {
+             throw new Error("Invalid regular expression.", { cause: e });
+          }
+
+          for (let [filename, text] of getSessionYDoc().getMap<Y.Text>(resolved.rootName)) {
+            let fileContent = text.toString();
+            let lines = fileContent.split('\\n');
+            let fileResults: string[] = [];
+            for (let i = 0; i < lines.length; i++) {
+              if (regex.test(lines[i])) {
+                fileResults.push(`${i + 1}: ${lines[i]}`);
+              }
+            }
+            if (fileResults.length > 0) {
+              results.push(`--- ${filename} ---\\n${fileResults.join('\\n')}`);
+            }
+          }
+          
+          let output = results.length > 0 ? results.join('\\n\\n') : "No matches found.";
+          if (output.length > 20000) {
+             output = output.substring(0, 20000) + "\\n\\n...[Truncated due to length]";
+          }
+
+          return toolResult(output, {
             observedCodeVersion: versionLock!
           });
         } catch (error) {
@@ -2852,6 +3074,10 @@ export async function runAgent(
 
   // Turn cap, replacing the old stepCountIs(30).
   let turnCount = 0;
+  // Set when the loop ends only because the hard cap was reached. The overseer uses this to
+  // decide whether to continue the session automatically instead of leaving the user with a
+  // silent stop.
+  let turnCapReached = false;
 
   // The awaited event sink driving both the client stream fan-out and the persistence barrier.
   let emit = async (event: AgentEvent): Promise<void> => {
@@ -3026,7 +3252,7 @@ export async function runAgent(
       logger.warn("agent turn skipped: history ends with a completed assistant message", {
         event: "agent.turn.skipped", chatId,
       });
-      return undefined;
+      return { turnCapReached: false };
     }
 
     let context: AgentContext = {
@@ -3041,22 +3267,28 @@ export async function runAgent(
       convertToLlm: (messages) => messages as Message[],
       toolExecution: "sequential",
       maxTokens: maxOutputTokens,
-      shouldStopAfterTurn: () =>
-          // Cancelled during tool execution: the completed turn was persisted by the turn_end
-          // barrier just above; don't start another (doomed) model request.
-          abortSignal.aborted ||
-          // Hard cap on turns, as before.
-          ++turnCount >= 30 ||
-          // End the turn once the agent has successfully requested a connection: it must wait
-          // for the user to respond, not keep reasoning in the meantime. (Accept resumes it on a
-          // fresh turn; deny just leaves the turn ended.) A rejected requestConnection (e.g.
-          // unresolvable resource) leaves this false so the agent can fix the request and retry
-          // in the same turn.
-          connectionRequested ||
-          // Wait for approval before continuing against state that may not reflect the action.
-          awaitingActionDecision ||
-          // Auto-terminate when callback-initiated and all callbacks have been resolved/rejected.
-          (callbackInitiated && hooks.activeAgentCallbackCount(chatId) === 0),
+      shouldStopAfterTurn: () => {
+        // Cancelled during tool execution: the completed turn was persisted by the turn_end
+        // barrier just above; don't start another (doomed) model request.
+        if (abortSignal.aborted) return true;
+        // Hard cap on turns. Don't treat it as a terminal error; surface it to the caller so
+        // the overseer can continue the session.
+        if (++turnCount >= 30) {
+          turnCapReached = true;
+          return true;
+        }
+        // End the turn once the agent has successfully requested a connection: it must wait
+        // for the user to respond, not keep reasoning in the meantime. (Accept resumes it on a
+        // fresh turn; deny just leaves the turn ended.) A rejected requestConnection (e.g.
+        // unresolvable resource) leaves this false so the agent can fix the request and retry
+        // in the same turn.
+        if (connectionRequested) return true;
+        // Wait for approval before continuing against state that may not reflect the action.
+        if (awaitingActionDecision) return true;
+        // Auto-terminate when callback-initiated and all callbacks have been resolved/rejected.
+        if (callbackInitiated && hooks.activeAgentCallbackCount(chatId) === 0) return true;
+        return false;
+      },
     }, emit, abortSignal, handle.stream);
   } finally {
     // Flush any remaining Y.Doc changes captured during this turn as a single "changes" message.
@@ -3075,8 +3307,9 @@ export async function runAgent(
         turnFailure.message, httpStatusFromError(turnFailure.message, handle));
   }
 
-  // The turn ran, so there is no checkpoint to report.
-  return undefined;
+  // The turn ran; report whether the cap was the only reason it stopped so the caller
+  // can continue the session transparently.
+  return { turnCapReached };
 }
 
 function formatUnifiedDiff(
@@ -3125,7 +3358,7 @@ export function makeStorableArgs(
     throw new Error("Agent callback arguments exceed maximum nesting depth of 64.");
   }
 
-  // Transient RPC stubs ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ collect and replace with loopback.
+  // Transient RPC stubs Ã¢ÂÂ collect and replace with loopback.
   if (value instanceof NativeRpcStub) {
     let index = transientStubs.length;
     // @ts-ignore RPC types cause excessively deep instantiation.

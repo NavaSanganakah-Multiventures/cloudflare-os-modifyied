@@ -178,6 +178,21 @@ describe("webFetch document conversion", () => {
     expect(result.body).toBe("PDF text content");
   });
 
+  it("falls back to raw text when the Workers AI binding is absent", async () => {
+    // When WORKERS_AI is not configured (e.g. dev without --use-workers-ai-binding),
+    // env.ai is undefined. webFetch should return the raw decoded body for HTML
+    // instead of crashing with "Cannot read properties of undefined (reading 'toMarkdown')".
+    mockResponse("<h1>Raw HTML</h1><p>Body</p>", "text/html; charset=utf-8");
+
+    const env: WebFetchEnv = {
+      ai: undefined as unknown as Ai,
+      gateway: null,
+    };
+
+    const result = await webFetch(env, { url: "https://example.com/page" });
+    expect(result.body).toBe("<h1>Raw HTML</h1><p>Body</p>");
+  });
+
   it("passes plain text through unconverted", async () => {
     mockResponse("just some text", "text/plain");
 
