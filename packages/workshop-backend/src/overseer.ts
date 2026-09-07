@@ -4587,9 +4587,21 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
         if (!cls) return;
         // Provision as an unnamed record: it reaches the agent through each chat's env (named at
         // seed time from the gatekeeper's suggested binding name), not as any gadget's binding.
-        await this.addGatekeeper(
+        let capsule = await this.addGatekeeper(
             cls,
             {type: "ambient", vendorId: account.vendorId, accountId: account.accountId});
+        // Auto-enable approval rules for the capsule's auto-approvable action kinds, matching the
+        // single-approval model used for GitHub repo connections. Read-only singletons (Context,
+        // Scheduler) return [] from getAutoApprovableActions() and are unaffected.
+        try {
+          let ownerProfile = await ownerDo.whoami();
+          await this.autoEnableDefaultApprovalRules(await capsule.getId(), ownerProfile, []);
+        } catch (err) {
+          this.logger.warn("failed to auto-enable ambient capsule approval rules", {
+            event: "ambient.capsule.auto.approval.enable.failed",
+            vendorId: account.vendorId, accountId: account.accountId, error: err,
+          });
+        }
       } catch (err) {
         this.logger.error("failed to provision ambient capsule", {
           event: "ambient.capsule.provision.failed",
@@ -8086,11 +8098,18 @@ class OverseerClientInterface extends RpcTarget implements Overseer {
   }
 
   async listPreApprovableActions(): Promise<PreApprovableAction[]> {
-    // Surface actions from every gatekeeper bound by some gadget (the connections the UI shows).
+    // Surface actions from every gatekeeper bound by some gadget (the connections the UI shows),
+    // plus ambient capsules (singleton gatekeepers like the Context Library and Jules Flow that are
+    // folded into chats rather than bound to a specific gadget).
     let boundIds = new Set<WorkpieceId>();
     for (let gadget of this.impl.storage.gadgets.list()) {
       for (let edge of Object.values(gadget.bindings)) {
         boundIds.add(edge.target);
+      }
+    }
+    for (let gk of this.impl.storage.gatekeepers.list()) {
+      if (gk.creationSpec?.type === "ambient") {
+        boundIds.add(gk.id);
       }
     }
 

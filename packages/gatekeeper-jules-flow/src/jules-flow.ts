@@ -48,8 +48,8 @@ const FLOW_ICON: AvatarImage = {
 
 // --- Action model + storage ---
 
-const FLOW_UPDATE_ACTION: ActionKind = { tag: "flow.update", label: "Update a Jules Flow workflow" };
-const FLOW_CANCEL_ACTION: ActionKind = { tag: "flow.cancel", label: "Cancel a Jules Flow workflow" };
+const FLOW_UPDATE_ACTION: ActionKind = { tag: "flow.update", label: "Update a Jules Flow workflow", branchScoped: false };
+const FLOW_CANCEL_ACTION: ActionKind = { tag: "flow.cancel", label: "Cancel a Jules Flow workflow", branchScoped: false };
 
 type SubmitWriteBody =
   | { type: "start"; workflowId: string; input: StartFlowInput }
