@@ -16,6 +16,7 @@ type Store = {
   subscription: RpcStub<{}> | null
   generation: number
   notifyScheduled: boolean
+  unsubscribeBroken?: (() => void) | undefined
 }
 
 const stores = new WeakMap<RpcStub<Overseer>, Store>()
@@ -76,6 +77,21 @@ function openSubscription(overseer: RpcStub<Overseer>, store: Store) {
     }
   }
 
+  // If the RPC connection is interrupted, the server-side subscriber stub is
+  // disposed and the backend stops pushing updates. Re-open the subscription so
+  // consumers see action-card state changes after reconnect without a page refresh.
+  store.unsubscribeBroken = overseer.onRpcBroken?.((error) => {
+    if (store.generation !== generation) return
+    console.warn('Actions subscription RPC connection broken:', error)
+    closeSubscription(store)
+    // Only resubscribe while this store is still active. If the Overseer stub
+    // itself was replaced (e.g. on a full reconnect) the old store will have been
+    // removed from the WeakMap by release().
+    if (stores.get(overseer) === store && store.refCount > 0) {
+      openSubscription(overseer, store)
+    }
+  })
+
   ;(async () => {
     try {
       const sub = await overseer.subscribeToActions(
@@ -99,6 +115,8 @@ function openSubscription(overseer: RpcStub<Overseer>, store: Store) {
 
 function closeSubscription(store: Store) {
   store.generation++
+  store.unsubscribeBroken?.()
+  store.unsubscribeBroken = undefined
   store.subscription?.[Symbol.dispose]()
   store.subscription = null
   store.actionsById = new Map()
@@ -163,7 +181,7 @@ export function useActions(overseer: RpcStub<Overseer> | null): UseActionsResult
 
 /**
  * Per-entry callback variant. Fires once for every existing action on mount
- * (replay) and once per live update — no separate seeding needed.
+ * (replay) and once per live update â no separate seeding needed.
  */
 export function useActionEntries(
   overseer: RpcStub<Overseer> | null,
