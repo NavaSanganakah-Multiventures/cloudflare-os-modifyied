@@ -4492,6 +4492,10 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
     return this.env as Env;
   }
 
+  runInBackground(promise: Promise<unknown>): void {
+    this.ctx.waitUntil(promise);
+  }
+
   async getWalletBalance(): Promise<number> {
     return await this.#ownerUserStub().getWalletBalance();
   }
