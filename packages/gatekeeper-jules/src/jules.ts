@@ -583,12 +583,12 @@ function truncate(text: string, max: number): string {
   return text.length <= max ? text : text.slice(0, max - 1) + "\u2026";
 }
 
-const JULES_CREATE_SESSION_ACTION: ActionKind = { tag: "jules.createSession", label: "Create a Google Jules session" };
-const JULES_SEND_MESSAGE_ACTION: ActionKind = { tag: "jules.sendMessage", label: "Send a message to a Jules session" };
-const JULES_APPROVE_PLAN_ACTION: ActionKind = { tag: "jules.approvePlan", label: "Approve a Jules plan" };
-const JULES_ARCHIVE_SESSION_ACTION: ActionKind = { tag: "jules.archiveSession", label: "Archive a Jules session" };
-const JULES_UNARCHIVE_SESSION_ACTION: ActionKind = { tag: "jules.unarchiveSession", label: "Unarchive a Jules session" };
-const JULES_DELETE_SESSION_ACTION: ActionKind = { tag: "jules.deleteSession", label: "Delete a Jules session" };
+const JULES_CREATE_SESSION_ACTION: ActionKind = { tag: "jules.createSession", label: "Create a Google Jules session", branchScoped: false };
+const JULES_SEND_MESSAGE_ACTION: ActionKind = { tag: "jules.sendMessage", label: "Send a message to a Jules session", branchScoped: false };
+const JULES_APPROVE_PLAN_ACTION: ActionKind = { tag: "jules.approvePlan", label: "Approve a Jules plan", branchScoped: false };
+const JULES_ARCHIVE_SESSION_ACTION: ActionKind = { tag: "jules.archiveSession", label: "Archive a Jules session", branchScoped: false };
+const JULES_UNARCHIVE_SESSION_ACTION: ActionKind = { tag: "jules.unarchiveSession", label: "Unarchive a Jules session", branchScoped: false };
+const JULES_DELETE_SESSION_ACTION: ActionKind = { tag: "jules.deleteSession", label: "Delete a Jules session", branchScoped: false };
 
 function describeAction(action: JulesAction): ActionDescription {
   switch (action.type) {
