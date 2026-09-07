@@ -3567,9 +3567,8 @@ class OverseerImpl implements AgentHooks {
     });
 
     if (prepared.message !== undefined && userMeta.aiModel) {
-      let needsAgentTurnKeepAlive = responseTargetRegistration !== undefined;
       this.startAgent(chatId, userMeta.aiModel, userMeta.profile,
-                      clientUser.id.toString(), false, needsAgentTurnKeepAlive);
+                      clientUser.id.toString(), false);
     }
 
     if (userMeta.quickModel) {
@@ -3670,9 +3669,8 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
     });
 
     if (runsAgentTurn && userMeta.aiModel) {
-      let needsAgentTurnKeepAlive = responseTargetRegistration !== undefined;
       this.startAgent(chatId, userMeta.aiModel, userMeta.profile,
-                      clientUser.id.toString(), false, needsAgentTurnKeepAlive);
+                      clientUser.id.toString(), false);
     }
     this.recordGadgetAnalytics({
       event_name: "gadget_interaction",
@@ -3959,8 +3957,7 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
   // needed to re-resolve the model config on resume.
   startAgent(chatId: number, aiModel: UserAiModelRecord,
              initiator: AiChatAuthorInfo, initiatorUserId: string,
-             callbackInitiated: boolean = false,
-             keepAlive: boolean = false): void {
+             callbackInitiated: boolean = false): void {
     // Register before starting the turn so registration always precedes the turn's teardown
     // (`#unregisterRunningAgent`, in `#runAgentTurn`'s finally).
     this.#registerRunningAgent(chatId);
@@ -3974,7 +3971,11 @@ ALSO, if you have a GitHub repository bound in your env, please check for Pull R
 
     let liveChat = this.#getLiveChat(chatId);
     let turn = this.#runAgentTurn(chatId, aiModel, initiator, callbackInitiated, liveChat);
-    if (keepAlive) this.ctx.waitUntil(turn);
+    // Keep the DO alive until the turn finishes even if the initiating client disconnects
+    // (e.g. the user logs out or closes the browser). Without this, a normal chat turn is only
+    // tied to the client's RPC connection and could be abandoned until the 60s keep-alive alarm
+    // resumes it.
+    this.ctx.waitUntil(turn);
   }
 
   #runAgentTurn(chatId: number, aiModel: UserAiModelRecord,
