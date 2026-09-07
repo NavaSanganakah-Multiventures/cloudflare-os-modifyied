@@ -13,7 +13,7 @@ import { AaryaWorkersAiFallback } from "./aarya-fallback";
 
 const logger = createWorkshopLogger("workshop.aarya.ai");
 
-export const DEFAULT_AARYA_GEMINI_MODEL = "models/gemini-3.1-flash-live-preview";
+export const DEFAULT_AARYA_GEMINI_MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025";
 
 // The endpoint is documented as wss://generativelanguage.googleapis.com/ws/...; workerd's
 // fetch()-based WebSocket client requires the https:// URL for the same host and path (the runtime
