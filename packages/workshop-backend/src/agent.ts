@@ -296,6 +296,10 @@ export interface AgentHooks {
       estimatedCost?: number): void;
   emitChatStreamEvent(chatId: number, event: AiChatStreamEvent): void;
 
+  // Schedule fire-and-forget work that must keep the Durable Object alive until it settles,
+  // without delaying the agent turn that kicked it off.
+  runInBackground(promise: Promise<unknown>): void;
+
   // Fetch the model-facing snapshot persisted for an agent step's "message" record, if any (see
   // StoredAssistantMessage). Absent for messages persisted before snapshots existed; replay then
   // falls back to reconstructing the message from the client-visible record.
@@ -2306,18 +2310,22 @@ export async function runAgent(
         // An empty summary would discard the compacted history, so keep the history instead.
         if (!summary) throw new Error("Compaction produced an empty summary.");
 
-        // SEMANTIC COMPACTION: Save the compacted history summary to Vector Memory
-        try {
-          let env = hooks.getEnv();
-          // @ts-ignore
-          let embeddingResponse = await env.WORKERS_AI.run("@cf/baai/bge-base-en-v1.5", { text: [summary] });
-          let vector = embeddingResponse.data[0];
-          let id = crypto.randomUUID();
-          // @ts-ignore
-          await env.VECTOR_MEMORY.insert([{ id, values: vector, metadata: { text: "Chat Compaction Summary:\\n" + summary } }]);
-        } catch (memErr) {
-          logger.warn("failed to save compaction to vector memory", { event: "agent.compaction.vector_memory_failed", error: memErr });
-        }
+        // SEMANTIC COMPACTION: Save the compacted history summary to Vector Memory.
+        // Best-effort and off the turn's critical path: the summary is already complete, so
+        // don't make the next turn wait for the embedding + insert round-trips.
+        hooks.runInBackground((async () => {
+          try {
+            let env = hooks.getEnv();
+            // @ts-ignore
+            let embeddingResponse = await env.WORKERS_AI.run("@cf/baai/bge-base-en-v1.5", { text: [summary] });
+            let vector = embeddingResponse.data[0];
+            let id = crypto.randomUUID();
+            // @ts-ignore
+            await env.VECTOR_MEMORY.insert([{ id, values: vector, metadata: { text: "Chat Compaction Summary:\\n" + summary } }]);
+          } catch (memErr) {
+            logger.warn("failed to save compaction to vector memory", { event: "agent.compaction.vector_memory_failed", error: memErr });
+          }
+        })());
 
         return {
           checkpoint: {
