@@ -26,7 +26,10 @@ const TEXT_EXTENSIONS = new Set([
   ".yml", ".yaml", ".css", ".html", ".svg", ".py", ".sh",
 ]);
 
-const SKIP_DIRS = new Set([".git", "node_modules", "dist", ".wrangler", ".turbo", "coverage"]);
+// Build outputs (dist, dist-app, generated, .wrangler, .turbo, coverage) are
+// produced at build time and are gitignored; they are not source and can contain
+// bytes that would false-positive the scanner.
+const SKIP_DIRS = new Set([".git", "node_modules", "dist", "dist-app", "generated", ".wrangler", ".turbo", "coverage"]);
 const SKIP_FILES = new Set(["pnpm-lock.yaml"]);
 
 function* walk(dir) {
