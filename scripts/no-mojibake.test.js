@@ -8,12 +8,17 @@ import { fileURLToPath } from "node:url";
 const repoRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 
 // Mojibake markers are built from code points rather than written literally so that
-// this file never trips its own scanner.
+// this file never trips its own scanner. Comments describe byte sequences in ASCII
+// (U+00xx) for the same reason.
 const MARKERS = {
-  middleDot: String.fromCodePoint(0xc2, 0xb7),           // 'Â·' -> '·'
-  cp1252: String.fromCodePoint(0xe2, 0x20ac),            // 'â€' -> '—'/'“'/'”'/'…'
-  doubleRound: String.fromCodePoint(0xc3, 0xa2, 0xc2),   // 'Ã¢Â' (double-encoded)
-  deepRound: String.fromCodePoint(0xc3, 0xc2),           // 'ÃÂ' (deep-encoded)
+  // U+00C2 U+00B7  (mis-decoded middle dot)
+  middleDot: String.fromCodePoint(0xc2, 0xb7),
+  // U+00E2 U+20AC  (mis-decoded em dash / curly quotes / ellipsis)
+  cp1252: String.fromCodePoint(0xe2, 0x20ac),
+  // U+00C3 U+00A2 U+00C2  (double-encoded mojibake)
+  doubleRound: String.fromCodePoint(0xc3, 0xa2, 0xc2),
+  // U+00C3 U+00C2  (deep-encoded mojibake)
+  deepRound: String.fromCodePoint(0xc3, 0xc2),
 };
 
 const TEXT_EXTENSIONS = new Set([
@@ -54,10 +59,10 @@ function findMojibake(text) {
       problems.push("C1 U+" + cp.toString(16).padStart(4, "0"));
     }
   }
-  if (text.includes(MARKERS.middleDot)) problems.push("'Â·' (mojibake of '·')");
-  if (text.includes(MARKERS.cp1252)) problems.push("'â€' (mojibake of '—'/'“'/'”'/'…')");
-  if (text.includes(MARKERS.doubleRound)) problems.push("'Ã¢Â' (double-encoded mojibake)");
-  if (text.includes(MARKERS.deepRound)) problems.push("'ÃÂ' (deep-encoded mojibake)");
+  if (text.includes(MARKERS.middleDot)) problems.push("mojibake U+00C2 U+00B7 (middle dot)");
+  if (text.includes(MARKERS.cp1252)) problems.push("mojibake U+00E2 U+20AC (em dash / curly quotes / ellipsis)");
+  if (text.includes(MARKERS.doubleRound)) problems.push("mojibake U+00C3 U+00A2 U+00C2 (double-encoded)");
+  if (text.includes(MARKERS.deepRound)) problems.push("mojibake U+00C3 U+00C2 (deep-encoded)");
   return [...new Set(problems)];
 }
 
