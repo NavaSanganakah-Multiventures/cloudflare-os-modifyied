@@ -174,8 +174,8 @@ function CreatedGadgetChatCard({
               )}
               <span>
                 {gadget.isPending
-                    ? `New ${formatOf(gadget.output).noun.toLowerCase()} Â· Click to preview`
-                    : `${formatOf(gadget.output).noun} Â· Click to open`}
+                    ? `New ${formatOf(gadget.output).noun.toLowerCase()} · Click to preview`
+                    : `${formatOf(gadget.output).noun} · Click to open`}
               </span>
             </span>
           </span>
@@ -641,7 +641,7 @@ function getToolCallSummary(
       return {
         verb: "Connected",
         target: tc.input.entrypoint
-          ? `${tc.input.bindingName} â ${tc.input.entrypoint}`
+          ? `${tc.input.bindingName} → ${tc.input.entrypoint}`
           : tc.input.bindingName,
       };
     case "setGadgetBinding":
@@ -668,7 +668,7 @@ function getToolCallSummary(
         verb: "Ran code",
         target: firstLine
           ? firstLine.length > 60
-            ? `${firstLine.slice(0, 57)}â¦`
+            ? `${firstLine.slice(0, 57)}…`
             : firstLine
           : undefined,
       };
@@ -983,7 +983,7 @@ function buildToolCallGroups(
   const firstObservation = observations[0];
 
   return [{
-    // Use the first work item id so expansion survives streaming â committed.
+    // Use the first work item id so expansion survives streaming → committed.
     key: firstToolCall
       ? `group-${firstToolCall.toolCallId}`
       : `group-observation-${firstObservation.chatId}-${firstObservation.sequence}`,
@@ -1060,7 +1060,7 @@ function SlashCommandMention(
             {/* Provider, then whatever identifies the command within it: for a skill that is
                 its collection and path. Same line the picker shows. */}
             <span className="mt-0.5 block truncate text-kumo-subtle">
-              {[choice.providerLabel, choice.resourceLabel].filter(Boolean).join(" Â· ")}
+              {[choice.providerLabel, choice.resourceLabel].filter(Boolean).join(" · ")}
             </span>
           </span>
         }
@@ -1345,9 +1345,9 @@ const AttachmentPreviewModal = memo(function AttachmentPreviewModal(
                 </div>
                 <div className="text-[14px] font-medium text-kumo-default">{title}</div>
                 <div className="text-[12px] leading-5 text-kumo-subtle">
-                  {attachment.mimeType || "Unknown file type"}{sizeLabel ? ` Â· ${sizeLabel}` : ""}
+                  {attachment.mimeType || "Unknown file type"}{sizeLabel ? ` · ${sizeLabel}` : ""}
                 </div>
-                <div className="text-[12px] leading-5 text-kumo-inactive">This file canât be previewed here.</div>
+                <div className="text-[12px] leading-5 text-kumo-inactive">This file can’t be previewed here.</div>
                 {onDownload && (
                   <button
                     type="button"
@@ -1400,7 +1400,7 @@ const ChatAttachmentThumbnail = memo(function ChatAttachmentThumbnail(
             onError={() => setImageState("error")}
           />
           {imageState !== "loaded" && (
-            <div className="absolute inset-0 grid place-items-center bg-kumo-elevated text-[11px] text-kumo-inactive">Loading imageâ¦</div>
+            <div className="absolute inset-0 grid place-items-center bg-kumo-elevated text-[11px] text-kumo-inactive">Loading image…</div>
           )}
         </>
       ) : (
@@ -1690,7 +1690,7 @@ const ToolGroupRow = memo(function ToolGroupRow({
           </span>
           {group.detailLines.length > 1 && (
             <span className="mt-1 block truncate font-mono text-[12px] leading-4 text-kumo-inactive">
-              {group.detailLines.join(" Â· ")}
+              {group.detailLines.join(" · ")}
             </span>
           )}
         </span>
@@ -1824,7 +1824,7 @@ export const ChatInput = ({
   /** Optional label for the attach menu item. */
   attachLabel?: string;
   draftUpdateBanner?: ReactNode;
-  /** When set, the composer is disabled and shows this message â the user must resolve something
+  /** When set, the composer is disabled and shows this message — the user must resolve something
    * (e.g. accept/deny a pending connection request) before they can type or send. */
   blockedReason?: string;
   /** Identity of the chat the composer is bound to; a change clears chat-scoped hints. */
@@ -2768,11 +2768,11 @@ export const ChatInput = ({
       // Portions after oldEnd shifted by editShift.
       // We want to remove the parts of the capsule that survived the user's edit.
       if (remEnd <= diffStart) {
-        // Capsule is entirely before the edit â shouldn't be broken, skip.
+        // Capsule is entirely before the edit — shouldn't be broken, skip.
         continue;
       }
       if (remStart >= oldEnd) {
-        // Capsule is entirely after the edit â shifted in newValue.
+        // Capsule is entirely after the edit — shifted in newValue.
         remStart += editShift;
         remEnd += editShift;
       } else {
@@ -3004,7 +3004,7 @@ export const ChatInput = ({
           if (files.length > 0) void addFiles(files);
         }}
       />
-      {/* Captured-log floating chip â sits above the composer like a transient pill */}
+      {/* Captured-log floating chip — sits above the composer like a transient pill */}
       {pendingConsoleLogCount > 0 && (
         <div className="pointer-events-none absolute inset-x-4 -top-10 z-10 flex justify-center">
           <div
@@ -3070,8 +3070,8 @@ export const ChatInput = ({
           <div className="px-4 pt-2 text-xs text-kumo-warning">
             {/* Composers without a chatKey (new-chat, home page) have no thread to check. */}
             {chatKey != null
-              ? "Connection hiccup â your message may not have been sent. Check the thread, then try again; if it keeps failing, reload the page."
-              : "Connection hiccup â your message may not have been sent. Try again; if it keeps failing, reload the page."}
+              ? "Connection hiccup — your message may not have been sent. Check the thread, then try again; if it keeps failing, reload the page."
+              : "Connection hiccup — your message may not have been sent. Try again; if it keeps failing, reload the page."}
           </div>
         )}
         {/* Textarea */}
@@ -3152,10 +3152,10 @@ export const ChatInput = ({
                 isBlocked
                   ? blockedReason
                   : isAgentActive
-                    ? "Waiting for agentâ¦"
+                    ? "Waiting for agent…"
                     : newChat
-                      ? "Start a new conversationâ¦"
-                      : "Ask a follow-upâ¦"
+                      ? "Start a new conversation…"
+                      : "Ask a follow-up…"
               }
               autoFocus={autoFocus}
               rows={minRows}
@@ -3568,7 +3568,7 @@ function appendWorkParts(target: WorkMessageParts, source: WorkMessageParts) {
 // reverting also deletes the created gadgets.
 function describeCreatedGadgetDeletion(titles: string[] | undefined): string {
   if (!titles || titles.length === 0) return "";
-  const names = titles.map((t) => `â${t}â`).join(", ");
+  const names = titles.map((t) => `“${t}”`).join(", ");
   return ` (deletes ${titles.length === 1 ? "gadget" : "gadgets"} ${names})`;
 }
 
@@ -3615,7 +3615,7 @@ function DiscardPendingChangesPopover({
             disabled={disabled}
             className="inline-flex h-[30px] cursor-pointer items-center justify-center rounded-md border border-kumo-fill bg-kumo-base px-2.5 text-[12px] font-medium leading-[18px] tracking-[-0.25px] text-kumo-default transition-colors enabled:hover:bg-kumo-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-ring disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Discardâ¦
+            Discard…
           </button>
         }
       />
@@ -4389,7 +4389,7 @@ function ChatInterface({
   // mouse events and the parent window never receives mouseup. The drag would
   // then "stick" to the cursor even after release. Pointer capture routes all
   // pointermove/pointerup events to the handle until release, regardless of
-  // what's under the cursor â including iframes.
+  // what's under the cursor — including iframes.
   const handleSidebarPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       e.preventDefault();
@@ -5147,7 +5147,7 @@ function ChatInterface({
           provisional.compacting = false;
           if (event.nothingToCompact) {
             toastsRef.current.add({
-              title: "Nothing to compact â there are no earlier messages to summarize.",
+              title: "Nothing to compact — there are no earlier messages to summarize.",
             });
           }
           break;
@@ -6498,10 +6498,10 @@ function ChatInterface({
     );
   };
 
-  // âââ sidebar list content (reused in both modes) ââââââââââââââââââââââââââ
+  // ─── sidebar list content (reused in both modes) ──────────────────────────
   const chatListPanel = (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* Chat list header â title doubles as the scope switcher */}
+      {/* Chat list header — title doubles as the scope switcher */}
       <div className="flex h-12 flex-shrink-0 items-center border-b border-kumo-line px-4">
         <DropdownMenu>
           <DropdownMenu.Trigger
@@ -6640,8 +6640,8 @@ function ChatInterface({
                       <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px] leading-4 text-kumo-inactive">
                         {chat.spawnerName && (
                           <>
-                            <span className="truncate">Agent Â· {chat.spawnerName}</span>
-                            <span className="flex-shrink-0" aria-hidden="true">Â·</span>
+                            <span className="truncate">Agent · {chat.spawnerName}</span>
+                            <span className="flex-shrink-0" aria-hidden="true">·</span>
                           </>
                         )}
                         <span className="flex-shrink-0">
@@ -6649,7 +6649,7 @@ function ChatInterface({
                         </span>
                         {chat.totalCost != null && (
                           <>
-                            <span className="flex-shrink-0" aria-hidden="true">Â·</span>
+                            <span className="flex-shrink-0" aria-hidden="true">·</span>
                             <span className="flex-shrink-0 font-mono">
                               ${chat.totalCost.toFixed(4)}
                             </span>
@@ -6705,7 +6705,7 @@ function ChatInterface({
         )}
       </div>
 
-      {/* New chat input â pinned to bottom. ChatInput supplies its own
+      {/* New chat input — pinned to bottom. ChatInput supplies its own
           horizontal padding, so the wrapper just adds the top divider; no
           extra p-4 (which would shrink the input vs. the in-chat composer). */}
       <div className="flex-shrink-0 border-t border-kumo-line">
@@ -6732,12 +6732,12 @@ function ChatInterface({
     </div>
   );
 
-  // âââ main render âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+  // ─── main render ─────────────────────────────────────────────────────────────
   return (
     <div
       className={`flex h-full bg-kumo-base ${sidebarMode ? "flex-row" : "flex-col"}`}
     >
-      {/* ââ Sidebar mode: conversations list on the left âââââââââââââââââââââ */}
+      {/* ── Sidebar mode: conversations list on the left ───────────────────── */}
       {sidebarMode && (
         <>
           <div
@@ -6759,12 +6759,12 @@ function ChatInterface({
         </>
       )}
 
-      {/* ââ Non-sidebar mode: show list OR chat ââââââââââââââââââââââââââââââ */}
+      {/* ── Non-sidebar mode: show list OR chat ────────────────────────────── */}
       {!sidebarMode && selectedChatId === null ? (
         chatListPanel
       ) : selectedChatId !== null ? (
         <div className="flex-1 flex flex-col overflow-auto">
-          {/* Tab bar â in sidebar mode, show Chat / Connections tabs */}
+          {/* Tab bar — in sidebar mode, show Chat / Connections tabs */}
           {sidebarMode && (
             <div className="flex h-12 flex-shrink-0 items-center gap-5 border-b border-kumo-line px-4">
               <button
@@ -6799,10 +6799,10 @@ function ChatInterface({
               <div className="flex-1 overflow-auto">{renderExtraTab()}</div>
             )}
 
-          {/* Chat content â hidden when connections tab is active in sidebar mode */}
+          {/* Chat content — hidden when connections tab is active in sidebar mode */}
           {(!sidebarMode || sidebarActiveTab === "chat") && (
             <>
-              {/* Chat sub-header â hidden in sidebar mode (list is always visible) */}
+              {/* Chat sub-header — hidden in sidebar mode (list is always visible) */}
               {!sidebarMode && (
                 <div className="flex h-12 flex-shrink-0 items-center justify-between gap-2 border-b border-kumo-line px-4">
                   <WorkshopIconButton
@@ -6887,7 +6887,7 @@ function ChatInterface({
                   >
                     {isLoadingEarlier && (
                       <div className="mx-auto mb-6 text-[12px] leading-4 font-medium text-kumo-inactive">
-                        Loading earlier messagesâ¦
+                        Loading earlier messages…
                       </div>
                     )}
 
@@ -7009,7 +7009,7 @@ function ChatInterface({
                         const createdGadgets = entry.message.createdGadgets ?? [];
                         const label = createdGadgets.length > 0
                           ? `${actor} created ${createdGadgets.length === 1 ? "gadget" : "gadgets"} ${
-                              createdGadgets.map((g) => `â${g.title}â`).join(", ")}`
+                              createdGadgets.map((g) => `“${g.title}”`).join(", ")}`
                           : `${actor} saved edits`;
                         const discardLabel = getSavedEditsDiscardLabel(
                           entry.message.sequence === lastDurablePendingChange?.sequence,
@@ -7105,7 +7105,7 @@ function ChatInterface({
 
                       return (
                         <div key={entry.key} className={entryTopClass}>
-                        {/* ââ user / AI text message ââ */}
+                        {/* ── user / AI text message ── */}
                         {msg.type === "slashCommand" && (
                           <div className="group/message relative flex flex-col items-end">
                             <div className="themed-user-bubble-shadow w-fit max-w-[min(680px,78%)] rounded-[24px] rounded-br-lg border border-transparent bg-kumo-bubble-user px-4 py-2.5 text-[14px] leading-[22px] tracking-[-0.25px] text-kumo-default">
@@ -7568,7 +7568,7 @@ function ChatInterface({
                         <div className={`group/agent min-w-0 w-full max-w-[860px] space-y-2 ${provisionalTopClass}`}>
                           {isCompacting && (
                             <div className={`inline-flex px-1.5 py-1 text-[14px] leading-5 tracking-[-0.25px] ${styles.thinkingShimmer}`}>
-                              Compactingâ¦
+                              Compacting…
                             </div>
                           )}
 
@@ -7632,7 +7632,7 @@ function ChatInterface({
                                       </span>
                                       {detailLines.length > 1 && (
                                         <span className="mt-1 block truncate font-mono text-[12px] leading-4 text-kumo-inactive">
-                                          {detailLines.join(" Â· ")}
+                                          {detailLines.join(" · ")}
                                         </span>
                                       )}
                                     </span>
@@ -7675,7 +7675,7 @@ function ChatInterface({
                 )}
               </div>
 
-              {/* ââ Bottom: input, update state, and cost ââââââââââââââââ */}
+              {/* ── Bottom: input, update state, and cost ──────────────── */}
               <div className={`flex-shrink-0 bg-kumo-base ${sidebarMode ? "" : "border-t border-kumo-line"}`}>
                 <div className={useConstrainedChatWidth ? "mx-auto w-full max-w-[920px]" : ""}>
                   <ChatInput
