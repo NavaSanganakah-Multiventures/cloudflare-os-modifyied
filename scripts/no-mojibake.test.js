@@ -77,12 +77,11 @@ describe("no mojibake in repository source files", () => {
         offenders.push(relative(repoRoot, fullPath) + ": " + problems.join(", "));
       }
     }
+    const NL = String.fromCharCode(10);
     assert.deepEqual(
       offenders,
       [],
-      "Found mojibake in the following files:
-" + offenders.map((o) => "  - " + o).join("
-"),
+      "Found mojibake in the following files:" + NL + offenders.map((o) => "  - " + o).join(NL),
     );
   });
 });
