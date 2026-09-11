@@ -352,7 +352,7 @@ export function selectRepoSearchMatches(
   return entries
     .map((entry) => ({ ...entry, score: scoreRepoSearchMatch(entry, queryTokens) }))
     .filter((entry) => entry.score > 0)
-    .sort((a, b) =>
+    .toSorted((a, b) =>
       b.score - a.score ||
       a.path.length - b.path.length ||
       (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
