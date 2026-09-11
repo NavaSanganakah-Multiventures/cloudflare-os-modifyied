@@ -7062,14 +7062,15 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
    * calls (run / iterate / approve / disapprove) as callbacks into the spawned chat thread.
    */
   async spawnAaryaAgent(title: string, prompt: string, modelId: string): Promise<any> {
-    if (!this.impl.ownerId) throw new Error("Workspace has been deleted.");
+    const ownerId = this.impl.ownerId;
+    if (!ownerId) throw new Error("Workspace has been deleted.");
     if (!modelId) throw new Error("A model id is required to spawn an AARYA agent.");
     const config: AgentSpawnerConfig = {
       displayName: "AARYA",
       modelId,
       env: this.impl.defaultBindingList(),
     };
-    return await this.spawnAgent(title, prompt, config, this.impl.ownerId, true);
+    return await this.spawnAgent(title, prompt, config, ownerId, true);
   }
 
   [restore](params: OverseerRestoreParams): any {
