@@ -7055,6 +7055,24 @@ export class OverseerDurableObject extends DurableObject<Cloudflare.Env> {
     }
   }
 
+  /**
+   * Spawn a callable background agent for AARYA in this workspace. The creating user is the
+   * workspace owner (already a User Durable Object id string), and the model is chosen by the
+   * caller so AARYA can use the owner's preferred model. The returned stub delivers later method
+   * calls (run / iterate / approve / disapprove) as callbacks into the spawned chat thread.
+   */
+  async spawnAaryaAgent(title: string, prompt: string, modelId: string): Promise<any> {
+    const ownerId = this.impl.ownerId;
+    if (!ownerId) throw new Error("Workspace has been deleted.");
+    if (!modelId) throw new Error("A model id is required to spawn an AARYA agent.");
+    const config: AgentSpawnerConfig = {
+      displayName: "AARYA",
+      modelId,
+      env: this.impl.defaultBindingList(),
+    };
+    return await this.spawnAgent(title, prompt, config, ownerId, true);
+  }
+
   [restore](params: OverseerRestoreParams): any {
     return this.impl.restore(params);
   }

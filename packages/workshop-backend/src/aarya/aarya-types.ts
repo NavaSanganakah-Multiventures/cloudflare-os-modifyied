@@ -31,7 +31,8 @@ export type AaryaClientMessage =
   | { type: "reject" }
   | { type: "hangup" }
   | { type: "ai-command"; action: "start" | "stop" }
-  | { type: "tool-confirmation-response"; requestId: string; approved: boolean };
+  | { type: "tool-confirmation-response"; requestId: string; approved: boolean }
+  | { type: "agent-task-response"; taskId: string; decision: "approve" | "disapprove" | "iterate"; feedback?: string };
 
 /** JSON messages the server sends to the client. */
 export type AaryaServerMessage =
@@ -47,4 +48,6 @@ export type AaryaServerMessage =
   | { type: "ai-status"; state: AaryaAiState; backend?: AaryaAiBackend; detail?: string }
   | { type: "transcript"; role: "user" | "assistant"; text: string; final: boolean }
   | { type: "error"; code: string; message: string }
-  | { type: "tool-confirmation-request"; requestId: string; tool: string; summary: string };
+  | { type: "tool-confirmation-request"; requestId: string; tool: string; summary: string }
+  | { type: "agent-task-ready"; taskId: string; title: string; summary: string }
+  | { type: "agent-task-status"; taskId: string; status: "approved" | "disapproved" | "failed"; message?: string };

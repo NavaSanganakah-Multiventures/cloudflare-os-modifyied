@@ -16,10 +16,10 @@ export interface AaryaReminder {
   createdAt: number;
 }
 
-/** A pending notification surfaced to Aarya (today only swept reminders). */
+/** A pending notification surfaced to Aarya (reminders and completed background-agent tasks). */
 export interface AaryaNotification {
   id: string;
-  kind: "reminder";
+  kind: "reminder" | "agent-task";
   title: string;
   detail: string;
   /** Epoch milliseconds when the notification was swept into the inbox. */
@@ -92,7 +92,7 @@ export function buildNotificationsHint(notifications: AaryaNotification[]): stri
   if (notifications.length === 0) return "";
   const lines = notifications.map((n) => `- ${n.title}: ${n.detail}`);
   return (
-    "The user has these pending reminders (mention them naturally in your first reply):\n" +
+    "The user has these pending notifications (mention them naturally in your first reply):\n" +
     lines.join("\n")
   );
 }
