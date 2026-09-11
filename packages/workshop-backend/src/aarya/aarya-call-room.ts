@@ -790,12 +790,13 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     if (!task) return;
 
     try {
-      task.summary = normalizeAgentTaskSummary(await task.agent.run({}));
+      const summary = normalizeAgentTaskSummary(await task.agent.run({}));
+      task.summary = summary;
       task.status = "ready";
       if (this.ownerConnected()) {
-        this.sendToOwner({ type: "agent-task-ready", taskId, title: task.title, summary: task.summary });
+        this.sendToOwner({ type: "agent-task-ready", taskId, title: task.title, summary });
       } else {
-        await this.persistAgentTaskNotification(task.title, task.summary);
+        await this.persistAgentTaskNotification(task.title, summary);
         this.pendingAgentTasks.delete(taskId);
       }
     } catch (error) {
@@ -843,12 +844,13 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
           message: feedback || undefined,
         });
       } else {
-        task.summary = normalizeAgentTaskSummary(await task.agent.iterate(feedback));
+        const summary = normalizeAgentTaskSummary(await task.agent.iterate(feedback));
+        task.summary = summary;
         this.sendToOwner({
           type: "agent-task-ready",
           taskId: message.taskId,
           title: task.title,
-          summary: task.summary,
+          summary,
         });
       }
     } catch (error) {
