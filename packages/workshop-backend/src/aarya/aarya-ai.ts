@@ -152,7 +152,7 @@ export interface ParsedGeminiMessage {
   errorDetail?: string;
 }
 
-/** Parse a Gemini Live server message (string or pre-parsed object). Defensive: never throws. */
+/** Parse a Gemini Live server message (text frame, binary frame, or pre-parsed object). Defensive: never throws. */
 export function parseGeminiServerMessage(message: unknown): ParsedGeminiMessage {
   const parsed: ParsedGeminiMessage = {
     setupComplete: false,
@@ -163,9 +163,10 @@ export function parseGeminiServerMessage(message: unknown): ParsedGeminiMessage 
   };
 
   let msg: unknown = message;
-  if (typeof message === "string") {
+  const text = decodeServerMessageText(message);
+  if (text !== null) {
     try {
-      msg = JSON.parse(message);
+      msg = JSON.parse(text);
     } catch {
       return parsed;
     }
@@ -287,8 +288,19 @@ function errorMessage(error: unknown): string {
 }
 
 /** Log-friendly, bounded rendering of a raw Gemini server message. */
+function decodeServerMessageText(data: unknown): string | null {
+  if (typeof data === "string") return data;
+  if (data instanceof ArrayBuffer) {
+    return new TextDecoder("utf-8").decode(data);
+  }
+  if (ArrayBuffer.isView(data)) {
+    return new TextDecoder("utf-8").decode(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+  }
+  return null;
+}
+
 function describeServerMessage(data: unknown): string {
-  const text = typeof data === "string" ? data : String(data);
+  const text = decodeServerMessageText(data) ?? String(data);
   return text.length > 1000 ? text.slice(0, 1000) + "..." : text;
 }
 

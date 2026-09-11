@@ -144,6 +144,27 @@ describe("gemini wire helpers", () => {
     });
   });
 
+  it("parses binary WebSocket frames (ArrayBuffer) carrying JSON", () => {
+    const setupCompleteBinary = new TextEncoder().encode(
+      JSON.stringify({ setupComplete: {} }),
+    ).buffer;
+    expect(parseGeminiServerMessage(setupCompleteBinary).setupComplete).toBe(true);
+
+    const contentBinary = new TextEncoder().encode(
+      JSON.stringify({
+        serverContent: {
+          modelTurn: {
+            parts: [{ inlineData: { data: pcm16ToBase64(Uint8Array.from([9, 10])) } }],
+          },
+        },
+      }),
+    ).buffer;
+    const parsed = parseGeminiServerMessage(contentBinary);
+    expect(parsed.setupComplete).toBe(false);
+    expect(parsed.audio.length).toBe(1);
+    expect(Array.from(new Uint8Array(parsed.audio[0]))).toEqual([9, 10]);
+  });
+
   it("wraps tool results into a toolResponse message", () => {
     const response = buildGeminiToolResponse([
       { id: "call-1", name: "get_current_time", response: { ok: true, result: { time: "t" } } },
