@@ -68,7 +68,7 @@ interface PendingAgentTask {
  * participant. The Gemini Live / Workers AI bridge joins as a server-side participant behind this
  * same relay: human audio is forwarded to the AI, and AI audio is broadcast back to every human.
  */
-// NOTE: The class name `AryaCallRoom` (single "A") is FROZEN â it is referenced by
+// NOTE: The class name `AryaCallRoom` (single "A") is FROZEN — it is referenced by
 // worker-configuration.d.ts (`durableNamespaces`) and scripts/testdata/golden-manifest.json.
 // Do NOT rename this class to `AaryaCallRoom`.
 export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
@@ -593,7 +593,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
           score: fuzzyEmailMatchScore(summary.subject, summary.snippet, query),
         }))
         .filter((entry) => entry.score > 0)
-        .sort((a, b) => b.score - a.score || a.summary.subject.localeCompare(b.summary.subject))
+        .toSorted((a, b) => b.score - a.score || a.summary.subject.localeCompare(b.summary.subject))
         .slice(0, 10)
         .map((entry) => entry.summary);
     }
