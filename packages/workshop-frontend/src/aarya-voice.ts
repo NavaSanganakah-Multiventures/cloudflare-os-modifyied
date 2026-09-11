@@ -149,9 +149,9 @@ export function createPcm16Player(audioContext: AudioContext): Pcm16Player {
     nextStartTime = when + buffer.duration;
 
     active.add(source);
-    source.onended = () => {
+    source.addEventListener('ended', () => {
       active.delete(source);
-    };
+    });
   }
 
   function flush(): void {
