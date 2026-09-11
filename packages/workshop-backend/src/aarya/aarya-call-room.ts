@@ -34,7 +34,7 @@ import type {
 } from "./aarya-jules";
 import type { Gatekeeper } from "@gadgets/workshop-shared/gatekeeper";
 import type { AaryaAiSession } from "./aarya-ai";
-import type { AaryaToolCall, AaryaToolDefinition, AaryaToolResult, AaryaWorkspaceSummary } from "./aarya-tools";
+import type { AaryaAgentTaskQueued, AaryaToolCall, AaryaToolDefinition, AaryaToolResult, AaryaWorkspaceSummary, RunWorkspaceAgentInput } from "./aarya-tools";
 import type { AaryaAiState, AaryaClientMessage, AaryaParticipantInfo, AaryaServerMessage } from "./aarya-types";
 import { buildNotificationsHint } from "./aarya-reminders";
 import type { AaryaNotification } from "./aarya-reminders";
@@ -47,6 +47,14 @@ interface Participant {
   ws: WebSocket;
   userId: string;
   name: string;
+}
+
+/** A background workspace-agent task spawned from this voice call. */
+interface PendingAgentTask {
+  agent: any;
+  title: string;
+  summary: string | null;
+  status: "running" | "ready";
 }
 
 /**
@@ -74,6 +82,9 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   private gmailSession: AaryaGmailSession | null = null;
   private readonly gmailThreads = new Map<string, AaryaGmailThread>();
   private readonly githubSessions = new Map<string, AaryaGithubRepoSession>();
+  // In-memory only: a spawned agent task lives while the room is alive (open WebSockets keep it from
+  // hibernating). Tasks that finish while the owner is offline are persisted as notifications.
+  private readonly pendingAgentTasks = new Map<string, PendingAgentTask>();
   private julesSession: AaryaJulesSession | null = null;
   private julesFlowSession: AaryaJulesFlowSession | null = null;
   private readonly tools = new AaryaToolRegistry({
@@ -128,6 +139,9 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       listWorkflows: () => this.listJulesFlowWorkflows(),
       getWorkflow: (id: string) => this.getJulesFlowWorkflow(id),
       cancelFlow: (id: string) => this.cancelJulesFlow(id),
+    },
+    agent: {
+      runWorkspaceAgent: (input: RunWorkspaceAgentInput) => this.runWorkspaceAgent(input),
     },
   });
 
@@ -289,6 +303,9 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
         }
         return;
       }
+      case "agent-task-response":
+        await this.handleAgentTaskResponse(message);
+        return;
     }
   }
 
@@ -731,6 +748,142 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   }
 
   // ---------------------------------------------------------------------------
+  // Background workspace-agent tasks. run_workspace_agent returns immediately; the room rings
+  // the owner when the agent finishes, then routes approve / disapprove / iterate back to it.
+
+  /** Spawn a background agent in the owner's most recent workspace and start waiting for it. */
+  private async runWorkspaceAgent(input: RunWorkspaceAgentInput): Promise<AaryaAgentTaskQueued> {
+    const user = this.ownerUser();
+    if (!user) throw new Error("No owner is connected for this voice call.");
+
+    const targetWorkspaceId = input.workspaceId ?? (await this.mostRecentWorkspaceId(user));
+    if (!targetWorkspaceId) {
+      throw new Error("No workspace is available for this account. Create a workspace first.");
+    }
+
+    const modelId = await user.getPreferredModel();
+    if (!modelId) throw new Error("No preferred AI model is configured for your account.");
+
+    const overseers = this.ctx.exports.OverseerDurableObject;
+    if (!overseers) throw new Error("Workspace agents are unavailable in this deployment.");
+    const overseer = overseers.get(overseers.idFromString(targetWorkspaceId));
+
+    const agent = await overseer.spawnAaryaAgent(input.title, buildAgentTaskPrompt(input.prompt), modelId);
+    const taskId = crypto.randomUUID();
+    this.pendingAgentTasks.set(taskId, { agent, title: input.title, summary: null, status: "running" });
+
+    this.ctx.waitUntil(this.awaitAgentTaskCompletion(taskId));
+    return { taskId, title: input.title, status: "queued" };
+  }
+
+  private async mostRecentWorkspaceId(user: DurableObjectStub<UserDurableObject>): Promise<string | null> {
+    const workspaces = await user.listWorkspaces();
+    if (workspaces.length === 0) return null;
+    const sorted = workspaces.toSorted(
+      (a, b) => new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime(),
+    );
+    return sorted[0].id;
+  }
+
+  private async awaitAgentTaskCompletion(taskId: string): Promise<void> {
+    const task = this.pendingAgentTasks.get(taskId);
+    if (!task) return;
+
+    try {
+      task.summary = normalizeAgentTaskSummary(await task.agent.run({}));
+      task.status = "ready";
+      if (this.ownerConnected()) {
+        this.sendToOwner({ type: "agent-task-ready", taskId, title: task.title, summary: task.summary });
+      } else {
+        await this.persistAgentTaskNotification(task.title, task.summary);
+        this.pendingAgentTasks.delete(taskId);
+      }
+    } catch (error) {
+      this.pendingAgentTasks.delete(taskId);
+      if (this.ownerConnected()) {
+        this.sendToOwner({
+          type: "agent-task-status",
+          taskId,
+          status: "failed",
+          message: errorMessage(error),
+        });
+      } else {
+        await this.persistAgentTaskNotification(task.title, errorMessage(error));
+      }
+    }
+  }
+
+  private async handleAgentTaskResponse(
+    message: Extract<AaryaClientMessage, { type: "agent-task-response" }>,
+  ): Promise<void> {
+    const task = this.pendingAgentTasks.get(message.taskId);
+    if (!task || task.status !== "ready") {
+      this.sendToOwner({
+        type: "agent-task-status",
+        taskId: message.taskId,
+        status: "failed",
+        message: "That background task is no longer active.",
+      });
+      return;
+    }
+
+    const feedback = typeof message.feedback === "string" ? message.feedback.trim() : "";
+    try {
+      if (message.decision === "approve") {
+        await task.agent.approve(task.summary ?? "");
+        this.pendingAgentTasks.delete(message.taskId);
+        this.sendToOwner({ type: "agent-task-status", taskId: message.taskId, status: "approved" });
+      } else if (message.decision === "disapprove") {
+        await task.agent.disapprove(feedback);
+        this.pendingAgentTasks.delete(message.taskId);
+        this.sendToOwner({
+          type: "agent-task-status",
+          taskId: message.taskId,
+          status: "disapproved",
+          message: feedback || undefined,
+        });
+      } else {
+        task.summary = normalizeAgentTaskSummary(await task.agent.iterate(feedback));
+        this.sendToOwner({
+          type: "agent-task-ready",
+          taskId: message.taskId,
+          title: task.title,
+          summary: task.summary,
+        });
+      }
+    } catch (error) {
+      this.sendToOwner({
+        type: "agent-task-status",
+        taskId: message.taskId,
+        status: "failed",
+        message: errorMessage(error),
+      });
+    }
+  }
+
+  private ownerConnected(): boolean {
+    const ownerId = this.ownerId;
+    if (!ownerId) return false;
+    for (const participant of this.participants.values()) {
+      if (participant.userId === ownerId) return true;
+    }
+    return false;
+  }
+
+  private async persistAgentTaskNotification(title: string, detail: string): Promise<void> {
+    const user = this.ownerUser();
+    if (!user) return;
+    try {
+      await user.addAgentTaskNotification(title, detail);
+    } catch (error) {
+      logger.warn("failed to persist AARYA agent-task notification", {
+        event: "aarya.room.agent.notification.persist.failed",
+        error,
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Google Jules + Jules Flow. Lazy sessions + tool operations. Jules is a normal URL-addressed
   // connected account; Jules Flow is an auto-provisioned singleton with no URL-addressed resources.
 
@@ -904,6 +1057,31 @@ const CONFIRMATION_TIMEOUT_MS = 30000;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function buildAgentTaskPrompt(prompt: string): string {
+  return (
+    prompt +
+    "\n\n---\n\nWhen you finish this task, resolve the pending callback (`run()`) with a concise " +
+    "Markdown summary of what you did and the resulting plan or deliverable. If a later callback named " +
+    "`approve`, `disapprove`, or `iterate` arrives: for `iterate`, revise your work according to the " +
+    "feedback in the callback arguments and resolve with an updated summary; for `approve` or " +
+    "`disapprove`, acknowledge in a sentence or two and resolve."
+  );
+}
+
+function normalizeAgentTaskSummary(value: unknown): string {
+  if (typeof value === "string") return value.trim() || "Task completed.";
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (typeof record.summary === "string" && record.summary.trim()) return record.summary.trim();
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "Task completed.";
+    }
+  }
+  return "Task completed.";
 }
 
 function describeToolCall(call: AaryaToolCall): string {
