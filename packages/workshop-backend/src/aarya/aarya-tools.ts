@@ -18,6 +18,7 @@ import type { AaryaEmailSummary } from "./aarya-email";
 import type {
   AaryaGithubPrReadResult,
   AaryaGithubPrSummary,
+  AaryaRepoContentHit,
   AaryaRepoDirectoryResult,
   AaryaRepoFileResult,
   AaryaRepoSearchHit,
@@ -123,6 +124,7 @@ export interface AaryaGithubRuntime {
   listRepoFiles(repo: string, path: string, ref?: string): Promise<AaryaRepoDirectoryResult>;
   readRepoFile(repo: string, path: string, ref?: string): Promise<AaryaRepoFileResult>;
   searchRepoFiles(repo: string, query: string, path?: string, ref?: string): Promise<AaryaRepoSearchHit[]>;
+  searchRepoCode(repo: string, query: string, path?: string, ref?: string): Promise<AaryaRepoContentHit[]>;
 }
 
 /** Google Jules capabilities exposed to tools. Confirmation for writes is provided by the Jules
@@ -293,7 +295,7 @@ const DEFAULT_AARYA_TOOLS: AaryaToolDefinition[] = [
   {
     name: "list_emails",
     description:
-      "List the most recent emails from the user's connected Gmail inbox, or search them with a Gmail query. Returns thread ids, subjects, and snippets. Use reply_email to reply to a thread by its id.",
+      "List the most recent emails from the user's connected Gmail inbox, or search them. For a spoken topic, turn it into a forgiving Gmail query: join the important words with OR (e.g. \"invoice OR payment\") so related emails are found. Returns thread ids, subjects, and snippets. Use reply_email to reply to a thread by its id.",
     parameters: {
       type: "object",
       properties: {
@@ -435,7 +437,7 @@ const DEFAULT_AARYA_TOOLS: AaryaToolDefinition[] = [
   {
     name: "search_repo_files",
     description:
-      "Search a GitHub repository for files and folders whose names relate to a query. The search is forgiving: it matches partial names, camelCase pieces, and multiple words, so you do not need the exact full name or path. Returns matching paths and types. Use read_repo_file afterwards to open one.",
+      "Search a GitHub repository for files and folders whose names relate to a query. The search is forgiving: it matches partial names, camelCase pieces, near-matches (typos), and multiple words, so you do not need the exact full name or path. Returns matching paths and types. Use search_repo_code to search inside file contents, and read_repo_file afterwards to open one.",
     parameters: {
       type: "object",
       properties: {
@@ -454,6 +456,30 @@ const DEFAULT_AARYA_TOOLS: AaryaToolDefinition[] = [
       const path = normalizeRepoPathArg(args);
       const ref = normalizeRepoRefArg(args);
       return { matches: await github.searchRepoFiles(repo, query, path, ref) };
+    },
+  },
+  {
+    name: "search_repo_code",
+    description:
+      "Search inside the files of a GitHub repository for lines related to a query (code or text). The search is forgiving and matches related terms, not only exact strings, so use it to find where a feature or concept is implemented. Returns file paths, line numbers, and matching line snippets.",
+    parameters: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: 'Repository as "owner/repo".' },
+        query: { type: "string", description: 'Topic or code to search for (e.g. "voice capture" or "reminder").' },
+        path: { type: "string", description: 'Optional directory to limit the search to ("" or "/" for the whole repo).' },
+        ref: { type: "string", description: "Optional branch, tag, or commit SHA. Defaults to the default branch." },
+      },
+      required: ["repo", "query"],
+    },
+    execute: async (args, runtime) => {
+      const github = runtime.github;
+      if (!github) throw new Error("GitHub is not configured for this call.");
+      const repo = normalizeGithubRepoArg(args);
+      const query = normalizeRepoSearchQueryArg(args);
+      const path = normalizeRepoPathArg(args);
+      const ref = normalizeRepoRefArg(args);
+      return { matches: await github.searchRepoCode(repo, query, path, ref) };
     },
   },
   {
