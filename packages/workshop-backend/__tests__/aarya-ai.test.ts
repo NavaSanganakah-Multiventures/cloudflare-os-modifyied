@@ -25,7 +25,7 @@ function loudSamples(count: number): Int16Array {
 }
 
 describe("gemini wire helpers", () => {
-  it("builds a setup message with generationConfig.responseModalities and systemInstruction", () => {
+  it("builds a setup message with top-level responseModalities and systemInstruction", () => {
     const setup = buildGeminiSetup(
       { model: "models/test-live", systemPrompt: "You are a test assistant." },
       [
@@ -39,21 +39,27 @@ describe("gemini wire helpers", () => {
     const body = setup["setup"] as Record<string, unknown>;
     expect(body["model"]).toBe("models/test-live");
 
-    const generationConfig = body["generationConfig"] as Record<string, unknown>;
-    expect(generationConfig["responseModalities"]).toEqual(["AUDIO"]);
+    expect(body["responseModalities"]).toEqual(["AUDIO"]);
+    expect(body["generationConfig"]).toBeUndefined();
 
     expect(body["systemInstruction"]).toEqual({
       parts: [{ text: "You are a test assistant." }],
     });
 
-    expect(body["inputAudioTranscription"]).toEqual({});
-    expect(body["outputAudioTranscription"]).toEqual({});
+    expect(body["inputAudioTranscription"]).toBeUndefined();
+    expect(body["outputAudioTranscription"]).toBeUndefined();
 
     expect(Array.isArray(body["tools"])).toBe(true);
     const tools = body["tools"] as Array<Record<string, unknown>>;
     expect(tools[0]["functionDeclarations"]).toEqual([
       { name: "get_current_time", description: "Time", parameters: { type: "object" } },
     ]);
+  });
+
+  it("normalizes model names to always include the models/ prefix", () => {
+    const setup = buildGeminiSetup({ model: "gemini-3.1-flash-live-preview" });
+    const body = setup["setup"] as Record<string, unknown>;
+    expect(body["model"]).toBe("models/gemini-3.1-flash-live-preview");
   });
 
   it("defaults the model and persona when not provided", () => {
@@ -312,6 +318,19 @@ describe("aarya ai session factory", () => {
   it("creates workers-ai fallback directly when no gemini key is provided", () => {
     const session = createAaryaAiSession(
       {} as Cloudflare.Env,
+      {
+        onAudio: () => {},
+        onTranscript: () => {},
+        onStatus: () => {},
+        onToolCalls: async () => [],
+      },
+    );
+    expect(session.backend).toBe("workers-ai");
+  });
+
+  it("creates workers-ai fallback when the env key is only whitespace", () => {
+    const session = createAaryaAiSession(
+      { AARYA_GEMINI_API_KEY: "   " } as Cloudflare.Env,
       {
         onAudio: () => {},
         onTranscript: () => {},
