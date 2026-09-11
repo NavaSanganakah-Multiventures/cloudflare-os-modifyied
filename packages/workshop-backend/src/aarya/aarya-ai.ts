@@ -22,7 +22,7 @@ const GEMINI_LIVE_ENDPOINT =
   "https://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 
 const GEMINI_HANDSHAKE_TIMEOUT_MS = 15000;
-const GEMINI_SETUP_COMPLETE_TIMEOUT_MS = 30000;
+const GEMINI_SETUP_COMPLETE_TIMEOUT_MS = 12000;
 
 // Gemini Live outputs assistant audio as PCM16 at 24kHz; the voice panel plays PCM16 at 16kHz.
 const GEMINI_LIVE_OUTPUT_SAMPLE_RATE = 24000;
@@ -329,6 +329,8 @@ export class AaryaLiveBridge implements AaryaAiSession {
   private intentionallyStopped = false;
   private setupCompleteReceived = false;
   private setupCompleteTimer: ReturnType<typeof setTimeout> | null = null;
+  private setupResolve: (() => void) | null = null;
+  private setupReject: ((reason: string) => void) | null = null;
 
   constructor(
     private readonly env: Cloudflare.Env,
@@ -348,16 +350,59 @@ export class AaryaLiveBridge implements AaryaAiSession {
     this.setupCompleteReceived = false;
     this.emitStatus("connecting");
 
+    const configuredModel = normalizeGeminiModel(this.env.AARYA_GEMINI_MODEL);
+    const alternateModel =
+      configuredModel === DEFAULT_AARYA_GEMINI_MODEL
+        ? "models/gemini-2.5-flash-native-audio-preview-12-2025"
+        : DEFAULT_AARYA_GEMINI_MODEL;
+
+    const attempts: Array<{ label: string; model: string; includeTools: boolean }> = [
+      { label: configuredModel + " (with tools)", model: configuredModel, includeTools: true },
+      { label: configuredModel + " (no tools)", model: configuredModel, includeTools: false },
+      { label: alternateModel + " (no tools)", model: alternateModel, includeTools: false },
+    ];
+
+    const failures: string[] = [];
+    for (const attempt of attempts) {
+      if (this.intentionallyStopped) return;
+      const failure = await this.connectOnce(key, attempt.model, attempt.includeTools);
+      if (failure === null) {
+        return;
+      }
+      failures.push(attempt.label + ": " + failure);
+      logger.warn("gemini live setup attempt failed", {
+        event: "aarya.ai.gemini.setup.attempt.failed",
+        attempt: attempt.label,
+        error: failure,
+      });
+      this.emitStatus("connecting");
+    }
+
+    const detail = "Gemini Live did not confirm setup after trying: " + failures.join(" | ");
+    this.emitStatus("error", detail);
+    throw new Error(detail);
+  }
+
+  /** Open a socket, send one setup message, and wait for setupComplete. Returns null on success. */
+  private async connectOnce(key: string, model: string, includeTools: boolean): Promise<string | null> {
+    this.setupCompleteReceived = false;
+    this.clearSetupCompleteTimer();
+
     let ws: WebSocket;
     try {
       ws = await connectGeminiLiveSocket(GEMINI_LIVE_ENDPOINT + "?key=" + encodeURIComponent(key));
     } catch (error) {
-      this.emitStatus("error", errorMessage(error));
-      throw error;
+      return errorMessage(error);
     }
     this.ws = ws;
 
+    const setupWait = new Promise<void>((resolve, reject) => {
+      this.setupResolve = resolve;
+      this.setupReject = reject;
+    });
+
     ws.addEventListener("message", (event) => {
+      if (this.ws !== ws) return;
       logger.debug("gemini live server message: " + describeServerMessage(event.data), {
         event: "aarya.ai.gemini.message.raw",
       });
@@ -372,23 +417,27 @@ export class AaryaLiveBridge implements AaryaAiSession {
       if (this.ws !== ws) return;
       this.ws = null;
       this.clearSetupCompleteTimer();
-      if (!this.intentionallyStopped) {
-        this.emitStatus(
-          "error",
-          "Gemini Live connection closed (code " + event.code + ", reason: " + (event.reason || "none") + ")",
-        );
+      if (this.intentionallyStopped) return;
+      const detail =
+        "Gemini Live connection closed (code " + event.code + ", reason: " + (event.reason || "none") + ")";
+      if (!this.setupCompleteReceived) {
+        this.settleSetupFail(detail);
+      } else {
+        this.emitStatus("error", detail);
       }
     });
     ws.addEventListener("error", (event) => {
+      if (this.ws !== ws) return;
+      this.ws = null;
       this.clearSetupCompleteTimer();
-      if (this.ws === ws) this.ws = null;
-      if (!this.intentionallyStopped) {
-        this.emitStatus(
-          "error",
-          event.message
-            ? "Gemini Live connection error: " + event.message
-            : "Gemini Live connection error",
-        );
+      if (this.intentionallyStopped) return;
+      const detail = event.message
+        ? "Gemini Live connection error: " + event.message
+        : "Gemini Live connection error";
+      if (!this.setupCompleteReceived) {
+        this.settleSetupFail(detail);
+      } else {
+        this.emitStatus("error", detail);
       }
     });
 
@@ -397,45 +446,31 @@ export class AaryaLiveBridge implements AaryaAiSession {
       ws.accept();
     } catch (error) {
       this.ws = null;
-      this.clearSetupCompleteTimer();
-      this.emitStatus("error", errorMessage(error));
-      throw error;
+      return errorMessage(error);
     }
 
     try {
       const setupMessage = buildGeminiSetup(
         {
-          model: this.env.AARYA_GEMINI_MODEL,
+          model,
           systemPrompt: this.systemPrompt ?? this.env.AARYA_GEMINI_SYSTEM_PROMPT,
         },
-        this.tools,
+        includeTools ? this.tools : [],
       );
-      const modelForLog = normalizeGeminiModel(this.env.AARYA_GEMINI_MODEL);
-      const systemPromptForLog = this.systemPrompt ?? this.env.AARYA_GEMINI_SYSTEM_PROMPT ?? "";
-      logger.debug(
-        "gemini live setup: model=" + modelForLog + ", tools=" + this.tools.length +
-          ", systemPromptChars=" + systemPromptForLog.length,
-        { event: "aarya.ai.gemini.setup" },
-      );
+      logger.debug("gemini live setup: model=" + model + ", tools=" + (includeTools ? this.tools.length : 0), {
+        event: "aarya.ai.gemini.setup",
+      });
       ws.send(JSON.stringify(setupMessage));
     } catch (error) {
       this.ws = null;
       this.clearSetupCompleteTimer();
-      this.emitStatus("error", errorMessage(error));
-      throw error;
+      return errorMessage(error);
     }
 
     this.setupCompleteTimer = setTimeout(() => {
       if (this.intentionallyStopped || this.setupCompleteReceived) return;
-      this.ws = null;
-      this.clearSetupCompleteTimer();
-      logger.warn("gemini live setupComplete timeout, readyState=" + ws.readyState, {
-        event: "aarya.ai.gemini.setup.timeout",
-      });
-      this.emitStatus(
-        "error",
-        "Gemini Live did not confirm setup (setupComplete timeout). " +
-          "The connection and API key were accepted, so check the configured model name.",
+      this.settleSetupFail(
+        "Gemini Live did not confirm setup (setupComplete timeout). The connection and API key were accepted, so check the configured model name and tools.",
       );
       try {
         ws.close(4000, "setupComplete timeout");
@@ -443,11 +478,37 @@ export class AaryaLiveBridge implements AaryaAiSession {
         // Already closed.
       }
     }, GEMINI_SETUP_COMPLETE_TIMEOUT_MS);
+
+    try {
+      await setupWait;
+      return null;
+    } catch (error) {
+      return errorMessage(error);
+    }
   }
 
+  private settleSetupOk(): void {
+    if (this.setupCompleteReceived) return;
+    this.setupCompleteReceived = true;
+    this.clearSetupCompleteTimer();
+    const resolve = this.setupResolve;
+    this.setupResolve = null;
+    this.setupReject = null;
+    resolve?.();
+    this.emitStatus("listening");
+  }
+
+  private settleSetupFail(reason: string): void {
+    this.clearSetupCompleteTimer();
+    const reject = this.setupReject;
+    this.setupResolve = null;
+    this.setupReject = null;
+    reject?.(reason);
+  }
   async stop(): Promise<void> {
     this.intentionallyStopped = true;
     this.clearSetupCompleteTimer();
+    this.settleSetupFail("stopped");
     const ws = this.ws;
     this.ws = null;
     if (ws) {
@@ -476,19 +537,26 @@ export class AaryaLiveBridge implements AaryaAiSession {
   private async handleServerMessage(data: unknown): Promise<void> {
     const parsed = parseGeminiServerMessage(data);
     if (parsed.errorDetail) {
-      this.clearSetupCompleteTimer();
-      this.emitStatus("error", parsed.errorDetail);
+      if (!this.setupCompleteReceived) {
+        this.settleSetupFail(parsed.errorDetail);
+      } else {
+        this.clearSetupCompleteTimer();
+        this.emitStatus("error", parsed.errorDetail);
+      }
       return;
     }
     if (parsed.goAwayDetail) {
-      this.clearSetupCompleteTimer();
-      this.emitStatus("error", "Gemini Live is closing the session (time left: " + parsed.goAwayDetail + ")");
+      const detail = "Gemini Live is closing the session (time left: " + parsed.goAwayDetail + ")";
+      if (!this.setupCompleteReceived) {
+        this.settleSetupFail(detail);
+      } else {
+        this.clearSetupCompleteTimer();
+        this.emitStatus("error", detail);
+      }
       return;
     }
     if (parsed.setupComplete) {
-      this.setupCompleteReceived = true;
-      this.clearSetupCompleteTimer();
-      this.emitStatus("listening");
+      this.settleSetupOk();
     }
     for (const audio of parsed.audio) {
       this.callbacks.onAudio(resamplePcm16(audio, GEMINI_LIVE_OUTPUT_SAMPLE_RATE, AARYA_PLAYBACK_SAMPLE_RATE));
