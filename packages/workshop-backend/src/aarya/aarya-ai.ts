@@ -290,12 +290,19 @@ function describeServerMessage(data: unknown): string {
 }
 
 /** Open a client WebSocket to Gemini using workerd's fetch-based upgrade pattern. */
-async function connectGeminiLiveSocket(url: string): Promise<WebSocket> {
+async function connectGeminiLiveSocket(url: string, apiKey: string): Promise<WebSocket> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), GEMINI_HANDSHAKE_TIMEOUT_MS);
   try {
+    // The official Google GenAI SDK authenticates the Live API WebSocket with the
+    // x-goog-api-key header (not the ?key= query parameter). Using ?key= only
+    // completes the handshake and the server then silently never sends setupComplete.
     const response = await fetch(url, {
-      headers: { Upgrade: "websocket" },
+      headers: {
+        Upgrade: "websocket",
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
       signal: controller.signal,
     });
     const ws = response.webSocket;
@@ -389,7 +396,7 @@ export class AaryaLiveBridge implements AaryaAiSession {
 
     let ws: WebSocket;
     try {
-      ws = await connectGeminiLiveSocket(GEMINI_LIVE_ENDPOINT + "?key=" + encodeURIComponent(key));
+      ws = await connectGeminiLiveSocket(GEMINI_LIVE_ENDPOINT, key);
     } catch (error) {
       return errorMessage(error);
     }
