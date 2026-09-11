@@ -59,6 +59,41 @@ export interface AaryaWorkspaceSummary {
   title: string;
 }
 
+/** A queued background-agent task returned by the `run_workspace_agent` tool. */
+export interface AaryaAgentTaskQueued {
+  taskId: string;
+  title: string;
+  status: "queued";
+}
+
+/** Input for spawning a background workspace agent. */
+export interface RunWorkspaceAgentInput {
+  title: string;
+  prompt: string;
+  workspaceId?: string;
+}
+
+/** Capabilities for handing work to the user's workspace AI agent. */
+export interface AaryaAgentRuntime {
+  runWorkspaceAgent(input: RunWorkspaceAgentInput): Promise<AaryaAgentTaskQueued>;
+}
+
+/**
+ * Parse and validate the `run_workspace_agent` tool args. Throws on empty titles or prompts so
+ * the model receives a corrective error instead of queueing a useless background task.
+ */
+export function normalizeRunWorkspaceAgentArgs(args: Record<string, unknown>): RunWorkspaceAgentInput {
+  const title = typeof args.title === "string" ? args.title.trim() : "";
+  if (!title) throw new Error("A non-empty task title is required.");
+  const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+  if (!prompt) throw new Error("A non-empty task prompt is required.");
+  const workspaceId =
+    typeof args.workspaceId === "string" && args.workspaceId.trim()
+      ? args.workspaceId.trim()
+      : undefined;
+  return { title, prompt, workspaceId };
+}
+
 /** Mutating capabilities exposed to gated tools. Each call is user-confirmed before execution. */
 export interface AaryaMutations {
   /** Update the room owner's display name. */
@@ -126,6 +161,8 @@ export interface AaryaToolRuntime {
   jules?: AaryaJulesRuntime;
   /** Jules Flow tracker capabilities, or absent when the connector isn't provisioned. */
   julesFlow?: AaryaJulesFlowRuntime;
+  /** Background workspace-agent capabilities, or absent when unavailable for the call. */
+  agent?: AaryaAgentRuntime;
 }
 
 /** A tool the Aarya assistant can execute. */
@@ -437,6 +474,26 @@ const DEFAULT_AARYA_TOOLS: AaryaToolDefinition[] = [
       const title = typeof args.title === "string" ? args.title.trim() : "";
       if (!title) throw new Error("A non-empty workspace title is required.");
       return { workspace: await runtime.mutations.createWorkspace(title) };
+    },
+  },
+  {
+    name: "run_workspace_agent",
+    description:
+      "Hand a task to the user's workspace AI agent and return immediately with a task id. The agent works in the background (for example, analyzing a GitHub repository and drafting an implementation plan) and the user is notified in the call when its summary is ready, with options to approve, reject, or request changes. Use this for longer-running work instead of reading many files yourself.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Short title for the background task." },
+        prompt: { type: "string", description: "The complete task for the workspace agent, including repo names, paths, and the requested deliverable." },
+        workspaceId: { type: "string", description: "Optional workspace to run in. Defaults to the user's most recently active workspace." },
+      },
+      required: ["title", "prompt"],
+    },
+    execute: async (args, runtime) => {
+      const agent = runtime.agent;
+      if (!agent) throw new Error("Workspace agents are not available for this call.");
+      const input = normalizeRunWorkspaceAgentArgs(args);
+      return await agent.runWorkspaceAgent(input);
     },
   },
   {
