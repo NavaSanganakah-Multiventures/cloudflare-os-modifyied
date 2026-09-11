@@ -7,6 +7,7 @@ import {
   buildGeminiToolResponse,
   createAaryaAiSession,
   DEFAULT_AARYA_GEMINI_MODEL,
+  DEFAULT_AARYA_VOICE,
   parseGeminiServerMessage,
   pcm16ToBase64,
   resamplePcm16,
@@ -55,6 +56,26 @@ describe("gemini wire helpers", () => {
     expect(tools[0]["functionDeclarations"]).toEqual([
       { name: "get_current_time", description: "Time", parameters: { type: "object" } },
     ]);
+  });
+
+  it("defaults Aarya's voice to the Aoede female prebuilt voice", () => {
+    expect(DEFAULT_AARYA_VOICE).toBe("Aoede");
+  });
+
+  it("adds a female prebuilt voice to speechConfig when a voice name is provided", () => {
+    const setup = buildGeminiSetup({ model: "models/test-live", voiceName: "Aoede" });
+    const body = setup["setup"] as Record<string, unknown>;
+    const generationConfig = body["generationConfig"] as Record<string, unknown>;
+    expect(generationConfig["speechConfig"]).toEqual({
+      voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } },
+    });
+  });
+
+  it("omits speechConfig when no voice name is provided", () => {
+    const setup = buildGeminiSetup({ model: "models/test-live" });
+    const body = setup["setup"] as Record<string, unknown>;
+    const generationConfig = body["generationConfig"] as Record<string, unknown>;
+    expect(generationConfig["speechConfig"]).toBeUndefined();
   });
 
   it("normalizes model names to always include the models/ prefix", () => {
