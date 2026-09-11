@@ -9,6 +9,7 @@
 import { createWorkshopLogger } from "../observability";
 import type { AaryaAiCallbacks, AaryaAiSession } from "./aarya-ai";
 import type { AaryaAiBackend, AaryaAiState } from "./aarya-types";
+import { transliterateDevanagariToLatin } from "./aarya-transliterate";
 
 const logger = createWorkshopLogger("workshop.aarya.fallback");
 
@@ -16,7 +17,11 @@ const FALLBACK_SAMPLE_RATE = 16000;
 const DEFAULT_AARYA_FALLBACK_LLM = "@cf/meta/llama-3.1-8b-instruct-fast";
 const FALLBACK_PERSONA =
   "You are AARYA, a friendly voice assistant for the user's workspace. " +
-  "Answer concisely and conversationally, in the same language the user speaks.";
+  "The user speaks Hinglish (a Hindi/English mix) and their message may arrive in Roman (Latin) letters. " +
+  "Always answer in Hindi written in Devanagari script, unless the user asks otherwise. " +
+  "Keep replies short and conversational. If you did not hear or understand the user clearly, ask them to repeat.";
+
+const MAX_HISTORY_MESSAGES = 8;
 
 /**
  * Minimum utterance length (in PCM16 samples at 16kHz) that we will send to whisper STT.
@@ -108,6 +113,29 @@ export function utteranceEnded(samples: Int16Array, options: AaryaVadOptions = {
   return detectUtteranceEnd(samples, options).ended;
 }
 
+/** Estimate the ambient noise floor as the mean RMS of the quietest third of frames. */
+export function estimateNoiseFloor(samples: Int16Array, options: AaryaVadOptions = {}): number {
+  const sampleRate = options.sampleRate ?? FALLBACK_SAMPLE_RATE;
+  const frameMs = options.frameMs ?? 20;
+  const frameSamples = Math.max(1, Math.floor((sampleRate * frameMs) / 1000));
+  const rmsValues: number[] = [];
+  for (let start = 0; start < samples.length; start += frameSamples) {
+    const end = Math.min(samples.length, start + frameSamples);
+    let sumSquares = 0;
+    for (let i = start; i < end; i++) {
+      const normalized = samples[i] / 32768;
+      sumSquares += normalized * normalized;
+    }
+    rmsValues.push(Math.sqrt(sumSquares / (end - start)));
+  }
+  if (rmsValues.length === 0) return 0;
+  rmsValues.sort((a, b) => a - b);
+  const quietCount = Math.max(1, Math.floor(rmsValues.length / 3));
+  let sum = 0;
+  for (let i = 0; i < quietCount; i++) sum += rmsValues[i];
+  return sum / quietCount;
+}
+
 /** True when an utterance is long enough to be worth sending to the STT model. */
 export function shouldTranscribe(samples: Int16Array): boolean {
   return samples.length >= MIN_TRANSCRIBE_SAMPLES;
@@ -164,6 +192,7 @@ export class AaryaWorkersAiFallback implements AaryaAiSession {
   private buffer: Int16Array<ArrayBufferLike> = new Int16Array(0);
   private processing = false;
   private stopped = false;
+  private history: Array<{ role: "user" | "assistant"; content: string }> = [];
 
   constructor(
     private readonly env: Cloudflare.Env,
@@ -195,7 +224,9 @@ export class AaryaWorkersAiFallback implements AaryaAiSession {
       this.buffer = this.buffer.slice(this.buffer.length - maxBufferSamples);
     }
 
-    const vad = detectUtteranceEnd(this.buffer);
+    const noiseFloor = estimateNoiseFloor(this.buffer);
+    const threshold = Math.max(0.008, Math.min(0.05, noiseFloor * 3));
+    const vad = detectUtteranceEnd(this.buffer, { threshold });
     if (!vad.hasSpeech || !vad.ended || this.processing) return;
 
     const utterance = this.buffer.slice(0, vad.speechEndSample);
@@ -228,12 +259,17 @@ export class AaryaWorkersAiFallback implements AaryaAiSession {
   private async processUtterance(samples: Int16Array): Promise<void> {
     this.emitStatus("listening");
 
-    const userText = await this.transcribe(samples);
+    const userText = transliterateDevanagariToLatin(await this.transcribe(samples));
     if (!userText) return;
     this.callbacks.onTranscript({ role: "user", text: userText, final: true });
 
-    const reply = await this.complete(userText);
+    this.history.push({ role: "user", content: userText });
+    const reply = await this.complete();
     if (!reply) return;
+    this.history.push({ role: "assistant", content: reply });
+    if (this.history.length > MAX_HISTORY_MESSAGES) {
+      this.history.splice(0, this.history.length - MAX_HISTORY_MESSAGES);
+    }
     this.callbacks.onTranscript({ role: "assistant", text: reply, final: true });
 
     const audio = await this.synthesize(reply);
@@ -249,9 +285,11 @@ export class AaryaWorkersAiFallback implements AaryaAiSession {
 
     let result: Record<string, unknown> | null = null;
     try {
+      // We already trim utterances with our own VAD, so whisper's internal VAD must
+      // not drop short or quiet speech segments that our VAD kept.
       result = (await this.env.WORKERS_AI.run(sttModel as any, {
         audio: audioData,
-        vad_filter: true,
+        vad_filter: false,
       })) as unknown as Record<string, unknown>;
     } catch (err) {
       // Whisper's Triton backend throws this when VAD finds no speech segments (e.g. a
@@ -281,13 +319,13 @@ export class AaryaWorkersAiFallback implements AaryaAiSession {
     return typeof text === "string" ? text.trim() : "";
   }
 
-  private async complete(userText: string): Promise<string> {
+  private async complete(): Promise<string> {
     const model = this.env.AARYA_WORKERS_AI_LLM ?? DEFAULT_AARYA_FALLBACK_LLM;
     const persona = this.systemPrompt ?? this.env.AARYA_GEMINI_SYSTEM_PROMPT ?? FALLBACK_PERSONA;
     const result = await this.env.WORKERS_AI.run(model, {
       messages: [
         { role: "system", content: persona },
-        { role: "user", content: userText },
+        ...this.history,
       ],
       stream: false,
     });
