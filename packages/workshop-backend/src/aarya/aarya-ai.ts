@@ -13,7 +13,7 @@ import { AaryaWorkersAiFallback } from "./aarya-fallback";
 
 const logger = createWorkshopLogger("workshop.aarya.ai");
 
-export const DEFAULT_AARYA_GEMINI_MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025";
+export const DEFAULT_AARYA_GEMINI_MODEL = "models/gemini-3.1-flash-live-preview";
 
 // The endpoint is documented as wss://generativelanguage.googleapis.com/ws/...; workerd's
 // fetch()-based WebSocket client requires the https:// URL for the same host and path (the runtime
@@ -98,18 +98,25 @@ export function resamplePcm16(input: ArrayBuffer, fromRate: number, toRate: numb
   return out.buffer;
 }
 
+/** Normalize a Gemini model name: trim and ensure the models/ prefix (a common config mistake). */
+export function normalizeGeminiModel(model?: string): string {
+  const trimmed = model?.trim();
+  if (!trimmed) return DEFAULT_AARYA_GEMINI_MODEL;
+  return trimmed.startsWith("models/") ? trimmed : "models/" + trimmed;
+}
+
 /** Build the Gemini Live setup message (sent as the first WebSocket frame). */
 export function buildGeminiSetup(options: GeminiSetupOptions, tools: GeminiTool[] = []): Record<string, unknown> {
+  // Matches the official Gemini Live WebSocket tutorial: responseModalities lives at the top
+  // level of the setup object (not inside generationConfig), and audio transcription config is
+  // omitted for native-audio models. The older shape made Google silently ignore the setup, so
+  // setupComplete never arrived and the bridge timed out into the Workers AI fallback.
   const setup: Record<string, unknown> = {
-    model: options.model?.trim() || DEFAULT_AARYA_GEMINI_MODEL,
-    generationConfig: {
-      responseModalities: ["AUDIO"],
-    },
+    model: normalizeGeminiModel(options.model),
+    responseModalities: ["AUDIO"],
     systemInstruction: {
       parts: [{ text: options.systemPrompt ?? DEFAULT_AARYA_PERSONA }],
     },
-    inputAudioTranscription: {},
-    outputAudioTranscription: {},
   };
   if (tools.length > 0) {
     setup["tools"] = tools;
@@ -263,7 +270,7 @@ export function createAaryaAiSession(
   geminiKey?: string,
   systemPrompt?: string,
 ): AaryaAiSession {
-  const key = geminiKey ?? env.AARYA_GEMINI_API_KEY;
+  const key = (geminiKey ?? env.AARYA_GEMINI_API_KEY)?.trim();
   if (key) {
     return new AaryaResilientAiSession(env, callbacks, tools, key, systemPrompt);
   }
@@ -331,7 +338,7 @@ export class AaryaLiveBridge implements AaryaAiSession {
 
   async start(): Promise<void> {
     if (this.ws) return;
-    const key = this.geminiKey;
+    const key = this.geminiKey.trim();
     if (!key) {
       throw new Error("AARYA_GEMINI_API_KEY is not configured");
     }
@@ -371,6 +378,8 @@ export class AaryaLiveBridge implements AaryaAiSession {
       }
     });
     ws.addEventListener("error", (event) => {
+      this.clearSetupCompleteTimer();
+      if (this.ws === ws) this.ws = null;
       if (!this.intentionallyStopped) {
         this.emitStatus(
           "error",
@@ -399,7 +408,7 @@ export class AaryaLiveBridge implements AaryaAiSession {
         },
         this.tools,
       );
-      const modelForLog = (this.env.AARYA_GEMINI_MODEL ?? "").trim() || DEFAULT_AARYA_GEMINI_MODEL;
+      const modelForLog = normalizeGeminiModel(this.env.AARYA_GEMINI_MODEL);
       const systemPromptForLog = this.systemPrompt ?? this.env.AARYA_GEMINI_SYSTEM_PROMPT ?? "";
       logger.debug(
         "gemini live setup: model=" + modelForLog + ", tools=" + this.tools.length +
@@ -421,7 +430,11 @@ export class AaryaLiveBridge implements AaryaAiSession {
       logger.warn("gemini live setupComplete timeout, readyState=" + ws.readyState, {
         event: "aarya.ai.gemini.setup.timeout",
       });
-      this.emitStatus("error", "Gemini Live did not confirm setup (setupComplete timeout)");
+      this.emitStatus(
+        "error",
+        "Gemini Live did not confirm setup (setupComplete timeout). " +
+          "The connection and API key were accepted, so check the configured model name.",
+      );
       try {
         ws.close(4000, "setupComplete timeout");
       } catch {
