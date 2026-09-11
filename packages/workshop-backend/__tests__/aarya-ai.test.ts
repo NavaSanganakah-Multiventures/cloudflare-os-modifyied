@@ -12,7 +12,8 @@ import {
   pcm16ToBase64,
   resamplePcm16,
 } from "../src/aarya/aarya-ai";
-import { detectUtteranceEnd, pcm16ToWavBytes, shouldTranscribe, utteranceEnded } from "../src/aarya/aarya-fallback";
+import { detectUtteranceEnd, estimateNoiseFloor, pcm16ToWavBytes, shouldTranscribe, utteranceEnded } from "../src/aarya/aarya-fallback";
+import { transliterateDevanagariToLatin } from "../src/aarya/aarya-transliterate";
 import {
   AaryaToolRegistry,
   executeAaryaTool,
@@ -313,6 +314,7 @@ describe("aarya tool registry", () => {
       "reply_email",
       "review_pr",
       "run_workspace_agent",
+      "search_repo_code",
       "search_repo_files",
       "send_email",
       "set_reminder",
@@ -345,6 +347,7 @@ describe("aarya tool registry", () => {
       "reply_email",
       "review_pr",
       "run_workspace_agent",
+      "search_repo_code",
       "search_repo_files",
       "send_email",
       "set_reminder",
@@ -413,3 +416,27 @@ describe("aarya ai session factory", () => {
   });
 });
 
+describe("estimateNoiseFloor", () => {
+  it("estimates a low noise floor for mostly-silent audio", () => {
+    const silence = new Int16Array(16000);
+    expect(estimateNoiseFloor(silence)).toBeLessThan(0.001);
+  });
+});
+
+describe("devanagari transliteration", () => {
+  it("converts Hindi words to Roman Hinglish", () => {
+    expect(transliterateDevanagariToLatin("नमस्ते")).toBe("namaste");
+    expect(transliterateDevanagariToLatin("मैं")).toBe("main");
+    expect(transliterateDevanagariToLatin("आर्य")).toBe("aarya");
+  });
+
+  it("leaves Latin and punctuation untouched", () => {
+    expect(transliterateDevanagariToLatin("hello आर्य")).toBe("hello aarya");
+    expect(transliterateDevanagariToLatin("ok bye")).toBe("ok bye");
+  });
+
+  it("converts Devanagari digits and nukta consonants", () => {
+    expect(transliterateDevanagariToLatin("१२३")).toBe("123");
+    expect(transliterateDevanagariToLatin("ज़रूरत")).toBe("zaroorata");
+  });
+});
