@@ -276,3 +276,86 @@ export function decodeRepoFileText(
   const prefix = new TextDecoder("utf-8").decode(encoded.subarray(0, end));
   return { text: prefix + "\n[...file truncated...]", truncated: true, bytes: end };
 }
+
+// ---------------------------------------------------------------------------
+// Repository file search. Aarya can find files and folders by a fuzzy name query
+// (partial names, camelCase pieces, and multi-word topics) without the caller
+// knowing the exact path or filename.
+
+/** A file or folder found by repository name search. */
+export interface AaryaRepoSearchHit {
+  path: string;
+  name: string;
+  type: string;
+}
+
+/** Highest-scoring search hits returned to the model. */
+export const MAX_REPO_SEARCH_RESULTS = 20;
+
+/** Safety caps for the recursive directory walk in searchRepoFiles(). */
+export const MAX_REPO_SEARCH_DIRS = 400;
+export const MAX_REPO_SEARCH_CANDIDATES = 4000;
+
+/** Normalize and validate the query argument for search_repo_files. */
+export function normalizeRepoSearchQueryArg(args: Record<string, unknown>): string {
+  const raw = typeof args.query === "string" ? args.query.trim() : "";
+  if (!raw) throw new Error('A search query is required (e.g. "voice panel").');
+  if (raw.length > 200) throw new Error("Search query must be at most 200 characters.");
+  if (raw.includes("\0")) throw new Error("query must not contain NUL bytes.");
+  return raw;
+}
+
+/** Split a name or query into search tokens: lowercased pieces split on camelCase,
+ *  snake_case, kebab-case, and punctuation. Devanagari text is preserved as tokens. */
+export function tokenizeRepoSearchTerm(value: string): string[] {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9\u0900-\u097F]+/)
+    .map((token) => token.toLowerCase())
+    .filter((token) => token.length > 0);
+}
+
+/** Score one repo entry against query tokens. Higher scores are better matches. */
+export function scoreRepoSearchMatch(
+  entry: { name: string; path: string },
+  queryTokens: string[],
+): number {
+  const nameTokens = tokenizeRepoSearchTerm(entry.name);
+  const pathTokens = tokenizeRepoSearchTerm(entry.path);
+  let score = 0;
+  for (const query of queryTokens) {
+    for (const token of nameTokens) {
+      if (token === query) score += 4;
+      else if (token.startsWith(query)) score += 3;
+      else if (token.includes(query)) score += 2;
+    }
+    for (const token of pathTokens) {
+      if (token === query) score += 2;
+      else if (token.startsWith(query)) score += 1;
+    }
+  }
+  const phrase = queryTokens.join(" ");
+  if (phrase.length >= 3 && entry.name.toLowerCase().includes(phrase)) score += 8;
+  if (phrase.length >= 3 && entry.path.toLowerCase().includes(phrase)) score += 4;
+  return score;
+}
+
+/** Rank candidate entries against a query, returning the top matches. Pure for testing. */
+export function selectRepoSearchMatches(
+  entries: { name: string; path: string; type: string }[],
+  query: string,
+  limit = MAX_REPO_SEARCH_RESULTS,
+): AaryaRepoSearchHit[] {
+  const queryTokens = tokenizeRepoSearchTerm(query);
+  if (queryTokens.length === 0) return [];
+  return entries
+    .map((entry) => ({ ...entry, score: scoreRepoSearchMatch(entry, queryTokens) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) =>
+      b.score - a.score ||
+      a.path.length - b.path.length ||
+      (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    .slice(0, limit)
+    .map(({ path, name, type }) => ({ path, name, type }));
+}
