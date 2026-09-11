@@ -182,7 +182,7 @@ describe("decodeRepoFileText", () => {
     expect(decoded.bytes).toBe(new TextEncoder().encode(text).byteLength);
   });
   it("truncates on a UTF-8 character boundary", () => {
-    const text = "\u0939".repeat(100); // Devanagari "à¤¹": 3 bytes each
+    const text = "\u0939".repeat(100); // Devanagari "ह": 3 bytes each
     const decoded = decodeRepoFileText(toBase64(text), 10);
     expect(decoded.truncated).toBe(true);
     expect(decoded.bytes).toBeGreaterThan(0);
@@ -211,7 +211,7 @@ describe("tokenizeRepoSearchTerm", () => {
     expect(tokenizeRepoSearchTerm("voice_panel-helper")).toEqual(["voice", "panel", "helper"]);
   });
   it("preserves Devanagari tokens", () => {
-    expect(tokenizeRepoSearchTerm("à¤ªà¥à¤°à¥à¤à¥à¤à¥à¤-voice")).toEqual(["à¤ªà¥à¤°à¥à¤à¥à¤à¥à¤", "voice"]);
+    expect(tokenizeRepoSearchTerm("प्रोजेक्ट-voice")).toEqual(["प्रोजेक्ट", "voice"]);
   });
 });
 
