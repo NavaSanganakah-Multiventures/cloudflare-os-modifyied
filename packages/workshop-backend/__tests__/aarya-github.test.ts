@@ -185,3 +185,56 @@ describe("decodeRepoFileText", () => {
     expect(decoded.text).not.toContain("\uFFFD");
   });
 });
+
+describe("normalizeRepoSearchQueryArg", () => {
+  it("accepts and trims a query", () => {
+    expect(normalizeRepoSearchQueryArg({ query: " voice panel " })).toBe("voice panel");
+  });
+  it("rejects missing or blank queries", () => {
+    expect(() => normalizeRepoSearchQueryArg({})).toThrow(/query/i);
+    expect(() => normalizeRepoSearchQueryArg({ query: "  " })).toThrow(/query/i);
+  });
+  it("rejects NUL bytes", () => {
+    expect(() => normalizeRepoSearchQueryArg({ query: "a\0b" })).toThrow(/NUL/);
+  });
+});
+
+describe("tokenizeRepoSearchTerm", () => {
+  it("splits camelCase, snake_case, kebab-case, and extensions", () => {
+    expect(tokenizeRepoSearchTerm("AaryaVoicePanel.tsx")).toEqual(["aarya", "voice", "panel", "tsx"]);
+    expect(tokenizeRepoSearchTerm("voice_panel-helper")).toEqual(["voice", "panel", "helper"]);
+  });
+  it("preserves Devanagari tokens", () => {
+    expect(tokenizeRepoSearchTerm("प्रोजेक्ट-voice")).toEqual(["प्रोजेक्ट", "voice"]);
+  });
+});
+
+describe("selectRepoSearchMatches", () => {
+  const entries = [
+    { name: "AaryaVoicePanel.tsx", path: "src/AaryaVoicePanel.tsx", type: "file" },
+    { name: "aarya-voice.ts", path: "src/aarya-voice.ts", type: "file" },
+    { name: "VoiceSection.tsx", path: "src/VoiceSection.tsx", type: "file" },
+    { name: "voice", path: "src/voice", type: "dir" },
+    { name: "README.md", path: "README.md", type: "file" },
+  ];
+
+  it("finds files by a partial name", () => {
+    const hits = selectRepoSearchMatches(entries, "voice");
+    expect(hits.map((h) => h.name)).toContain("AaryaVoicePanel.tsx");
+    expect(hits.map((h) => h.name)).toContain("voice");
+  });
+
+  it("finds a multi-word topic without the exact filename", () => {
+    const hits = selectRepoSearchMatches(entries, "voice panel");
+    expect(hits[0].name).toBe("AaryaVoicePanel.tsx");
+  });
+
+  it("prefers the shorter path when scores tie", () => {
+    const hits = selectRepoSearchMatches(entries, "aarya");
+    expect(hits[0].name).toBe("aarya-voice.ts");
+  });
+
+  it("returns no matches for an unrelated query", () => {
+    expect(selectRepoSearchMatches(entries, "zzzz")).toEqual([]);
+  });
+});
