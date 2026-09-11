@@ -610,6 +610,17 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return removed;
   }
 
+  /** Push an AARYA agent-task notification so the next voice call can announce it. */
+  async addAgentTaskNotification(title: string, detail: string): Promise<void> {
+    this.storage.notifications.put({
+      id: crypto.randomUUID(),
+      kind: "agent-task",
+      title,
+      detail,
+      createdAt: Date.now(),
+    });
+  }
+
   /** Schedule (or clear) the per-user reminder alarm for the soonest pending reminder. Background
    * delivery relies on this alarm rather than a global cron sweep: each user DO wakes itself. */
   private async scheduleNextReminderAlarm(): Promise<void> {
