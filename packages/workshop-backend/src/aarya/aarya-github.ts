@@ -263,19 +263,16 @@ export function decodeRepoFileText(
 ): { text: string; truncated: boolean; bytes: number } {
   const bin = atob(contentBase64);
   const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-  const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  // Decode (lenient) then re-encode so we always work on well-formed UTF-8.
+  const text = new TextDecoder("utf-8").decode(bytes);
   const encoded = new TextEncoder().encode(text);
   if (encoded.byteLength <= maxBytes) {
     return { text, truncated: false, bytes: encoded.byteLength };
   }
-  // Find the largest prefix that decodes cleanly as UTF-8 (avoids splitting a multibyte char).
-  for (let end = maxBytes; end > 0; end--) {
-    try {
-      const prefix = new TextDecoder("utf-8", { fatal: true }).decode(encoded.subarray(0, end));
-      return { text: prefix + "\n[...file truncated...]", truncated: true, bytes: end };
-    } catch {
-      // Keep shrinking until the cut lands on a character boundary.
-    }
-  }
-  return { text: "", truncated: true, bytes: 0 };
+  // Find the largest prefix that ends on a UTF-8 character boundary (walk back over any
+  // trailing continuation bytes; safe because TextEncoder output is always well-formed).
+  let end = maxBytes;
+  while (end > 0 && (encoded[end] & 0xc0) === 0x80) end--;
+  const prefix = new TextDecoder("utf-8").decode(encoded.subarray(0, end));
+  return { text: prefix + "\n[...file truncated...]", truncated: true, bytes: end };
 }
