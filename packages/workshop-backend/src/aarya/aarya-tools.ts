@@ -11,6 +11,7 @@ import {
   normalizeRepoFilePathArg,
   normalizeRepoPathArg,
   normalizeRepoRefArg,
+  normalizeRepoSearchQueryArg,
   normalizeReviewPrArgs,
 } from "./aarya-github";
 import type { AaryaEmailSummary } from "./aarya-email";
@@ -19,6 +20,7 @@ import type {
   AaryaGithubPrSummary,
   AaryaRepoDirectoryResult,
   AaryaRepoFileResult,
+  AaryaRepoSearchHit,
   AaryaReviewDecision,
 } from "./aarya-github";
 import {
@@ -85,6 +87,7 @@ export interface AaryaGithubRuntime {
   reviewPr(repo: string, prNumber: number, decision: AaryaReviewDecision, body: string): Promise<void>;
   listRepoFiles(repo: string, path: string, ref?: string): Promise<AaryaRepoDirectoryResult>;
   readRepoFile(repo: string, path: string, ref?: string): Promise<AaryaRepoFileResult>;
+  searchRepoFiles(repo: string, query: string, path?: string, ref?: string): Promise<AaryaRepoSearchHit[]>;
 }
 
 /** Google Jules capabilities exposed to tools. Confirmation for writes is provided by the Jules
@@ -390,6 +393,30 @@ const DEFAULT_AARYA_TOOLS: AaryaToolDefinition[] = [
       const path = normalizeRepoFilePathArg(args);
       const ref = normalizeRepoRefArg(args);
       return await github.readRepoFile(repo, path, ref);
+    },
+  },
+  {
+    name: "search_repo_files",
+    description:
+      "Search a GitHub repository for files and folders whose names relate to a query. The search is forgiving: it matches partial names, camelCase pieces, and multiple words, so you do not need the exact full name or path. Returns matching paths and types. Use read_repo_file afterwards to open one.",
+    parameters: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: 'Repository as "owner/repo".' },
+        query: { type: "string", description: 'Name or topic to search for (e.g. "voice panel" or "aarya").' },
+        path: { type: "string", description: 'Optional directory to limit the search to ("" or "/" for the whole repo).' },
+        ref: { type: "string", description: "Optional branch, tag, or commit SHA. Defaults to the default branch." },
+      },
+      required: ["repo", "query"],
+    },
+    execute: async (args, runtime) => {
+      const github = runtime.github;
+      if (!github) throw new Error("GitHub is not configured for this call.");
+      const repo = normalizeGithubRepoArg(args);
+      const query = normalizeRepoSearchQueryArg(args);
+      const path = normalizeRepoPathArg(args);
+      const ref = normalizeRepoRefArg(args);
+      return { matches: await github.searchRepoFiles(repo, query, path, ref) };
     },
   },
   {
