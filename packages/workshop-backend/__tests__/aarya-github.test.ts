@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   decodeRepoFileText,
+  findRepoTextMatches,
+  isSearchableRepoFile,
+  levenshteinDistance,
   normalizeGithubPrNumberArg,
   normalizeGithubRepoArg,
   normalizeRepoFilePathArg,
@@ -179,7 +182,7 @@ describe("decodeRepoFileText", () => {
     expect(decoded.bytes).toBe(new TextEncoder().encode(text).byteLength);
   });
   it("truncates on a UTF-8 character boundary", () => {
-    const text = "\u0939".repeat(100); // Devanagari "ह": 3 bytes each
+    const text = "\u0939".repeat(100); // Devanagari "à¤¹": 3 bytes each
     const decoded = decodeRepoFileText(toBase64(text), 10);
     expect(decoded.truncated).toBe(true);
     expect(decoded.bytes).toBeGreaterThan(0);
@@ -208,7 +211,7 @@ describe("tokenizeRepoSearchTerm", () => {
     expect(tokenizeRepoSearchTerm("voice_panel-helper")).toEqual(["voice", "panel", "helper"]);
   });
   it("preserves Devanagari tokens", () => {
-    expect(tokenizeRepoSearchTerm("प्रोजेक्ट-voice")).toEqual(["प्रोजेक्ट", "voice"]);
+    expect(tokenizeRepoSearchTerm("à¤ªà¥à¤°à¥à¤à¥à¤à¥à¤-voice")).toEqual(["à¤ªà¥à¤°à¥à¤à¥à¤à¥à¤", "voice"]);
   });
 });
 
@@ -239,5 +242,52 @@ describe("selectRepoSearchMatches", () => {
 
   it("returns no matches for an unrelated query", () => {
     expect(selectRepoSearchMatches(entries, "zzzz")).toEqual([]);
+  });
+});
+
+describe("levenshteinDistance", () => {
+  it("is zero for equal strings and small for near-matches", () => {
+    expect(levenshteinDistance("voice", "voice")).toBe(0);
+    expect(levenshteinDistance("voice", "voise")).toBe(1);
+    expect(levenshteinDistance("voice", "voise")).toBe(levenshteinDistance("voise", "voice"));
+  });
+});
+
+describe("findRepoTextMatches", () => {
+  const text = "const mic = createMicCapture()\nfunction searchRepoFiles(query: string) {\n  return results\n}";
+
+  it("finds lines containing query tokens", () => {
+    const hits = findRepoTextMatches(text, "search repo", "src/aarya.ts");
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].path).toBe("src/aarya.ts");
+    expect(hits[0].line).toBe(2);
+  });
+
+  it("finds near-matches for typos", () => {
+    const hits = findRepoTextMatches("const voise = true", "voice", "a.ts");
+    expect(hits.length).toBe(1);
+  });
+
+  it("returns no matches for unrelated queries", () => {
+    expect(findRepoTextMatches("const x = 1", "zzzz", "a.ts")).toEqual([]);
+  });
+});
+
+describe("isSearchableRepoFile", () => {
+  it("skips binaries and locks", () => {
+    expect(isSearchableRepoFile("app.ts")).toBe(true);
+    expect(isSearchableRepoFile("logo.png")).toBe(false);
+    expect(isSearchableRepoFile("yarn.lock")).toBe(false);
+  });
+});
+
+describe("selectRepoSearchMatches fuzzy typo matching", () => {
+  it("surfaces entries with near-miss spellings", () => {
+    const entries = [
+      { name: "voice.ts", path: "src/voice.ts", type: "file" as const },
+      { name: "README.md", path: "README.md", type: "file" as const },
+    ];
+    const hits = selectRepoSearchMatches(entries, "voise");
+    expect(hits.map((h) => h.name)).toContain("voice.ts");
   });
 });
