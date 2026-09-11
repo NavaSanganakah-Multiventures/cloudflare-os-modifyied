@@ -107,13 +107,15 @@ export function normalizeGeminiModel(model?: string): string {
 
 /** Build the Gemini Live setup message (sent as the first WebSocket frame). */
 export function buildGeminiSetup(options: GeminiSetupOptions, tools: GeminiTool[] = []): Record<string, unknown> {
-  // Matches the official Gemini Live WebSocket tutorial: responseModalities lives at the top
-  // level of the setup object (not inside generationConfig), and audio transcription config is
-  // omitted for native-audio models. The older shape made Google silently ignore the setup, so
-  // setupComplete never arrived and the bridge timed out into the Workers AI fallback.
+  // Per the v1beta WebSocket API reference, responseModalities belongs inside
+  // generationConfig. A top-level responseModalities field is rejected by Google with close
+  // code 1007 ("Unknown name responseModalities at 'setup'").
+  // Audio transcription config is omitted for native-audio models (transcripts are emitted natively).
   const setup: Record<string, unknown> = {
     model: normalizeGeminiModel(options.model),
-    responseModalities: ["AUDIO"],
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+    },
     systemInstruction: {
       parts: [{ text: options.systemPrompt ?? DEFAULT_AARYA_PERSONA }],
     },
