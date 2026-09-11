@@ -37,6 +37,7 @@ export const DEFAULT_AARYA_PERSONA =
 export interface GeminiSetupOptions {
   model?: string;
   systemPrompt?: string;
+  omitSystemInstruction?: boolean;
 }
 
 /** Status event emitted by an AI session to the room. */
@@ -116,10 +117,12 @@ export function buildGeminiSetup(options: GeminiSetupOptions, tools: GeminiTool[
     generationConfig: {
       responseModalities: ["AUDIO"],
     },
-    systemInstruction: {
-      parts: [{ text: options.systemPrompt ?? DEFAULT_AARYA_PERSONA }],
-    },
   };
+  if (!options.omitSystemInstruction) {
+    setup["systemInstruction"] = {
+      parts: [{ text: options.systemPrompt ?? DEFAULT_AARYA_PERSONA }],
+    };
+  }
   if (tools.length > 0) {
     setup["tools"] = tools;
   }
@@ -363,16 +366,16 @@ export class AaryaLiveBridge implements AaryaAiSession {
         ? "models/gemini-2.5-flash-native-audio-preview-12-2025"
         : DEFAULT_AARYA_GEMINI_MODEL;
 
-    const attempts: Array<{ label: string; model: string; includeTools: boolean }> = [
-      { label: configuredModel + " (with tools)", model: configuredModel, includeTools: true },
-      { label: configuredModel + " (no tools)", model: configuredModel, includeTools: false },
-      { label: alternateModel + " (no tools)", model: alternateModel, includeTools: false },
+    const attempts: Array<{ label: string; model: string; includeTools: boolean; includeSystemInstruction: boolean }> = [
+      { label: configuredModel + " (with tools)", model: configuredModel, includeTools: true, includeSystemInstruction: true },
+      { label: configuredModel + " (no tools)", model: configuredModel, includeTools: false, includeSystemInstruction: false },
+      { label: alternateModel + " (no tools)", model: alternateModel, includeTools: false, includeSystemInstruction: false },
     ];
 
     const failures: string[] = [];
     for (const attempt of attempts) {
       if (this.intentionallyStopped) return;
-      const failure = await this.connectOnce(key, attempt.model, attempt.includeTools);
+      const failure = await this.connectOnce(key, attempt.model, attempt.includeTools, attempt.includeSystemInstruction);
       if (failure === null) {
         return;
       }
@@ -390,9 +393,11 @@ export class AaryaLiveBridge implements AaryaAiSession {
   }
 
   /** Open a socket, send one setup message, and wait for setupComplete. Returns null on success. */
-  private async connectOnce(key: string, model: string, includeTools: boolean): Promise<string | null> {
+  private async connectOnce(key: string, model: string, includeTools: boolean, includeSystemInstruction: boolean): Promise<string | null> {
     this.setupCompleteReceived = false;
     this.clearSetupCompleteTimer();
+    let anyMessageReceived = false;
+    let lastRawMessage = "(none)";
 
     let ws: WebSocket;
     try {
@@ -409,7 +414,15 @@ export class AaryaLiveBridge implements AaryaAiSession {
 
     ws.addEventListener("message", (event) => {
       if (this.ws !== ws) return;
-      logger.debug("gemini live server message: " + describeServerMessage(event.data), {
+      const described = describeServerMessage(event.data);
+      try {
+        anyMessageReceived = true;
+        lastRawMessage = described.slice(0, 500);
+      } catch {
+        anyMessageReceived = true;
+        lastRawMessage = "(unreadable message)";
+      }
+      logger.debug("gemini live server message: " + described, {
         event: "aarya.ai.gemini.message.raw",
       });
       void this.handleServerMessage(event.data).catch((error) => {
@@ -460,10 +473,11 @@ export class AaryaLiveBridge implements AaryaAiSession {
         {
           model,
           systemPrompt: this.systemPrompt ?? this.env.AARYA_GEMINI_SYSTEM_PROMPT,
+          omitSystemInstruction: !includeSystemInstruction,
         },
         includeTools ? this.tools : [],
       );
-      logger.debug("gemini live setup: model=" + model + ", tools=" + (includeTools ? this.tools.length : 0), {
+      logger.debug("gemini live setup: model=" + model + ", tools=" + (includeTools ? this.tools.length : 0) + ", systemInstruction=" + includeSystemInstruction, {
         event: "aarya.ai.gemini.setup",
       });
       ws.send(JSON.stringify(setupMessage));
@@ -475,8 +489,12 @@ export class AaryaLiveBridge implements AaryaAiSession {
 
     this.setupCompleteTimer = setTimeout(() => {
       if (this.intentionallyStopped || this.setupCompleteReceived) return;
+      const diagnostic = anyMessageReceived
+        ? "Received server message(s) but none was setupComplete; last: " + lastRawMessage
+        : "No server message was received before the timeout";
       this.settleSetupFail(
-        "Gemini Live did not confirm setup (setupComplete timeout). The connection and API key were accepted, so check the configured model name and tools.",
+        "Gemini Live did not confirm setup (setupComplete timeout). " + diagnostic +
+          ". The connection and API key were accepted, so this points to a key entitlement issue, a server-side hang, or an unsupported setup field.",
       );
       try {
         ws.close(4000, "setupComplete timeout");
