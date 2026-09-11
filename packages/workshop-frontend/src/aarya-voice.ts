@@ -107,17 +107,68 @@ export async function createMicCapture(
   };
 }
 
-/** Play a PCM16 16kHz mono audio buffer through the speakers. */
-export function playPcm16Audio(audio: ArrayBuffer, audioContext: AudioContext): void {
-  const int16 = new Int16Array(audio);
-  const float32 = new Float32Array(int16.length);
-  for (let i = 0; i < int16.length; i++) {
-    float32[i] = int16[i] / 0x8000;
+/** A queue-based PCM16 player that schedules chunks back-to-back with no overlap. */
+export interface Pcm16Player {
+  /** Enqueue a PCM16 16kHz mono audio buffer for real-time playback. */
+  play(audio: ArrayBuffer): void;
+  /** Stop all pending/playing audio immediately (barge-in when the user starts talking). */
+  flush(): void;
+  /** Flush pending audio. The caller still owns and closes the AudioContext. */
+  close(): void;
+}
+
+const PLAYBACK_PRIME_SECONDS = 0.04;
+
+/** Create a queued player for PCM16 16kHz mono audio. */
+export function createPcm16Player(audioContext: AudioContext): Pcm16Player {
+  const active = new Set<AudioBufferSourceNode>();
+  let nextStartTime = 0;
+
+  function play(audio: ArrayBuffer): void {
+    const int16 = new Int16Array(audio);
+    if (int16.length === 0) return;
+
+    const float32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i++) {
+      float32[i] = int16[i] / 0x8000;
+    }
+
+    const buffer = audioContext.createBuffer(1, float32.length, 16000);
+    buffer.copyToChannel(float32, 0);
+
+    const source = audioContext.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioContext.destination);
+
+    const now = audioContext.currentTime;
+    if (nextStartTime < now) {
+      nextStartTime = now + PLAYBACK_PRIME_SECONDS;
+    }
+    const when = nextStartTime;
+    source.start(when);
+    nextStartTime = when + buffer.duration;
+
+    active.add(source);
+    source.addEventListener('ended', () => {
+      active.delete(source);
+    });
   }
-  const buffer = audioContext.createBuffer(1, float32.length, 16000);
-  buffer.copyToChannel(float32, 0);
-  const src = audioContext.createBufferSource();
-  src.buffer = buffer;
-  src.connect(audioContext.destination);
-  src.start();
+
+  function flush(): void {
+    for (const source of active) {
+      try {
+        source.stop();
+      } catch {
+        // Already stopped.
+      }
+    }
+    active.clear();
+    nextStartTime = 0;
+  }
+
+  function close(): void {
+    flush();
+  }
+
+  return { play, flush, close };
 }

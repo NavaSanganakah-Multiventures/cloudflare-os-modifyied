@@ -4,7 +4,8 @@ import {
   aaryaVoiceWsUrl,
   connectAaryaVoice,
   createMicCapture,
-  playPcm16Audio,
+  createPcm16Player,
+  type Pcm16Player,
 } from './aarya-voice'
 import { Microphone, X, Phone, PhoneSlash, SpeakerHigh } from '@phosphor-icons/react'
 
@@ -29,6 +30,7 @@ export function AaryaVoicePanel() {
   const wsRef = useRef<WebSocket | null>(null)
   const micRef = useRef<{ stop: () => void } | null>(null)
   const playbackRef = useRef<AudioContext | null>(null)
+  const playerRef = useRef<Pcm16Player | null>(null)
 
   const handleConnect = useCallback(async () => {
     setError(null)
@@ -40,6 +42,7 @@ export function AaryaVoicePanel() {
 
       if (!playbackRef.current) {
         playbackRef.current = new AudioContext({ sampleRate: 16000 })
+        playerRef.current = createPcm16Player(playbackRef.current)
       }
 
       const ws = connectAaryaVoice(wsUrl, {
@@ -53,8 +56,8 @@ export function AaryaVoicePanel() {
           setTranscripts((prev) => [...prev, { role, text }])
         },
         onAudio: (audio) => {
-          if (playbackRef.current) {
-            playPcm16Audio(audio, playbackRef.current)
+          if (playerRef.current) {
+            playerRef.current.play(audio)
           }
         },
         onPeerEvent: (msg) => {
@@ -85,6 +88,9 @@ export function AaryaVoicePanel() {
   }, [authenticatedApi])
 
   const handleDisconnect = useCallback(() => {
+    if (playerRef.current) {
+      playerRef.current.flush()
+    }
     if (micRef.current) {
       micRef.current.stop()
       micRef.current = null
@@ -108,6 +114,7 @@ export function AaryaVoicePanel() {
 
   const handleStartTalk = useCallback(async () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+    playerRef.current?.flush()
     try {
       const mic = await createMicCapture((chunk) => {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -137,6 +144,7 @@ export function AaryaVoicePanel() {
 
   const handleStopAi = useCallback(() => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+    playerRef.current?.flush()
     wsRef.current.send(JSON.stringify({ type: 'ai-command', action: 'stop' }))
   }, [])
 
@@ -153,6 +161,10 @@ export function AaryaVoicePanel() {
   useEffect(() => {
     return () => {
       handleDisconnect()
+      if (playerRef.current) {
+        playerRef.current.close()
+        playerRef.current = null
+      }
       if (playbackRef.current) {
         playbackRef.current.close()
         playbackRef.current = null
