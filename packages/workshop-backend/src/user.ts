@@ -1967,6 +1967,27 @@ export class UserDurableObject extends DurableObject<Cloudflare.Env> {
     return null;
   }
 
+  /**
+   * Resolve an auto-provisioned singleton gatekeeper (for example "jules-flow") to its gatekeeper DO
+   * class, so Aarya can start a session against it. Singleton gatekeepers have no URL-addressed
+   * resources, so this calls the account's getSingletonGatekeeperClass() rather than
+   * getGatekeeperClassFor(). Returns null when no such account is provisioned.
+   */
+  async getAaryaSingletonGatekeeperClass(vendorId: string)
+      : Promise<DurableObjectClass<Gatekeeper<any>> | null> {
+    for (const rec of this.#connectedAccountRecords()) {
+      if (rec.vendorId !== vendorId || !rec.description.singleton) continue;
+      try {
+        return await (rec.account as unknown as SingletonAccountStub).getSingletonGatekeeperClass();
+      } catch (error) {
+        logger.warn("aarya: failed to resolve singleton gatekeeper class", {
+          event: "aarya.singleton.class.resolve.failed", vendorId, accountId: rec.id, error,
+        });
+      }
+    }
+    return null;
+  }
+
 }
 
 type GatekeeperConnectCallbackProps = {

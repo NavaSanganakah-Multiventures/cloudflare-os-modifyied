@@ -78,10 +78,27 @@ export interface AaryaGithubPullRequest {
   }): Promise<void>;
 }
 
+/** One entry returned by listDirectory(). */
+export interface AaryaGithubDirectoryEntry {
+  name: string;
+  path: string;
+  sha: string;
+  type: "file" | "dir" | "symlink" | "submodule";
+}
+
+/** A file read from the repository. */
+export interface AaryaGithubFileContent {
+  path: string;
+  sha: string;
+  contentBase64: string;
+}
+
 /** The subset of the GitHub repo session Aarya uses. */
 export interface AaryaGithubRepoSession {
   getPullRequest(id: string): Promise<AaryaGithubPullRequest>;
   listPullRequests(options?: { state?: string }): Promise<AaryaGithubCursor<AaryaGithubListPr>>;
+  readFile(path: string, ref?: string): Promise<AaryaGithubFileContent>;
+  listDirectory(path: string, ref?: string): Promise<AaryaGithubDirectoryEntry[]>;
 }
 
 /** A pull request read result returned to the model. */
@@ -184,4 +201,78 @@ export async function summarizePrDiff(diff: AaryaGithubDiff, maxBytes = 20000): 
     collected.push(...page);
   }
   return serializePrDiffFiles(collected, maxBytes);
+}
+
+// ---------------------------------------------------------------------------
+// Repository file reading. Aarya can list a directory and read (capped) file text so the model can
+// analyze the repo without pulling an unbounded amount of content into the call context.
+
+/** A file's decoded text returned to the model. */
+export interface AaryaRepoFileResult {
+  path: string;
+  sha: string;
+  text: string;
+  truncated: boolean;
+  bytes: number;
+}
+
+/** One entry in a directory listing returned to the model. */
+export interface AaryaRepoFileEntry {
+  name: string;
+  path: string;
+  type: string;
+  sha: string;
+}
+
+/** A directory listing returned to the model. */
+export interface AaryaRepoDirectoryResult {
+  path: string;
+  entries: AaryaRepoFileEntry[];
+}
+
+const MAX_REPO_FILE_BYTES = 20000;
+
+/** Normalize and validate the directory path for list_repo_files ("" or "/" means the repo root). */
+export function normalizeRepoPathArg(args: Record<string, unknown>): string {
+  const raw = typeof args.path === "string" ? args.path.trim() : "";
+  const path = raw === "/" ? "" : raw.replace(/^\.?\//, "").replace(/\/+$/, "");
+  if (path.includes("\0")) throw new Error("path must not contain NUL bytes.");
+  return path;
+}
+
+/** Normalize and validate a file path for read_repo_file. */
+export function normalizeRepoFilePathArg(args: Record<string, unknown>): string {
+  const raw = typeof args.path === "string" ? args.path.trim() : "";
+  if (!raw) throw new Error('A file path is required (e.g. "src/index.ts").');
+  const path = raw.replace(/^\.?\//, "");
+  if (path === "" || path === "/") throw new Error('A file path is required (e.g. "src/index.ts").');
+  if (path.includes("\0")) throw new Error("path must not contain NUL bytes.");
+  return path;
+}
+
+/** Normalize an optional git ref (branch/tag/SHA). */
+export function normalizeRepoRefArg(args: Record<string, unknown>): string | undefined {
+  const raw = typeof args.ref === "string" ? args.ref.trim() : "";
+  return raw || undefined;
+}
+
+/** Decode base64 file content to UTF-8 text, capping at maxBytes on a character boundary. Pure. */
+export function decodeRepoFileText(
+  contentBase64: string,
+  maxBytes = MAX_REPO_FILE_BYTES,
+): { text: string; truncated: boolean; bytes: number } {
+  const bin = atob(contentBase64);
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  // Decode (lenient) then re-encode so we always work on well-formed UTF-8.
+  const text = new TextDecoder("utf-8").decode(bytes);
+  const encoded = new TextEncoder().encode(text);
+  if (encoded.byteLength <= maxBytes) {
+    return { text, truncated: false, bytes: encoded.byteLength };
+  }
+  // Find the largest prefix that ends on a UTF-8 character boundary (walk back over any
+  // trailing continuation bytes; safe because TextEncoder output is always well-formed).
+  let end = maxBytes;
+  while (end > 0 && (encoded[end] & 0xc0) === 0x80) end--;
+  const prefix = new TextDecoder("utf-8").decode(encoded.subarray(0, end));
+  return { text: prefix + "\n[...file truncated...]", truncated: true, bytes: end };
 }

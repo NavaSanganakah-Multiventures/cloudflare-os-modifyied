@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  decodeRepoFileText,
   normalizeGithubPrNumberArg,
   normalizeGithubRepoArg,
+  normalizeRepoFilePathArg,
+  normalizeRepoPathArg,
+  normalizeRepoRefArg,
   normalizeReviewPrArgs,
   serializePrDiffFiles,
   summarizePrDiff,
@@ -114,5 +118,70 @@ describe("summarizePrDiff", () => {
     const out = await summarizePrDiff(diff);
     // First page empty, second call null -> no files serialized.
     expect(out).toBe("");
+  });
+});
+
+function toBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+describe("normalizeRepoPathArg", () => {
+  it("defaults to the repo root", () => {
+    expect(normalizeRepoPathArg({})).toBe("");
+    expect(normalizeRepoPathArg({ path: "" })).toBe("");
+    expect(normalizeRepoPathArg({ path: "/" })).toBe("");
+    expect(normalizeRepoPathArg({ path: "  " })).toBe("");
+  });
+  it("trims a leading ./ and trailing slashes", () => {
+    expect(normalizeRepoPathArg({ path: "./src" })).toBe("src");
+    expect(normalizeRepoPathArg({ path: "src/utils/" })).toBe("src/utils");
+  });
+  it("rejects NUL bytes", () => {
+    expect(() => normalizeRepoPathArg({ path: "a\0b" })).toThrow(/NUL/);
+  });
+});
+
+describe("normalizeRepoFilePathArg", () => {
+  it("accepts and normalizes a file path", () => {
+    expect(normalizeRepoFilePathArg({ path: "src/index.ts" })).toBe("src/index.ts");
+    expect(normalizeRepoFilePathArg({ path: "./src/index.ts" })).toBe("src/index.ts");
+    expect(normalizeRepoFilePathArg({ path: " src/index.ts " })).toBe("src/index.ts");
+  });
+  it("rejects missing or root paths", () => {
+    expect(() => normalizeRepoFilePathArg({})).toThrow(/file path/i);
+    expect(() => normalizeRepoFilePathArg({ path: "" })).toThrow(/file path/i);
+    expect(() => normalizeRepoFilePathArg({ path: "/" })).toThrow(/file path/i);
+  });
+});
+
+describe("normalizeRepoRefArg", () => {
+  it("returns undefined for missing or blank refs", () => {
+    expect(normalizeRepoRefArg({})).toBeUndefined();
+    expect(normalizeRepoRefArg({ ref: "  " })).toBeUndefined();
+  });
+  it("trims a provided ref", () => {
+    expect(normalizeRepoRefArg({ ref: " main " })).toBe("main");
+  });
+});
+
+describe("decodeRepoFileText", () => {
+  it("round-trips UTF-8 text without truncation", () => {
+    const text = "hello world";
+    const decoded = decodeRepoFileText(toBase64(text));
+    expect(decoded.text).toBe(text);
+    expect(decoded.truncated).toBe(false);
+    expect(decoded.bytes).toBe(new TextEncoder().encode(text).byteLength);
+  });
+  it("truncates on a UTF-8 character boundary", () => {
+    const text = "\u0939".repeat(100); // Devanagari "ह": 3 bytes each
+    const decoded = decodeRepoFileText(toBase64(text), 10);
+    expect(decoded.truncated).toBe(true);
+    expect(decoded.bytes).toBeGreaterThan(0);
+    expect(decoded.bytes).toBeLessThanOrEqual(10);
+    expect(decoded.text).toContain("[...file truncated...]");
+    expect(decoded.text).not.toContain("\uFFFD");
   });
 });

@@ -5,11 +5,29 @@ import { createAaryaAiSession, DEFAULT_AARYA_PERSONA } from "./aarya-ai";
 import { AaryaToolRegistry, geminiFunctionDeclarations } from "./aarya-tools";
 import { AaryaApprovalQueue } from "./aarya-email";
 import type { AaryaEmailSummary, AaryaGmailSession, AaryaGmailThread } from "./aarya-email";
-import { summarizePrDiff } from "./aarya-github";
-import type { AaryaGithubPrReadResult, AaryaGithubPrSummary, AaryaGithubRepoSession, AaryaReviewDecision } from "./aarya-github";
+import { decodeRepoFileText, summarizePrDiff } from "./aarya-github";
+import type {
+  AaryaGithubPrReadResult,
+  AaryaGithubPrSummary,
+  AaryaGithubRepoSession,
+  AaryaRepoDirectoryResult,
+  AaryaRepoFileResult,
+  AaryaReviewDecision,
+} from "./aarya-github";
+import { summarizeJulesActivity } from "./aarya-jules";
+import type {
+  AaryaJulesActivitySummary,
+  AaryaJulesFlowSession,
+  AaryaJulesFlowStartInput,
+  AaryaJulesFlowWorkflow,
+  AaryaJulesSession,
+  AaryaJulesSessionSummary,
+  AaryaJulesSourceSummary,
+  StartJulesSessionInput,
+} from "./aarya-jules";
 import type { Gatekeeper } from "@gadgets/workshop-shared/gatekeeper";
 import type { AaryaAiSession } from "./aarya-ai";
-import type { AaryaToolCall, AaryaToolDefinition, AaryaToolResult } from "./aarya-tools";
+import type { AaryaToolCall, AaryaToolDefinition, AaryaToolResult, AaryaWorkspaceSummary } from "./aarya-tools";
 import type { AaryaAiState, AaryaClientMessage, AaryaParticipantInfo, AaryaServerMessage } from "./aarya-types";
 import { buildNotificationsHint } from "./aarya-reminders";
 import type { AaryaNotification } from "./aarya-reminders";
@@ -49,6 +67,8 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   private gmailSession: AaryaGmailSession | null = null;
   private readonly gmailThreads = new Map<string, AaryaGmailThread>();
   private readonly githubSessions = new Map<string, AaryaGithubRepoSession>();
+  private julesSession: AaryaJulesSession | null = null;
+  private julesFlowSession: AaryaJulesFlowSession | null = null;
   private readonly tools = new AaryaToolRegistry({
     now: () => new Date(),
     voiceStatus: () => ({ state: this.aiState, backend: this.ai?.backend }),
@@ -64,6 +84,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
         if (!user) throw new Error("No owner is connected for this voice call.");
         return await user.cancelReminder(id);
       },
+      createWorkspace: (title: string) => this.createWorkspace(title),
     },
     readReminders: async () => {
       const user = this.ownerUser();
@@ -83,6 +104,21 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       readPr: (repo: string, prNumber: number) => this.readPr(repo, prNumber),
       reviewPr: (repo: string, prNumber: number, decision: AaryaReviewDecision, body: string) =>
         this.reviewPr(repo, prNumber, decision, body),
+      listRepoFiles: (repo: string, path: string, ref?: string) => this.listRepoFiles(repo, path, ref),
+      readRepoFile: (repo: string, path: string, ref?: string) => this.readRepoFile(repo, path, ref),
+    },
+    jules: {
+      listSources: () => this.listJulesSources(),
+      listSessions: () => this.listJulesSessions(),
+      listActivities: (sessionId: string) => this.listJulesActivities(sessionId),
+      createSession: (input: StartJulesSessionInput) => this.startJulesSession(input),
+      approvePlan: (sessionId: string) => this.approveJulesPlan(sessionId),
+    },
+    julesFlow: {
+      startFlow: (input: AaryaJulesFlowStartInput) => this.startJulesFlow(input),
+      listWorkflows: () => this.listJulesFlowWorkflows(),
+      getWorkflow: (id: string) => this.getJulesFlowWorkflow(id),
+      cancelFlow: (id: string) => this.cancelJulesFlow(id),
     },
   });
 
@@ -453,7 +489,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     vendorId: string,
     url: string,
     facetKey: string,
-  ): Promise<AaryaGmailSession | AaryaGithubRepoSession | null> {
+  ): Promise<unknown> {
     const user = this.ownerUser();
     if (!user) return null;
 
@@ -477,7 +513,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       (tool, summary) => this.requestConfirmation(tool, summary),
     );
     try {
-      return (await gatekeeper.startSession(approvalQueue)) as AaryaGmailSession | AaryaGithubRepoSession;
+      return await gatekeeper.startSession(approvalQueue);
     } catch (error) {
       logger.warn("failed to start aarya gatekeeper session", {
         event: "aarya.room.gatekeeper.session.start.failed",
@@ -607,6 +643,166 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     const pr = await session.getPullRequest(String(prNumber));
     const diff = await pr.readDiff();
     await pr.postReview({ revision: diff.revision, decision, bodyMarkdown: body });
+  }
+
+  /** List files/directories in a repo folder for the model. */
+  private async listRepoFiles(repo: string, path: string, ref?: string): Promise<AaryaRepoDirectoryResult> {
+    const session = await this.ensureGithubRepoSession(repo);
+    if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
+    const entries = await session.listDirectory(path || "", ref);
+    return {
+      path: path || "",
+      entries: entries.map((e) => ({ name: e.name, path: e.path, type: e.type, sha: e.sha })),
+    };
+  }
+
+  /** Read a repo file as (capped) text for the model. */
+  private async readRepoFile(repo: string, path: string, ref?: string): Promise<AaryaRepoFileResult> {
+    const session = await this.ensureGithubRepoSession(repo);
+    if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
+    const file = await session.readFile(path, ref);
+    const decoded = decodeRepoFileText(file.contentBase64);
+    return { path: file.path, sha: file.sha, ...decoded };
+  }
+
+  /** Create a new workspace for the room owner (room-level mutation, user-confirmed). */
+  private async createWorkspace(title: string): Promise<AaryaWorkspaceSummary> {
+    const user = this.ownerUser();
+    if (!user) throw new Error("No owner is connected for this voice call.");
+    const overseers = this.ctx.exports.OverseerDurableObject;
+    if (!overseers) throw new Error("Workspace creation is unavailable in this deployment.");
+    const workspaceId = overseers.newUniqueId().toString();
+    await user.newWorkspace(workspaceId, title);
+    await user.setGadgetLastActive(workspaceId, new Date(), undefined);
+    return { workspaceId, title };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Google Jules + Jules Flow. Lazy sessions + tool operations. Jules is a normal URL-addressed
+  // connected account; Jules Flow is an auto-provisioned singleton with no URL-addressed resources.
+
+  private async ensureJulesSession(): Promise<AaryaJulesSession | null> {
+    if (this.julesSession) return this.julesSession;
+    const session = await this.startAaryaGatekeeperSession(
+      "jules",
+      "https://jules.google.com/",
+      `aarya-jules-${this.ownerId}`,
+    );
+    this.julesSession = session as AaryaJulesSession | null;
+    return this.julesSession;
+  }
+
+  private async ensureJulesFlowSession(): Promise<AaryaJulesFlowSession | null> {
+    if (this.julesFlowSession) return this.julesFlowSession;
+    const user = this.ownerUser();
+    if (!user) return null;
+    let cls: DurableObjectClass<Gatekeeper<any>> | null;
+    try {
+      cls = await user.getAaryaSingletonGatekeeperClass("jules-flow");
+    } catch (error) {
+      logger.warn("failed to resolve aarya jules-flow class", {
+        event: "aarya.room.julesflow.class.failed", error,
+      });
+      return null;
+    }
+    if (!cls) return null;
+    const gatekeeper = this.ctx.facets.get(`aarya-jules-flow-${this.ownerId}`, () => ({ class: cls }));
+    const approvalQueue = new AaryaApprovalQueue(
+      gatekeeper,
+      (tool, summary) => this.requestConfirmation(tool, summary),
+    );
+    try {
+      const session = (await gatekeeper.startSession(approvalQueue)) as AaryaJulesFlowSession | null;
+      this.julesFlowSession = session;
+      return session;
+    } catch (error) {
+      logger.warn("failed to start aarya jules-flow session", {
+        event: "aarya.room.julesflow.session.start.failed", error,
+      });
+      return null;
+    }
+  }
+
+  private async listJulesSources(): Promise<AaryaJulesSourceSummary[]> {
+    const session = await this.ensureJulesSession();
+    if (!session) throw new Error("You haven't connected a Google Jules account. Connect Google Jules in Settings first.");
+    const sources = await session.listSources({ pageSize: 100 });
+    return sources.map((s) => ({
+      id: s.id,
+      name: s.name,
+      ...(s.githubRepo?.owner && s.githubRepo?.repo
+        ? { repo: `${s.githubRepo.owner}/${s.githubRepo.repo}` }
+        : {}),
+    }));
+  }
+
+  private async listJulesSessions(): Promise<AaryaJulesSessionSummary[]> {
+    const session = await this.ensureJulesSession();
+    if (!session) throw new Error("You haven't connected a Google Jules account. Connect Google Jules in Settings first.");
+    const sessions = await session.listSessions({ filter: "archived = false" });
+    return sessions.map((s) => ({
+      id: s.id,
+      title: s.title ?? s.id,
+      state: s.state,
+      ...(s.url ? { url: s.url } : {}),
+      ...(s.createTime ? { createTime: s.createTime } : {}),
+    }));
+  }
+
+  private async listJulesActivities(sessionId: string): Promise<AaryaJulesActivitySummary[]> {
+    const session = await this.ensureJulesSession();
+    if (!session) throw new Error("You haven't connected a Google Jules account. Connect Google Jules in Settings first.");
+    const activities = await session.listActivities(sessionId, { pageSize: 100 });
+    return activities.map(summarizeJulesActivity);
+  }
+
+  private async startJulesSession(input: StartJulesSessionInput): Promise<{ queued: true; source: string; title?: string }> {
+    const session = await this.ensureJulesSession();
+    if (!session) throw new Error("You haven't connected a Google Jules account. Connect Google Jules in Settings first.");
+    await session.createSession({
+      prompt: input.prompt,
+      ...(input.title ? { title: input.title } : {}),
+      sourceContext: {
+        source: input.source,
+        ...(input.startingBranch
+          ? { githubRepoContext: { startingBranch: input.startingBranch } }
+          : {}),
+      },
+      ...(input.automationMode ? { automationMode: input.automationMode } : {}),
+      ...(input.requirePlanApproval ? { requirePlanApproval: true } : {}),
+    });
+    return { queued: true, source: input.source, ...(input.title ? { title: input.title } : {}) };
+  }
+
+  private async approveJulesPlan(sessionId: string): Promise<{ queued: true; session: string }> {
+    const session = await this.ensureJulesSession();
+    if (!session) throw new Error("You haven't connected a Google Jules account. Connect Google Jules in Settings first.");
+    await session.approvePlan(sessionId);
+    return { queued: true, session: sessionId };
+  }
+
+  private async startJulesFlow(input: AaryaJulesFlowStartInput): Promise<AaryaJulesFlowWorkflow> {
+    const session = await this.ensureJulesFlowSession();
+    if (!session) throw new Error("Jules Flow is not available. Add the Jules Flow connector in Settings first.");
+    return await session.startFlow(input);
+  }
+
+  private async listJulesFlowWorkflows(): Promise<AaryaJulesFlowWorkflow[]> {
+    const session = await this.ensureJulesFlowSession();
+    if (!session) throw new Error("Jules Flow is not available. Add the Jules Flow connector in Settings first.");
+    return await session.listWorkflows();
+  }
+
+  private async getJulesFlowWorkflow(id: string): Promise<AaryaJulesFlowWorkflow> {
+    const session = await this.ensureJulesFlowSession();
+    if (!session) throw new Error("Jules Flow is not available. Add the Jules Flow connector in Settings first.");
+    return await session.getWorkflow(id);
+  }
+
+  private async cancelJulesFlow(id: string): Promise<AaryaJulesFlowWorkflow> {
+    const session = await this.ensureJulesFlowSession();
+    if (!session) throw new Error("Jules Flow is not available. Add the Jules Flow connector in Settings first.");
+    return await session.cancelFlow(id);
   }
 
   private peerInfo(participant: Participant): AaryaParticipantInfo {
