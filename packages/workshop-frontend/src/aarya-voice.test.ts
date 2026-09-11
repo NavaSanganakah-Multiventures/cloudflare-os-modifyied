@@ -3,10 +3,16 @@ import { createPcm16Player } from './aarya-voice'
 
 type MockFn = ReturnType<typeof vi.fn>
 
+interface MockBuffer {
+  duration: number
+  copyToChannel: MockFn
+}
+
 interface MockSource {
   connect: MockFn
   start: MockFn
   stop: MockFn
+  addEventListener: MockFn
 }
 
 function createMockAudioContext(startTime: number) {
@@ -15,15 +21,18 @@ function createMockAudioContext(startTime: number) {
   const context = {
     currentTime: startTime,
     destination: {},
-    createBuffer: vi.fn((_channels: number, length: number, sampleRate: number) => ({
-      duration: length / sampleRate,
-      copyToChannel: vi.fn(),
-    })),
-    createBufferSource: vi.fn(() => {
+    createBuffer: vi.fn<(channels: number, length: number, sampleRate: number) => MockBuffer>(
+      (_channels, length, sampleRate) => ({
+        duration: length / sampleRate,
+        copyToChannel: vi.fn<(data: Float32Array, channel: number) => void>(),
+      }),
+    ),
+    createBufferSource: vi.fn<() => MockSource>(() => {
       const source: MockSource = {
-        connect: vi.fn(),
-        start: vi.fn(),
-        stop: vi.fn(),
+        connect: vi.fn<(destination: unknown) => void>(),
+        start: vi.fn<(when?: number) => void>(),
+        stop: vi.fn<(when?: number) => void>(),
+        addEventListener: vi.fn<(type: string, listener: () => void) => void>(),
       }
       sources.push(source)
       return source
