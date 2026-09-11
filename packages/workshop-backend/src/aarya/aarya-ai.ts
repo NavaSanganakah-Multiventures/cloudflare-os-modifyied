@@ -370,9 +370,8 @@ export class AaryaLiveBridge implements AaryaAiSession {
         return;
       }
       failures.push(attempt.label + ": " + failure);
-      logger.warn("gemini live setup attempt failed", {
+      logger.warn("gemini live setup attempt failed: " + attempt.label, {
         event: "aarya.ai.gemini.setup.attempt.failed",
-        attempt: attempt.label,
         error: failure,
       });
       this.emitStatus("connecting");
