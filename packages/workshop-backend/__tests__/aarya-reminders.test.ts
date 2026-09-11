@@ -65,4 +65,11 @@ describe("buildNotificationsHint", () => {
     ]);
     expect(hint).toContain("- Reminder: call mom");
   });
+
+  it("lists agent-task notifications", () => {
+    const hint = buildNotificationsHint([
+      { id: "n2", kind: "agent-task", title: "Repo plan", detail: "Plan for the auth refactor", createdAt: 0 },
+    ]);
+    expect(hint).toContain("- Repo plan: Plan for the auth refactor");
+  });
 });
