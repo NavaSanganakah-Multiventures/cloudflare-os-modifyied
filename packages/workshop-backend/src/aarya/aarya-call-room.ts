@@ -5,13 +5,20 @@ import { createAaryaAiSession, DEFAULT_AARYA_PERSONA } from "./aarya-ai";
 import { AaryaToolRegistry, geminiFunctionDeclarations } from "./aarya-tools";
 import { AaryaApprovalQueue } from "./aarya-email";
 import type { AaryaEmailSummary, AaryaGmailSession, AaryaGmailThread } from "./aarya-email";
-import { decodeRepoFileText, summarizePrDiff } from "./aarya-github";
+import {
+  decodeRepoFileText,
+  MAX_REPO_SEARCH_CANDIDATES,
+  MAX_REPO_SEARCH_DIRS,
+  selectRepoSearchMatches,
+  summarizePrDiff,
+} from "./aarya-github";
 import type {
   AaryaGithubPrReadResult,
   AaryaGithubPrSummary,
   AaryaGithubRepoSession,
   AaryaRepoDirectoryResult,
   AaryaRepoFileResult,
+  AaryaRepoSearchHit,
   AaryaReviewDecision,
 } from "./aarya-github";
 import { summarizeJulesActivity } from "./aarya-jules";
@@ -106,6 +113,8 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
         this.reviewPr(repo, prNumber, decision, body),
       listRepoFiles: (repo: string, path: string, ref?: string) => this.listRepoFiles(repo, path, ref),
       readRepoFile: (repo: string, path: string, ref?: string) => this.readRepoFile(repo, path, ref),
+      searchRepoFiles: (repo: string, query: string, path?: string, ref?: string) =>
+        this.searchRepoFiles(repo, query, path, ref),
     },
     jules: {
       listSources: () => this.listJulesSources(),
@@ -663,6 +672,50 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     const file = await session.readFile(path, ref);
     const decoded = decodeRepoFileText(file.contentBase64);
     return { path: file.path, sha: file.sha, ...decoded };
+  }
+
+  /** Search a repo recursively for files/folders whose names fuzzy-match a query. */
+  private async searchRepoFiles(
+    repo: string,
+    query: string,
+    path?: string,
+    ref?: string,
+  ): Promise<AaryaRepoSearchHit[]> {
+    const session = await this.ensureGithubRepoSession(repo);
+    if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
+
+    const root = path || "";
+    const queue: string[] = [root];
+    const visited = new Set<string>();
+    const candidates: { name: string; path: string; type: string }[] = [];
+    let dirsVisited = 0;
+
+    while (
+      queue.length > 0 &&
+      dirsVisited < MAX_REPO_SEARCH_DIRS &&
+      candidates.length < MAX_REPO_SEARCH_CANDIDATES
+    ) {
+      const dir = queue.shift()!;
+      if (visited.has(dir)) continue;
+      visited.add(dir);
+      dirsVisited++;
+
+      try {
+        const entries = await session.listDirectory(dir, ref);
+        for (const entry of entries) {
+          candidates.push({ name: entry.name, path: entry.path, type: entry.type });
+          if (entry.type === "dir") queue.push(entry.path);
+          if (candidates.length >= MAX_REPO_SEARCH_CANDIDATES) break;
+        }
+      } catch (error) {
+        logger.warn("failed to list repo directory during aarya search", {
+          event: "aarya.room.github.search.listdir.failed",
+          error,
+        });
+      }
+    }
+
+    return selectRepoSearchMatches(candidates, query);
   }
 
   /** Create a new workspace for the room owner (room-level mutation, user-confirmed). */
