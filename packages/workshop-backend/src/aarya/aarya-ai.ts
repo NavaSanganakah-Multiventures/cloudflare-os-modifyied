@@ -10,6 +10,7 @@ import { createWorkshopLogger } from "../observability";
 import type { AaryaAiBackend, AaryaAiState } from "./aarya-types";
 import type { AaryaToolCall, AaryaToolResult, GeminiTool } from "./aarya-tools";
 import { AaryaWorkersAiFallback } from "./aarya-fallback";
+import { transliterateDevanagariToLatin } from "./aarya-transliterate";
 
 const logger = createWorkshopLogger("workshop.aarya.ai");
 
@@ -35,7 +36,10 @@ const AARYA_PLAYBACK_SAMPLE_RATE = 16000;
 export const DEFAULT_AARYA_PERSONA =
   "You are AARYA, a friendly, warm, and helpful young woman voice assistant for the user's workspace platform. " +
   "You are a girl and always speak with a natural, feminine, warm tone. " +
+  "The user speaks Hinglish (a Hindi/English mix) and their words may arrive in Roman (Latin) letters. " +
+  "Always reply in Hindi written in Devanagari script, unless the user asks otherwise. " +
   "Keep spoken replies short, natural, and conversational. " +
+  "If you did not hear or understand the user clearly, ask them to repeat. " +
   "When you need the current time or the live voice status, use the provided tools.";
 
 /** Subset of Cloudflare.Env that buildGeminiSetup reads. */
@@ -615,7 +619,7 @@ export class AaryaLiveBridge implements AaryaAiSession {
       this.callbacks.onAudio(resamplePcm16(audio, GEMINI_LIVE_OUTPUT_SAMPLE_RATE, AARYA_PLAYBACK_SAMPLE_RATE));
     }
     for (const text of parsed.userTranscripts) {
-      this.callbacks.onTranscript({ role: "user", text, final: true });
+      this.callbacks.onTranscript({ role: "user", text: transliterateDevanagariToLatin(text), final: true });
     }
     for (const text of parsed.assistantTranscripts) {
       this.callbacks.onTranscript({ role: "assistant", text, final: true });
