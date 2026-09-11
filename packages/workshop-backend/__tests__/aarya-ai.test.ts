@@ -25,7 +25,7 @@ function loudSamples(count: number): Int16Array {
 }
 
 describe("gemini wire helpers", () => {
-  it("builds a setup message with top-level responseModalities and systemInstruction", () => {
+  it("builds a setup message with generationConfig.responseModalities and systemInstruction", () => {
     const setup = buildGeminiSetup(
       { model: "models/test-live", systemPrompt: "You are a test assistant." },
       [
@@ -39,8 +39,9 @@ describe("gemini wire helpers", () => {
     const body = setup["setup"] as Record<string, unknown>;
     expect(body["model"]).toBe("models/test-live");
 
-    expect(body["responseModalities"]).toEqual(["AUDIO"]);
-    expect(body["generationConfig"]).toBeUndefined();
+    const generationConfig = body["generationConfig"] as Record<string, unknown>;
+    expect(generationConfig["responseModalities"]).toEqual(["AUDIO"]);
+    expect(body["responseModalities"]).toBeUndefined();
 
     expect(body["systemInstruction"]).toEqual({
       parts: [{ text: "You are a test assistant." }],
