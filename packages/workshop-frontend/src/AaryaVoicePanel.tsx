@@ -12,6 +12,14 @@ import { Microphone, X, Phone, PhoneSlash, SpeakerHigh } from '@phosphor-icons/r
 interface TranscriptEntry {
   role: 'user' | 'assistant'
   text: string
+  final: boolean
+}
+
+function findLastPartialIndex(entries: TranscriptEntry[], role: 'user' | 'assistant'): number {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].role === role && !entries[i].final) return i
+  }
+  return -1
 }
 
 /** Floating voice panel: connects to the Aarya WebSocket, captures mic audio (push-to-talk),
@@ -52,8 +60,22 @@ export function AaryaVoicePanel() {
           if (detail) setError(detail)
           else if (state === 'error') setError('AARYA encountered an error')
         },
-        onTranscript: (role, text, _final) => {
-          setTranscripts((prev) => [...prev, { role, text }])
+        onTranscript: (role, text, final) => {
+          setTranscripts((prev) => {
+            // Update an in-progress (partial) transcript in place; replace it when the
+            // final version arrives so the spoken text is shown once and correctly.
+            const partialIndex = findLastPartialIndex(prev, role)
+            if (partialIndex !== -1) {
+              const next = prev.slice()
+              next[partialIndex] = { role, text, final }
+              return next
+            }
+            const last = prev[prev.length - 1]
+            if (last && last.role === role && last.final && last.text === text) {
+              return prev
+            }
+            return [...prev, { role, text, final }]
+          })
         },
         onAudio: (audio) => {
           if (playerRef.current) {

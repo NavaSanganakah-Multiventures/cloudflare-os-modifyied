@@ -3,10 +3,14 @@ import { createWorkshopLogger } from "../observability";
 import { isAuthorizedMember, verifyAaryaToken } from "./aarya-auth";
 import { createAaryaAiSession, DEFAULT_AARYA_PERSONA } from "./aarya-ai";
 import { AaryaToolRegistry, geminiFunctionDeclarations } from "./aarya-tools";
-import { AaryaApprovalQueue } from "./aarya-email";
-import type { AaryaEmailSummary, AaryaGmailSession, AaryaGmailThread } from "./aarya-email";
+import { AaryaApprovalQueue, fuzzyEmailMatchScore } from "./aarya-email";
+import type { AaryaEmailSummary, AaryaGmailSession, AaryaGmailThread, AaryaGmailThreadEntry } from "./aarya-email";
 import {
   decodeRepoFileText,
+  findRepoTextMatches,
+  isSearchableRepoFile,
+  MAX_REPO_CONTENT_FILES,
+  MAX_REPO_CONTENT_MATCHES,
   MAX_REPO_SEARCH_CANDIDATES,
   MAX_REPO_SEARCH_DIRS,
   selectRepoSearchMatches,
@@ -16,6 +20,7 @@ import type {
   AaryaGithubPrReadResult,
   AaryaGithubPrSummary,
   AaryaGithubRepoSession,
+  AaryaRepoContentHit,
   AaryaRepoDirectoryResult,
   AaryaRepoFileResult,
   AaryaRepoSearchHit,
@@ -126,6 +131,8 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       readRepoFile: (repo: string, path: string, ref?: string) => this.readRepoFile(repo, path, ref),
       searchRepoFiles: (repo: string, query: string, path?: string, ref?: string) =>
         this.searchRepoFiles(repo, query, path, ref),
+      searchRepoCode: (repo: string, query: string, path?: string, ref?: string) =>
+        this.searchRepoCode(repo, query, path, ref),
     },
     jules: {
       listSources: () => this.listJulesSources(),
@@ -570,13 +577,54 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
   private async listEmails(query?: string): Promise<AaryaEmailSummary[]> {
     const session = await this.ensureGmailSession();
     if (!session) throw new Error("You haven't connected a Gmail account. Connect Gmail in Settings first.");
-    const cursor = await (query ? session.search(query) : session.listThreads());
+
+    if (query) {
+      const exactCursor = await session.search(query);
+      const exactPage = await exactCursor.next();
+      if (exactPage && exactPage.length > 0) {
+        return this.summarizeEmailThreads(exactPage);
+      }
+      // No exact Gmail hits: fall back to a forgiving, related match over recent threads
+      // so a spoken topic still surfaces relevant emails.
+      const recent = await this.listRecentEmailThreads(session);
+      return recent
+        .map((summary) => ({
+          summary,
+          score: fuzzyEmailMatchScore(summary.subject, summary.snippet, query),
+        }))
+        .filter((entry) => entry.score > 0)
+        .toSorted((a, b) => b.score - a.score || a.summary.subject.localeCompare(b.summary.subject))
+        .slice(0, 10)
+        .map((entry) => entry.summary);
+    }
+
+    const cursor = await session.listThreads();
     const page = await cursor.next();
-    if (!page) return [];
+    return page ? this.summarizeEmailThreads(page) : [];
+  }
+
+  private summarizeEmailThreads(page: AaryaGmailThreadEntry[]): AaryaEmailSummary[] {
     const summaries: AaryaEmailSummary[] = [];
     for (const entry of page) {
       this.gmailThreads.set(entry.info.id, entry.thread);
       summaries.push({ id: entry.info.id, subject: entry.info.subject, snippet: entry.info.snippet });
+    }
+    return summaries;
+  }
+
+  /** Read a few recent inbox threads for related-email fallback matching. */
+  private async listRecentEmailThreads(session: AaryaGmailSession): Promise<AaryaEmailSummary[]> {
+    const cursor = await session.listThreads();
+    let page = await cursor.next();
+    const summaries: AaryaEmailSummary[] = [];
+    let pages = 0;
+    while (page && pages < 3) {
+      for (const entry of page) {
+        this.gmailThreads.set(entry.info.id, entry.thread);
+        summaries.push({ id: entry.info.id, subject: entry.info.subject, snippet: entry.info.snippet });
+      }
+      pages++;
+      page = await cursor.next();
     }
     return summaries;
   }
@@ -733,6 +781,69 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     }
 
     return selectRepoSearchMatches(candidates, query);
+  }
+
+  /** Search inside repo files (not just names) for lines related to a query. */
+  private async searchRepoCode(
+    repo: string,
+    query: string,
+    path?: string,
+    ref?: string,
+  ): Promise<AaryaRepoContentHit[]> {
+    const session = await this.ensureGithubRepoSession(repo);
+    if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
+
+    const root = path || "";
+    const queue: string[] = [root];
+    const visited = new Set<string>();
+    const hits: AaryaRepoContentHit[] = [];
+    let dirsVisited = 0;
+    let filesRead = 0;
+
+    while (
+      queue.length > 0 &&
+      dirsVisited < MAX_REPO_SEARCH_DIRS &&
+      filesRead < MAX_REPO_CONTENT_FILES &&
+      hits.length < MAX_REPO_CONTENT_MATCHES
+    ) {
+      const dir = queue.shift()!;
+      if (visited.has(dir)) continue;
+      visited.add(dir);
+      dirsVisited++;
+
+      let entries;
+      try {
+        entries = await session.listDirectory(dir, ref);
+      } catch (error) {
+        logger.warn("failed to list repo directory during aarya content search", {
+          event: "aarya.room.github.contentsearch.listdir.failed",
+          error,
+        });
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (hits.length >= MAX_REPO_CONTENT_MATCHES || filesRead >= MAX_REPO_CONTENT_FILES) break;
+        if (entry.type === "dir") {
+          queue.push(entry.path);
+          continue;
+        }
+        if (entry.type !== "file" || !isSearchableRepoFile(entry.name)) continue;
+        filesRead++;
+        try {
+          const file = await session.readFile(entry.path, ref);
+          const decoded = decodeRepoFileText(file.contentBase64);
+          hits.push(...findRepoTextMatches(decoded.text, query, entry.path));
+        } catch (error) {
+          logger.warn("failed to read repo file during aarya content search", {
+            event: "aarya.room.github.contentsearch.readfile.failed",
+            error,
+          });
+        }
+      }
+    }
+
+    return hits.slice(0, MAX_REPO_CONTENT_MATCHES);
   }
 
   /** Create a new workspace for the room owner (room-level mutation, user-confirmed). */

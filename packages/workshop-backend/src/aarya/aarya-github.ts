@@ -316,6 +316,46 @@ export function tokenizeRepoSearchTerm(value: string): string[] {
     .filter((token) => token.length > 0);
 }
 
+/** Edit distance between two strings (used for forgiving, related-term matching). */
+export function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  let prev = Array.from({ length: b.length + 1 }, () => 0);
+  let curr = Array.from({ length: b.length + 1 }, () => 0);
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    const tmp = prev;
+    prev = curr;
+    curr = tmp;
+  }
+  return prev[b.length];
+}
+
+/** Score one name/path token against a query token, falling back to edit distance for typos. */
+function scoreTokenMatch(
+  query: string,
+  token: string,
+  exact: number,
+  prefix: number,
+  contains: number,
+  fuzzy: number,
+): number {
+  if (token === query) return exact;
+  if (token.startsWith(query)) return prefix;
+  if (token.includes(query)) return contains;
+  if (query.length >= 3 && token.length >= 3) {
+    const similarity = 1 - levenshteinDistance(query, token) / Math.max(query.length, token.length);
+    if (similarity >= 0.6) return fuzzy;
+  }
+  return 0;
+}
+
 /** Score one repo entry against query tokens. Higher scores are better matches. */
 export function scoreRepoSearchMatch(
   entry: { name: string; path: string },
@@ -326,13 +366,10 @@ export function scoreRepoSearchMatch(
   let score = 0;
   for (const query of queryTokens) {
     for (const token of nameTokens) {
-      if (token === query) score += 4;
-      else if (token.startsWith(query)) score += 3;
-      else if (token.includes(query)) score += 2;
+      score += scoreTokenMatch(query, token, 4, 3, 2, 2);
     }
     for (const token of pathTokens) {
-      if (token === query) score += 2;
-      else if (token.startsWith(query)) score += 1;
+      score += scoreTokenMatch(query, token, 2, 1, 1, 1);
     }
   }
   const phrase = queryTokens.join(" ");
@@ -358,4 +395,75 @@ export function selectRepoSearchMatches(
       (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
     .slice(0, limit)
     .map(({ path, name, type }) => ({ path, name, type }));
+}
+
+// ---------------------------------------------------------------------------
+// Repository content search. Aarya can also search inside files (not just names)
+// so "related" lookups surface where a feature or concept is implemented.
+
+/** A single matching line inside a repository file. */
+export interface AaryaRepoContentHit {
+  path: string;
+  line: number;
+  text: string;
+}
+
+/** Safety caps for repository content search. */
+export const MAX_REPO_CONTENT_FILES = 200;
+export const MAX_REPO_CONTENT_MATCHES = 40;
+export const MAX_REPO_CONTENT_LINE_BYTES = 200;
+
+/** File extensions that are not useful to full-text search (binaries, media, locks). */
+const SKIP_REPO_CONTENT_EXT =
+  /\.(png|jpe?g|gif|webp|ico|bmp|woff2?|ttf|otf|eot|mp3|wav|ogg|m4a|mp4|mov|avi|webm|pdf|zip|gz|tgz|tar|7z|wasm|bin|exe|dll|so|dylib|map|lock)$/i;
+
+/** True when a repo file is a reasonable candidate for full-text search. */
+export function isSearchableRepoFile(name: string): boolean {
+  return !SKIP_REPO_CONTENT_EXT.test(name);
+}
+
+/**
+ * Find lines in a file's text that relate to a query. Matches are forgiving: a line
+ * matches when it contains a query token or a token within a short edit distance, so
+ * typos and transliteration variants still surface. Pure for testing.
+ */
+export function findRepoTextMatches(
+  text: string,
+  query: string,
+  path: string,
+  limit = MAX_REPO_CONTENT_MATCHES,
+): AaryaRepoContentHit[] {
+  const queryTokens = tokenizeRepoSearchTerm(query).filter((token) => token.length >= 2);
+  if (queryTokens.length === 0) return [];
+  const lines = text.split(/\r?\n/);
+  const hits: AaryaRepoContentHit[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (hits.length >= limit) break;
+    const lineTokens = tokenizeRepoSearchTerm(lines[i]);
+    let matched = false;
+    for (const query of queryTokens) {
+      for (const token of lineTokens) {
+        if (token.length < 2) continue;
+        if (token === query || token.includes(query)) {
+          matched = true;
+          break;
+        }
+        if (query.length >= 3 && token.length >= 3) {
+          const similarity = 1 - levenshteinDistance(query, token) / Math.max(query.length, token.length);
+          if (similarity >= 0.7) {
+            matched = true;
+            break;
+          }
+        }
+      }
+      if (matched) break;
+    }
+    if (!matched) continue;
+    const trimmed = lines[i].trim();
+    const snippet = trimmed.length > MAX_REPO_CONTENT_LINE_BYTES
+      ? trimmed.slice(0, MAX_REPO_CONTENT_LINE_BYTES) + "..."
+      : trimmed;
+    hits.push({ path, line: i + 1, text: snippet });
+  }
+  return hits;
 }
