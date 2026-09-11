@@ -2,7 +2,7 @@
 // Google/Gmail gatekeeper: the Gmail gatekeeper's mutating operations call submitAction() on an
 // AaryaApprovalQueue, which routes the action through Aarya's live voice-call confirmation gate, then
 // calls the gatekeeper's applyAction() to actually send the email. Reads (authorizeObservation)
-// are auto-approved — the owner is reading their own mailbox.
+// are auto-approved â the owner is reading their own mailbox.
 
 import { RpcTarget, RpcStub } from "cloudflare:workers";
 import type {
@@ -13,6 +13,7 @@ import type {
   HookDescription,
   ObservationDescription,
 } from "@gadgets/workshop-shared/gatekeeper";
+import { levenshteinDistance } from "./aarya-github";
 
 /** A decision returned by Aarya's confirmation gate. */
 export type AaryaConfirmationDecision = "approved" | "rejected" | "timeout";
@@ -37,7 +38,7 @@ export class AaryaApprovalQueue extends RpcTarget implements ApprovalQueue {
   }
 
   authorizeObservation(_description: ObservationDescription): Promise<void> {
-    // The owner reading their own Gmail data — always permitted.
+    // The owner reading their own Gmail data â always permitted.
     return Promise.resolve();
   }
 
@@ -137,4 +138,42 @@ export function normalizeSendEmailArgs(args: Record<string, unknown>): SendEmail
   if (!subject.trim()) throw new Error("An email subject is required.");
   if (!body.trim()) throw new Error("An email body is required.");
   return { to, subject, body };
+}
+
+/** Score an email thread against a spoken topic for related (not just exact) matching. */
+export function fuzzyEmailMatchScore(
+  subject: string,
+  snippet: string | undefined,
+  query: string,
+): number {
+  const queryTokens = query
+    .toLowerCase()
+    .split(/[^a-z0-9\u0900-\u097F]+/)
+    .filter((token) => token.length >= 2);
+  if (queryTokens.length === 0) return 0;
+  const haystack = (subject + " " + (snippet ?? "")).toLowerCase();
+  const haystackTokens = haystack
+    .split(/[^a-z0-9\u0900-\u097F]+/)
+    .filter((token) => token.length >= 2);
+  let score = 0;
+  for (const query of queryTokens) {
+    if (haystack.includes(query)) {
+      score += 3;
+      continue;
+    }
+    for (const token of haystackTokens) {
+      if (token.includes(query) || query.includes(token)) {
+        score += 2;
+        break;
+      }
+      if (query.length >= 3 && token.length >= 3) {
+        const similarity = 1 - levenshteinDistance(query, token) / Math.max(query.length, token.length);
+        if (similarity >= 0.7) {
+          score += 1;
+          break;
+        }
+      }
+    }
+  }
+  return score;
 }
