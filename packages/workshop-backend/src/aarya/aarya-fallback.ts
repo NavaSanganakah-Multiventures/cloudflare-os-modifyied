@@ -129,10 +129,10 @@ export function estimateNoiseFloor(samples: Int16Array, options: AaryaVadOptions
     rmsValues.push(Math.sqrt(sumSquares / (end - start)));
   }
   if (rmsValues.length === 0) return 0;
-  rmsValues.sort((a, b) => a - b);
-  const quietCount = Math.max(1, Math.floor(rmsValues.length / 3));
+  const sorted = rmsValues.toSorted((a, b) => a - b);
+  const quietCount = Math.max(1, Math.floor(sorted.length / 3));
   let sum = 0;
-  for (let i = 0; i < quietCount; i++) sum += rmsValues[i];
+  for (let i = 0; i < quietCount; i++) sum += sorted[i];
   return sum / quietCount;
 }
 
