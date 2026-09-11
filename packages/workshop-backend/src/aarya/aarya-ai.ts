@@ -15,6 +15,10 @@ const logger = createWorkshopLogger("workshop.aarya.ai");
 
 export const DEFAULT_AARYA_GEMINI_MODEL = "models/gemini-3.1-flash-live-preview";
 
+// Gemini Live prebuilt voice for Aarya's spoken output. "Aoede" is one of Google's
+// prebuilt female voices for native-audio Live models; override with AARYA_GEMINI_VOICE.
+export const DEFAULT_AARYA_VOICE = "Aoede";
+
 // The endpoint is documented as wss://generativelanguage.googleapis.com/ws/...; workerd's
 // fetch()-based WebSocket client requires the https:// URL for the same host and path (the runtime
 // performs the WebSocket upgrade handshake on our behalf).
@@ -29,7 +33,8 @@ const GEMINI_LIVE_OUTPUT_SAMPLE_RATE = 24000;
 const AARYA_PLAYBACK_SAMPLE_RATE = 16000;
 
 export const DEFAULT_AARYA_PERSONA =
-  "You are AARYA, a friendly and helpful voice assistant for the user's workspace platform. " +
+  "You are AARYA, a friendly, warm, and helpful young woman voice assistant for the user's workspace platform. " +
+  "You are a girl and always speak with a natural, feminine, warm tone. " +
   "Keep spoken replies short, natural, and conversational. " +
   "When you need the current time or the live voice status, use the provided tools.";
 
@@ -38,6 +43,7 @@ export interface GeminiSetupOptions {
   model?: string;
   systemPrompt?: string;
   omitSystemInstruction?: boolean;
+  voiceName?: string;
 }
 
 /** Status event emitted by an AI session to the room. */
@@ -111,12 +117,22 @@ export function buildGeminiSetup(options: GeminiSetupOptions, tools: GeminiTool[
   // Per the v1beta WebSocket API reference, responseModalities belongs inside
   // generationConfig. A top-level responseModalities field is rejected by Google with close
   // code 1007 ("Unknown name responseModalities at 'setup'").
+  // speechConfig (the prebuilt voice) also lives inside generationConfig for native-audio models.
   // Audio transcription config is omitted for native-audio models (transcripts are emitted natively).
+  const generationConfig: Record<string, unknown> = {
+    responseModalities: ["AUDIO"],
+  };
+  const voiceName = options.voiceName?.trim();
+  if (voiceName) {
+    generationConfig["speechConfig"] = {
+      voiceConfig: {
+        prebuiltVoiceConfig: { voiceName },
+      },
+    };
+  }
   const setup: Record<string, unknown> = {
     model: normalizeGeminiModel(options.model),
-    generationConfig: {
-      responseModalities: ["AUDIO"],
-    },
+    generationConfig,
   };
   if (!options.omitSystemInstruction) {
     setup["systemInstruction"] = {
@@ -378,16 +394,16 @@ export class AaryaLiveBridge implements AaryaAiSession {
         ? "models/gemini-2.5-flash-native-audio-preview-12-2025"
         : DEFAULT_AARYA_GEMINI_MODEL;
 
-    const attempts: Array<{ label: string; model: string; includeTools: boolean; includeSystemInstruction: boolean }> = [
-      { label: configuredModel + " (with tools)", model: configuredModel, includeTools: true, includeSystemInstruction: true },
-      { label: configuredModel + " (no tools)", model: configuredModel, includeTools: false, includeSystemInstruction: false },
-      { label: alternateModel + " (no tools)", model: alternateModel, includeTools: false, includeSystemInstruction: false },
+    const attempts: Array<{ label: string; model: string; includeTools: boolean; includeSystemInstruction: boolean; includeVoice: boolean }> = [
+      { label: configuredModel + " (with tools)", model: configuredModel, includeTools: true, includeSystemInstruction: true, includeVoice: true },
+      { label: configuredModel + " (no tools)", model: configuredModel, includeTools: false, includeSystemInstruction: false, includeVoice: true },
+      { label: alternateModel + " (no tools)", model: alternateModel, includeTools: false, includeSystemInstruction: false, includeVoice: false },
     ];
 
     const failures: string[] = [];
     for (const attempt of attempts) {
       if (this.intentionallyStopped) return;
-      const failure = await this.connectOnce(key, attempt.model, attempt.includeTools, attempt.includeSystemInstruction);
+      const failure = await this.connectOnce(key, attempt.model, attempt.includeTools, attempt.includeSystemInstruction, attempt.includeVoice);
       if (failure === null) {
         return;
       }
@@ -405,7 +421,7 @@ export class AaryaLiveBridge implements AaryaAiSession {
   }
 
   /** Open a socket, send one setup message, and wait for setupComplete. Returns null on success. */
-  private async connectOnce(key: string, model: string, includeTools: boolean, includeSystemInstruction: boolean): Promise<string | null> {
+  private async connectOnce(key: string, model: string, includeTools: boolean, includeSystemInstruction: boolean, includeVoice: boolean): Promise<string | null> {
     this.setupCompleteReceived = false;
     this.clearSetupCompleteTimer();
     let anyMessageReceived = false;
@@ -486,10 +502,11 @@ export class AaryaLiveBridge implements AaryaAiSession {
           model,
           systemPrompt: this.systemPrompt ?? this.env.AARYA_GEMINI_SYSTEM_PROMPT,
           omitSystemInstruction: !includeSystemInstruction,
+          voiceName: includeVoice ? this.env.AARYA_GEMINI_VOICE ?? DEFAULT_AARYA_VOICE : undefined,
         },
         includeTools ? this.tools : [],
       );
-      logger.debug("gemini live setup: model=" + model + ", tools=" + (includeTools ? this.tools.length : 0) + ", systemInstruction=" + includeSystemInstruction, {
+      logger.debug("gemini live setup: model=" + model + ", tools=" + (includeTools ? this.tools.length : 0) + ", systemInstruction=" + includeSystemInstruction + ", voice=" + (includeVoice ? "on" : "off"), {
         event: "aarya.ai.gemini.setup",
       });
       ws.send(JSON.stringify(setupMessage));
