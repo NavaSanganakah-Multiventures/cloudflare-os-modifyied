@@ -2,7 +2,7 @@
 // Google/Gmail gatekeeper: the Gmail gatekeeper's mutating operations call submitAction() on an
 // AaryaApprovalQueue, which routes the action through Aarya's live voice-call confirmation gate, then
 // calls the gatekeeper's applyAction() to actually send the email. Reads (authorizeObservation)
-// are auto-approved â the owner is reading their own mailbox.
+// are auto-approved — the owner is reading their own mailbox.
 
 import { RpcTarget, RpcStub } from "cloudflare:workers";
 import type {
@@ -38,7 +38,7 @@ export class AaryaApprovalQueue extends RpcTarget implements ApprovalQueue {
   }
 
   authorizeObservation(_description: ObservationDescription): Promise<void> {
-    // The owner reading their own Gmail data â always permitted.
+    // The owner reading their own Gmail data — always permitted.
     return Promise.resolve();
   }
 
