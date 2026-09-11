@@ -67,8 +67,10 @@ export async function createMicCapture(
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       channelCount: 1,
+      sampleRate: { ideal: 16000 },
       echoCancellation: true,
       noiseSuppression: true,
+      autoGainControl: true,
     },
   });
 
