@@ -6,8 +6,11 @@ import type { AaryaNotification, AaryaReminder } from "./aarya-reminders";
 import { normalizeSetReminderArgs, summarizeReminder } from "./aarya-reminders";
 import { normalizeSendEmailArgs } from "./aarya-email";
 import {
+  normalizeCommentGithubIssueArgs,
+  normalizeGithubIssueNumberArg,
   normalizeGithubPrNumberArg,
   normalizeGithubRepoArg,
+  normalizeGithubWorkSearchArgs,
   normalizeRepoFilePathArg,
   normalizeRepoPathArg,
   normalizeRepoRefArg,
@@ -16,8 +19,10 @@ import {
 } from "./aarya-github";
 import type { AaryaEmailSummary } from "./aarya-email";
 import type {
+  AaryaGithubIssueReadResult,
   AaryaGithubPrReadResult,
   AaryaGithubPrSummary,
+  AaryaGithubWorkSearchHit,
   AaryaRepoContentHit,
   AaryaRepoDirectoryResult,
   AaryaRepoFileResult,
@@ -28,6 +33,8 @@ import {
   normalizeApprovePlanArgs,
   normalizeJulesActivitiesArgs,
   normalizeJulesFlowIdArg,
+  normalizeMessageJulesSessionArgs,
+  normalizeReadJulesSessionArgs,
   normalizeStartJulesFlowArgs,
   normalizeStartJulesSessionArgs,
 } from "./aarya-jules";
@@ -35,6 +42,7 @@ import type {
   AaryaJulesActivitySummary,
   AaryaJulesFlowStartInput,
   AaryaJulesFlowWorkflow,
+  AaryaJulesSessionReadResult,
   AaryaJulesSessionSummary,
   AaryaJulesSourceSummary,
   StartJulesSessionInput,
@@ -121,6 +129,11 @@ export interface AaryaGithubRuntime {
   listPrs(repo: string): Promise<AaryaGithubPrSummary[]>;
   readPr(repo: string, prNumber: number): Promise<AaryaGithubPrReadResult>;
   reviewPr(repo: string, prNumber: number, decision: AaryaReviewDecision, body: string): Promise<void>;
+  searchIssues(repo: string, query: string, state?: "open" | "closed" | "all"): Promise<AaryaGithubWorkSearchHit[]>;
+  searchPullRequests(repo: string, query: string, state?: "open" | "closed" | "all"): Promise<AaryaGithubWorkSearchHit[]>;
+  readIssue(repo: string, issueNumber: number): Promise<AaryaGithubIssueReadResult>;
+  commentIssue(repo: string, issueNumber: number, body: string): Promise<void>;
+  commentPr(repo: string, prNumber: number, body: string): Promise<void>;
   listRepoFiles(repo: string, path: string, ref?: string): Promise<AaryaRepoDirectoryResult>;
   readRepoFile(repo: string, path: string, ref?: string): Promise<AaryaRepoFileResult>;
   searchRepoFiles(repo: string, query: string, path?: string, ref?: string): Promise<AaryaRepoSearchHit[]>;
@@ -133,7 +146,9 @@ export interface AaryaJulesRuntime {
   listSources(): Promise<AaryaJulesSourceSummary[]>;
   listSessions(): Promise<AaryaJulesSessionSummary[]>;
   listActivities(sessionId: string): Promise<AaryaJulesActivitySummary[]>;
+  readSession(sessionId: string): Promise<AaryaJulesSessionReadResult>;
   createSession(input: StartJulesSessionInput): Promise<unknown>;
+  messageSession(sessionId: string, message: string): Promise<unknown>;
   approvePlan(sessionId: string): Promise<unknown>;
 }
 
@@ -391,6 +406,113 @@ const DEFAULT_AARYA_TOOLS: AaryaToolDefinition[] = [
     },
   },
   {
+    name: "search_github_issues",
+    description:
+      "Search the issues of a GitHub repository by text. The search is forgiving and matches related terms, so use it to find related work by topic (e.g. \"voice capture\"). Returns issue numbers, titles, states, and authors. Use read_github_issue to open one, then comment_github_issue to reply on it.",
+    parameters: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: 'Repository as "owner/repo".' },
+        query: { type: "string", description: "Topic or phrase to search for." },
+        state: { type: "string", enum: ["open", "closed", "all"], description: "Optional issue state filter." },
+      },
+      required: ["repo", "query"],
+    },
+    execute: async (args, runtime) => {
+      const github = runtime.github;
+      if (!github) throw new Error("GitHub is not configured for this call.");
+      const repo = normalizeGithubRepoArg(args);
+      const { text, state } = normalizeGithubWorkSearchArgs(args);
+      return { issues: await github.searchIssues(repo, text, state) };
+    },
+  },
+  {
+    name: "search_github_pull_requests",
+    description:
+      "Search the pull requests of a GitHub repository by text. The search is forgiving and matches related terms, so use it to find related PRs by topic. Returns PR numbers, titles, states, and authors. Use read_pr to open one, then comment_github_pr or review_pr to reply on it.",
+    parameters: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: 'Repository as "owner/repo".' },
+        query: { type: "string", description: "Topic or phrase to search for." },
+        state: { type: "string", enum: ["open", "closed", "all"], description: "Optional PR state filter." },
+      },
+      required: ["repo", "query"],
+    },
+    execute: async (args, runtime) => {
+      const github = runtime.github;
+      if (!github) throw new Error("GitHub is not configured for this call.");
+      const repo = normalizeGithubRepoArg(args);
+      const { text, state } = normalizeGithubWorkSearchArgs(args);
+      return { pullRequests: await github.searchPullRequests(repo, text, state) };
+    },
+  },
+  {
+    name: "read_github_issue",
+    description:
+      "Read a GitHub issue's title, state, author, body, and recent discussion comments so you can understand existing work before replying. Use search_github_issues to find an issue number first.",
+    parameters: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: 'Repository as "owner/repo".' },
+        issueNumber: { type: "number", description: "The issue number." },
+      },
+      required: ["repo", "issueNumber"],
+    },
+    execute: async (args, runtime) => {
+      const github = runtime.github;
+      if (!github) throw new Error("GitHub is not configured for this call.");
+      const repo = normalizeGithubRepoArg(args);
+      const issueNumber = normalizeGithubIssueNumberArg(args);
+      return await github.readIssue(repo, issueNumber);
+    },
+  },
+  {
+    name: "comment_github_issue",
+    description:
+      "Post a comment on a GitHub issue to reply on existing work. Ask the user what to write first; they must approve before it is posted. Use read_github_issue to see the discussion before replying.",
+    parameters: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: 'Repository as "owner/repo".' },
+        issueNumber: { type: "number", description: "The issue number." },
+        body: { type: "string", description: "The comment body in Markdown." },
+      },
+      required: ["repo", "issueNumber", "body"],
+    },
+    execute: async (args, runtime) => {
+      const github = runtime.github;
+      if (!github) throw new Error("GitHub is not configured for this call.");
+      const input = normalizeCommentGithubIssueArgs(args);
+      await github.commentIssue(input.repo, input.issueNumber, input.body);
+      return { commented: true, repo: input.repo, issueNumber: input.issueNumber };
+    },
+  },
+  {
+    name: "comment_github_pr",
+    description:
+      "Post a normal comment on a pull request to reply on existing work (this is not a formal review). Ask the user what to write first; they must approve before it is posted. Use read_pr to see the PR before replying.",
+    parameters: {
+      type: "object",
+      properties: {
+        repo: { type: "string", description: 'Repository as "owner/repo".' },
+        prNumber: { type: "number", description: "The pull request number." },
+        body: { type: "string", description: "The comment body in Markdown." },
+      },
+      required: ["repo", "prNumber", "body"],
+    },
+    execute: async (args, runtime) => {
+      const github = runtime.github;
+      if (!github) throw new Error("GitHub is not configured for this call.");
+      const repo = normalizeGithubRepoArg(args);
+      const prNumber = normalizeGithubPrNumberArg(args);
+      const body = typeof args.body === "string" ? args.body : "";
+      if (!body.trim()) throw new Error("A comment body is required.");
+      await github.commentPr(repo, prNumber, body);
+      return { commented: true, repo, prNumber };
+    },
+  },
+  {
     name: "list_repo_files",
     description:
       "List files and directories in a GitHub repository folder the user can access. Pass path \"\" or \"/\" for the repository root. Returns entry names, paths, and types. Use read_repo_file to read a specific file.",
@@ -597,6 +719,41 @@ const DEFAULT_AARYA_TOOLS: AaryaToolDefinition[] = [
       if (!jules) throw new Error("Google Jules is not configured for this call.");
       const session = normalizeApprovePlanArgs(args);
       return await jules.approvePlan(session);
+    },
+  },
+  {
+    name: "read_jules_session",
+    description:
+      "Read a Google Jules session's title, state, original prompt, and the pull requests it produced. Use list_jules_sessions to find a session id, then message_jules_session to continue or redirect the work.",
+    parameters: {
+      type: "object",
+      properties: { sessionId: { type: "string", description: "The Jules session id or name." } },
+      required: ["sessionId"],
+    },
+    execute: async (args, runtime) => {
+      const jules = runtime.jules;
+      if (!jules) throw new Error("Google Jules is not configured for this call.");
+      const session = normalizeReadJulesSessionArgs(args);
+      return await jules.readSession(session);
+    },
+  },
+  {
+    name: "message_jules_session",
+    description:
+      "Send a message to an existing Google Jules session to continue, redirect, or reply on its work. Ask the user what to tell Jules first; they must approve before it is sent.",
+    parameters: {
+      type: "object",
+      properties: {
+        sessionId: { type: "string", description: "The Jules session id or name." },
+        message: { type: "string", description: "The message to send to Jules (e.g. \"Also add tests for this\")." },
+      },
+      required: ["sessionId", "message"],
+    },
+    execute: async (args, runtime) => {
+      const jules = runtime.jules;
+      if (!jules) throw new Error("Google Jules is not configured for this call.");
+      const input = normalizeMessageJulesSessionArgs(args);
+      return await jules.messageSession(input.session, input.message);
     },
   },
   {
