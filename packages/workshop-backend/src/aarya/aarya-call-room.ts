@@ -9,6 +9,7 @@ import {
   decodeRepoFileText,
   findRepoTextMatches,
   isSearchableRepoFile,
+  MAX_GITHUB_WORK_SEARCH_PAGES,
   MAX_REPO_CONTENT_FILES,
   MAX_REPO_CONTENT_MATCHES,
   MAX_REPO_SEARCH_CANDIDATES,
@@ -19,6 +20,7 @@ import {
   summarizePrDiff,
 } from "./aarya-github";
 import type {
+  AaryaGithubIssueCommentSummary,
   AaryaGithubIssueReadResult,
   AaryaGithubIssueSearchEntry,
   AaryaGithubPrReadResult,
@@ -710,8 +712,12 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     const pr = await session.getPullRequest(String(prNumber));
     const details = await pr.getDetails();
     const diff = await pr.readDiff();
-    const discussion = await pr.readDiscussion();
-    const comments = await summarizeGithubIssueDiscussion(discussion);
+    let comments: AaryaGithubIssueCommentSummary[] = [];
+    try {
+      comments = await summarizeGithubIssueDiscussion(await pr.readDiscussion());
+    } catch {
+      // Discussion comments are optional context; keep details and diff if they fail.
+    }
     return {
       number: Number(details.id),
       title: details.title,
@@ -750,7 +756,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
     const cursor = await session.searchIssues({ text: query, ...(state ? { state } : {}) });
     const entries: AaryaGithubIssueSearchEntry[] = [];
-    for (let page = 0; page < 3; page++) {
+    for (let page = 0; page < MAX_GITHUB_WORK_SEARCH_PAGES; page++) {
       const batch = await cursor.next();
       if (!batch) break;
       entries.push(...batch);
@@ -774,7 +780,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
     const cursor = await session.searchPullRequests({ text: query, ...(state ? { state } : {}) });
     const entries: AaryaGithubPrSearchEntry[] = [];
-    for (let page = 0; page < 3; page++) {
+    for (let page = 0; page < MAX_GITHUB_WORK_SEARCH_PAGES; page++) {
       const batch = await cursor.next();
       if (!batch) break;
       entries.push(...batch);
@@ -794,7 +800,12 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
     const issue = await session.getIssue(String(issueNumber));
     const details = await issue.getDetails();
-    const comments = await summarizeGithubIssueDiscussion(await issue.readDiscussion());
+    let comments: AaryaGithubIssueCommentSummary[] = [];
+    try {
+      comments = await summarizeGithubIssueDiscussion(await issue.readDiscussion());
+    } catch {
+      // Discussion is optional; still return the issue details if it fails.
+    }
     return {
       number: Number(details.id),
       title: details.title,
