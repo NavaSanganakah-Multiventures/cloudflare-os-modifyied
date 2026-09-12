@@ -274,12 +274,21 @@ export interface CommentGithubIssueInput {
   body: string;
 }
 
+/** Maximum number of cursor pages read when searching issues/PRs by text. */
+export const MAX_GITHUB_WORK_SEARCH_PAGES = 3;
+
+/** Normalize and require a non-empty comment body. Shared by comment_github_issue and comment_github_pr. */
+export function normalizeGithubCommentBody(args: Record<string, unknown>): string {
+  const body = typeof args.body === "string" ? args.body : "";
+  if (!body.trim()) throw new Error("A comment body is required.");
+  return body;
+}
+
 /** Normalize and validate arguments for the comment_github_issue tool. */
 export function normalizeCommentGithubIssueArgs(args: Record<string, unknown>): CommentGithubIssueInput {
   const repo = normalizeGithubRepoArg(args);
   const issueNumber = normalizeGithubIssueNumberArg(args);
-  const body = typeof args.body === "string" ? args.body : "";
-  if (!body.trim()) throw new Error("A comment body is required.");
+  const body = normalizeGithubCommentBody(args);
   return { repo, issueNumber, body };
 }
 
