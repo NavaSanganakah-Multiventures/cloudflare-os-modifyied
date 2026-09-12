@@ -14,6 +14,18 @@ export interface AaryaJulesSource {
   githubRepo?: { owner?: string; repo?: string; defaultBranch?: { displayName: string } };
 }
 
+/** One pull request produced by a Jules session. */
+export interface AaryaJulesSessionPullRequest {
+  url?: string;
+  title?: string;
+  description?: string;
+}
+
+/** One output produced by a Jules session. */
+export interface AaryaJulesSessionOutput {
+  pullRequest?: AaryaJulesSessionPullRequest;
+}
+
 export interface AaryaJulesSessionInfo {
   name: string;
   id: string;
@@ -24,6 +36,7 @@ export interface AaryaJulesSessionInfo {
   url?: string;
   createTime?: string;
   updateTime?: string;
+  outputs?: AaryaJulesSessionOutput[];
 }
 
 export interface AaryaJulesPlanStep {
@@ -61,7 +74,9 @@ export interface AaryaJulesCreateSessionInput {
 export interface AaryaJulesSession {
   listSources(options?: { pageSize?: number }): Promise<AaryaJulesSource[]>;
   listSessions(options?: { pageSize?: number; filter?: string }): Promise<AaryaJulesSessionInfo[]>;
+  getSession(name: string): Promise<AaryaJulesSessionInfo>;
   createSession(input: AaryaJulesCreateSessionInput): Promise<void>;
+  sendMessage(session: string, prompt: string): Promise<void>;
   approvePlan(session: string): Promise<void>;
   listActivities(session: string, options?: { pageSize?: number }): Promise<AaryaJulesActivity[]>;
 }
@@ -123,6 +138,18 @@ export interface AaryaJulesSessionSummary {
   createTime?: string;
 }
 
+/** A single Jules session read result returned to the model (read_jules_session). */
+export interface AaryaJulesSessionReadResult {
+  id: string;
+  title: string;
+  state: string;
+  url?: string;
+  prompt?: string;
+  createTime?: string;
+  updateTime?: string;
+  pullRequests: { title?: string; url?: string }[];
+}
+
 export interface AaryaJulesActivitySummary {
   id: string;
   createTime?: string;
@@ -165,6 +192,27 @@ export function summarizeJulesActivity(activity: AaryaJulesActivity): AaryaJules
     summary.reason = activity.sessionFailed.reason ?? "";
   }
   return summary;
+}
+
+/** Collapse a Jules session into the small JSON shape read_jules_session returns. Pure for testing. */
+export function summarizeJulesSession(session: AaryaJulesSessionInfo): AaryaJulesSessionReadResult {
+  const result: AaryaJulesSessionReadResult = {
+    id: session.id,
+    title: session.title ?? session.id,
+    state: session.state,
+    pullRequests: (session.outputs ?? [])
+      .map((output) => output.pullRequest)
+      .filter((pr): pr is AaryaJulesSessionPullRequest => !!pr)
+      .map((pr) => ({
+        ...(pr.title ? { title: pr.title } : {}),
+        ...(pr.url ? { url: pr.url } : {}),
+      })),
+  };
+  if (session.url) result.url = session.url;
+  if (session.prompt) result.prompt = session.prompt;
+  if (session.createTime) result.createTime = session.createTime;
+  if (session.updateTime) result.updateTime = session.updateTime;
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +267,23 @@ export function normalizeApprovePlanArgs(args: Record<string, unknown>): string 
 export function normalizeJulesActivitiesArgs(args: Record<string, unknown>): string {
   const sessionRaw = requiredString(args, "sessionId", "A sessionId is required to list activities.");
   return expandJulesName(sessionRaw, "sessions");
+}
+
+export function normalizeReadJulesSessionArgs(args: Record<string, unknown>): string {
+  const sessionRaw = requiredString(args, "sessionId", "A sessionId is required to read a Jules session.");
+  return expandJulesName(sessionRaw, "sessions");
+}
+
+export interface MessageJulesSessionInput {
+  /** Always in "sessions/<id>" form. */
+  session: string;
+  message: string;
+}
+
+export function normalizeMessageJulesSessionArgs(args: Record<string, unknown>): MessageJulesSessionInput {
+  const session = normalizeReadJulesSessionArgs(args);
+  const message = requiredString(args, "message", "A message is required to send to the Jules session.");
+  return { session, message };
 }
 
 export function normalizeStartJulesFlowArgs(args: Record<string, unknown>): AaryaJulesFlowStartInput {

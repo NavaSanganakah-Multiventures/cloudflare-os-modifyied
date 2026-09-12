@@ -9,30 +9,39 @@ import {
   decodeRepoFileText,
   findRepoTextMatches,
   isSearchableRepoFile,
+  MAX_GITHUB_WORK_SEARCH_PAGES,
   MAX_REPO_CONTENT_FILES,
   MAX_REPO_CONTENT_MATCHES,
   MAX_REPO_SEARCH_CANDIDATES,
   MAX_REPO_SEARCH_DIRS,
+  rankGithubWorkSearchHits,
   selectRepoSearchMatches,
+  summarizeGithubIssueDiscussion,
   summarizePrDiff,
 } from "./aarya-github";
 import type {
+  AaryaGithubIssueCommentSummary,
+  AaryaGithubIssueReadResult,
+  AaryaGithubIssueSearchEntry,
   AaryaGithubPrReadResult,
+  AaryaGithubPrSearchEntry,
   AaryaGithubPrSummary,
   AaryaGithubRepoSession,
+  AaryaGithubWorkSearchHit,
   AaryaRepoContentHit,
   AaryaRepoDirectoryResult,
   AaryaRepoFileResult,
   AaryaRepoSearchHit,
   AaryaReviewDecision,
 } from "./aarya-github";
-import { summarizeJulesActivity } from "./aarya-jules";
+import { summarizeJulesActivity, summarizeJulesSession } from "./aarya-jules";
 import type {
   AaryaJulesActivitySummary,
   AaryaJulesFlowSession,
   AaryaJulesFlowStartInput,
   AaryaJulesFlowWorkflow,
   AaryaJulesSession,
+  AaryaJulesSessionReadResult,
   AaryaJulesSessionSummary,
   AaryaJulesSourceSummary,
   StartJulesSessionInput,
@@ -127,6 +136,15 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       readPr: (repo: string, prNumber: number) => this.readPr(repo, prNumber),
       reviewPr: (repo: string, prNumber: number, decision: AaryaReviewDecision, body: string) =>
         this.reviewPr(repo, prNumber, decision, body),
+      searchIssues: (repo: string, query: string, state?: "open" | "closed" | "all") =>
+        this.searchGithubIssues(repo, query, state),
+      searchPullRequests: (repo: string, query: string, state?: "open" | "closed" | "all") =>
+        this.searchGithubPullRequests(repo, query, state),
+      readIssue: (repo: string, issueNumber: number) => this.readGithubIssue(repo, issueNumber),
+      commentIssue: (repo: string, issueNumber: number, body: string) =>
+        this.commentGithubIssue(repo, issueNumber, body),
+      commentPr: (repo: string, prNumber: number, body: string) =>
+        this.commentGithubPr(repo, prNumber, body),
       listRepoFiles: (repo: string, path: string, ref?: string) => this.listRepoFiles(repo, path, ref),
       readRepoFile: (repo: string, path: string, ref?: string) => this.readRepoFile(repo, path, ref),
       searchRepoFiles: (repo: string, query: string, path?: string, ref?: string) =>
@@ -138,7 +156,9 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       listSources: () => this.listJulesSources(),
       listSessions: () => this.listJulesSessions(),
       listActivities: (sessionId: string) => this.listJulesActivities(sessionId),
+      readSession: (sessionId: string) => this.readJulesSession(sessionId),
       createSession: (input: StartJulesSessionInput) => this.startJulesSession(input),
+      messageSession: (sessionId: string, message: string) => this.messageJulesSession(sessionId, message),
       approvePlan: (sessionId: string) => this.approveJulesPlan(sessionId),
     },
     julesFlow: {
@@ -692,6 +712,12 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     const pr = await session.getPullRequest(String(prNumber));
     const details = await pr.getDetails();
     const diff = await pr.readDiff();
+    let comments: AaryaGithubIssueCommentSummary[] = [];
+    try {
+      comments = await summarizeGithubIssueDiscussion(await pr.readDiscussion());
+    } catch {
+      // Discussion comments are optional context; keep details and diff if they fail.
+    }
     return {
       number: Number(details.id),
       title: details.title,
@@ -703,6 +729,7 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
       changedFiles: details.changedFiles,
       mergeable: details.mergeable,
       diff: await summarizePrDiff(diff),
+      ...(comments.length > 0 ? { comments } : {}),
     };
   }
 
@@ -717,6 +744,93 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     const pr = await session.getPullRequest(String(prNumber));
     const diff = await pr.readDiff();
     await pr.postReview({ revision: diff.revision, decision, bodyMarkdown: body });
+  }
+
+  /** Search a repo's issues by text and return fuzzy-ranked related matches. */
+  private async searchGithubIssues(
+    repo: string,
+    query: string,
+    state?: "open" | "closed" | "all",
+  ): Promise<AaryaGithubWorkSearchHit[]> {
+    const session = await this.ensureGithubRepoSession(repo);
+    if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
+    const cursor = await session.searchIssues({ text: query, ...(state ? { state } : {}) });
+    const entries: AaryaGithubIssueSearchEntry[] = [];
+    for (let page = 0; page < MAX_GITHUB_WORK_SEARCH_PAGES; page++) {
+      const batch = await cursor.next();
+      if (!batch) break;
+      entries.push(...batch);
+    }
+    const hits: AaryaGithubWorkSearchHit[] = entries.map((entry) => ({
+      number: Number(entry.id),
+      title: entry.title,
+      state: entry.state,
+      author: entry.author?.login ?? "",
+    }));
+    return rankGithubWorkSearchHits(hits, query);
+  }
+
+  /** Search a repo's pull requests by text and return fuzzy-ranked related matches. */
+  private async searchGithubPullRequests(
+    repo: string,
+    query: string,
+    state?: "open" | "closed" | "all",
+  ): Promise<AaryaGithubWorkSearchHit[]> {
+    const session = await this.ensureGithubRepoSession(repo);
+    if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
+    const cursor = await session.searchPullRequests({ text: query, ...(state ? { state } : {}) });
+    const entries: AaryaGithubPrSearchEntry[] = [];
+    for (let page = 0; page < MAX_GITHUB_WORK_SEARCH_PAGES; page++) {
+      const batch = await cursor.next();
+      if (!batch) break;
+      entries.push(...batch);
+    }
+    const hits: AaryaGithubWorkSearchHit[] = entries.map((entry) => ({
+      number: Number(entry.id),
+      title: entry.title,
+      state: entry.state,
+      author: entry.author?.login ?? "",
+    }));
+    return rankGithubWorkSearchHits(hits, query);
+  }
+
+  /** Read an issue's details and recent discussion for the model. */
+  private async readGithubIssue(repo: string, issueNumber: number): Promise<AaryaGithubIssueReadResult> {
+    const session = await this.ensureGithubRepoSession(repo);
+    if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
+    const issue = await session.getIssue(String(issueNumber));
+    const details = await issue.getDetails();
+    let comments: AaryaGithubIssueCommentSummary[] = [];
+    try {
+      comments = await summarizeGithubIssueDiscussion(await issue.readDiscussion());
+    } catch {
+      // Discussion is optional; still return the issue details if it fails.
+    }
+    return {
+      number: Number(details.id),
+      title: details.title,
+      state: details.state,
+      author: details.author?.login ?? "",
+      ...(details.bodyMarkdown ? { body: details.bodyMarkdown } : {}),
+      ...(details.commentCount !== undefined ? { commentCount: details.commentCount } : {}),
+      comments,
+    };
+  }
+
+  /** Post a normal comment on an issue (reply on existing work). */
+  private async commentGithubIssue(repo: string, issueNumber: number, body: string): Promise<void> {
+    const session = await this.ensureGithubRepoSession(repo);
+    if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
+    const issue = await session.getIssue(String(issueNumber));
+    await issue.postComment(body);
+  }
+
+  /** Post a normal comment on a pull request (reply on existing work, not a formal review). */
+  private async commentGithubPr(repo: string, prNumber: number, body: string): Promise<void> {
+    const session = await this.ensureGithubRepoSession(repo);
+    if (!session) throw new Error("You haven't connected a GitHub account. Connect GitHub in Settings first.");
+    const pr = await session.getPullRequest(String(prNumber));
+    await pr.postComment(body);
   }
 
   /** List files/directories in a repo folder for the model. */
@@ -1097,6 +1211,20 @@ export class AryaCallRoom extends DurableObject<Cloudflare.Env> {
     const session = await this.ensureJulesSession();
     if (!session) throw new Error("You haven't connected a Google Jules account. Connect Google Jules in Settings first.");
     await session.approvePlan(sessionId);
+    return { queued: true, session: sessionId };
+  }
+
+  private async readJulesSession(sessionId: string): Promise<AaryaJulesSessionReadResult> {
+    const session = await this.ensureJulesSession();
+    if (!session) throw new Error("You haven't connected a Google Jules account. Connect Google Jules in Settings first.");
+    const info = await session.getSession(sessionId);
+    return summarizeJulesSession(info);
+  }
+
+  private async messageJulesSession(sessionId: string, message: string): Promise<{ queued: true; session: string }> {
+    const session = await this.ensureJulesSession();
+    if (!session) throw new Error("You haven't connected a Google Jules account. Connect Google Jules in Settings first.");
+    await session.sendMessage(sessionId, message);
     return { queued: true, session: sessionId };
   }
 
