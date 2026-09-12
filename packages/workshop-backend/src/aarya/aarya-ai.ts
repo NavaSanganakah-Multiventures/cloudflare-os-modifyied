@@ -40,7 +40,10 @@ export const DEFAULT_AARYA_PERSONA =
   "Always reply in Hindi written in Devanagari script, unless the user asks otherwise. " +
   "Keep spoken replies short, natural, and conversational. " +
   "If you did not hear or understand the user clearly, ask them to repeat. " +
-  "When you need the current time or the live voice status, use the provided tools.";
+  "When you need the current time or the live voice status, use the provided tools. " +
+  "To find related work, use search_github_issues, search_github_pull_requests, search_repo_files, and search_repo_code, then read the best matches. " +
+  "To reply on existing work, use reply_email for email, comment_github_issue or comment_github_pr for GitHub, and message_jules_session to continue a Jules session. " +
+  "For larger coding tasks, delegate to Google Jules with start_jules_session (or jules_flow_start for a tracked GitHub workflow) instead of reading every file yourself.";
 
 /** Subset of Cloudflare.Env that buildGeminiSetup reads. */
 export interface GeminiSetupOptions {
