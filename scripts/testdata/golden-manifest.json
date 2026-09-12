@@ -18,6 +18,46 @@
   "manifestVersion": 1,
   "releaseId": "r000000-fixture",
   "workers": {
+    "gatekeeper-astrology": {
+      "bindings": [],
+      "compatibilityDate": "2026-02-02",
+      "compatibilityFlags": [
+        "allow_irrevocable_stub_storage"
+      ],
+      "inputs": [],
+      "installable": true,
+      "kind": "gatekeeper",
+      "mainModule": "astrology.js",
+      "migrations": [
+        {
+          "new_sqlite_classes": [
+            "UserAccount",
+            "AstrologyGatekeeperImpl"
+          ],
+          "tag": "v0"
+        }
+      ],
+      "modules": [
+        {
+          "name": "astrology.js",
+          "r2Key": "blobs/modules/9fc37651d9772086fa413525ca390e5fc0eeb5e9b747448e561fa3c90dfa3d57",
+          "sha256": "9fc37651d9772086fa413525ca390e5fc0eeb5e9b747448e561fa3c90dfa3d57",
+          "size": 62,
+          "type": "esm"
+        }
+      ],
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "logs": {
+          "invocation_logs": false
+        }
+      },
+      "shortName": "astrology",
+      "vars": {
+        "BASE_URL": "$PUBLIC_BASE_URL/gatekeeper/astrology"
+      }
+    },
     "gatekeeper-cloudflare": {
       "bindings": [
         {
