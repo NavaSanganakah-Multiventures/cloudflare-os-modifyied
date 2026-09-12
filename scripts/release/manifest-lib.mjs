@@ -42,7 +42,7 @@ const ARTIFACTS_CUT_ALLOWED = new Set(["gatekeeper-context"]);
 // defaults to CLIENT_ID/CLIENT_SECRET secret inputs (overridable via deploy-inputs.json).
 const NO_DEFAULT_CRED_INPUTS = new Set([
   "gatekeeper-astrology",     // users connect their own Navasanganakah Astrology API key in-app
-
+  "gatekeeper-context",       // no third-party service; uses its own storage
   "gatekeeper-homeassistant", // users connect their own Home Assistant URL + token in-app
   "gatekeeper-jules",         // users connect their own Google Jules API key in-app
   "gatekeeper-jules-flow",    // ambient flow ledger; no credentials (work via agent passed stubs)

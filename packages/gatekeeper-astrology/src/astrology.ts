@@ -38,6 +38,7 @@ import type {
   BirthDetails,
   BhriguYogasReport,
   CareerMarriageReport,
+  DashaPeriod,
   DashaReport,
   GocharReport,
   KundliAnalysis,
@@ -900,7 +901,7 @@ function buildAnalysis(
   const moonRashi = text(moon?.rashiName);
   const sunRashi = text(sun?.rashiName);
 
-  const planets: PlanetReading[] = PLANET_KEYS.map((key) => {
+  const planets: PlanetReading[] = PLANET_KEYS.map((key): PlanetReading | null => {
     const p = chart?.planets?.[key];
     const rashi = text(p?.rashiName);
     const nakshatra = text(p?.nakshatraName);
