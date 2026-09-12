@@ -6,6 +6,7 @@ import {
   isSearchableRepoFile,
   levenshteinDistance,
   normalizeCommentGithubIssueArgs,
+  normalizeGithubCommentBody,
   normalizeGithubIssueNumberArg,
   normalizeGithubPrNumberArg,
   normalizeGithubRepoArg,
@@ -387,5 +388,16 @@ describe("summarizeGithubIssueDiscussion", () => {
     ]);
     const comments = await summarizeGithubIssueDiscussion(cursor, 20, 5);
     expect(comments).toEqual([{ author: "alice", body: "Hello" }]);
+  });
+});
+
+describe("normalizeGithubCommentBody", () => {
+  it("returns the body when it is non-empty", () => {
+    expect(normalizeGithubCommentBody({ body: "  Thanks!  " })).toBe("  Thanks!  ");
+  });
+
+  it("rejects missing or whitespace-only bodies", () => {
+    expect(() => normalizeGithubCommentBody({})).toThrow(/comment body/i);
+    expect(() => normalizeGithubCommentBody({ body: "   " })).toThrow(/comment body/i);
   });
 });
