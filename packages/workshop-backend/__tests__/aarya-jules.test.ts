@@ -4,9 +4,12 @@ import {
   normalizeApprovePlanArgs,
   normalizeJulesActivitiesArgs,
   normalizeJulesFlowIdArg,
+  normalizeMessageJulesSessionArgs,
+  normalizeReadJulesSessionArgs,
   normalizeStartJulesFlowArgs,
   normalizeStartJulesSessionArgs,
   summarizeJulesActivity,
+  summarizeJulesSession,
 } from "../src/aarya/aarya-jules";
 import type { AaryaJulesActivity } from "../src/aarya/aarya-jules";
 
@@ -173,5 +176,75 @@ describe("summarizeJulesActivity", () => {
     const completedSummary = summarizeJulesActivity(completed);
     expect(completedSummary.message).toBe("done");
     expect(completedSummary.status).toBe("completed");
+  });
+});
+
+describe("normalizeReadJulesSessionArgs", () => {
+  it("expands a bare session id to sessions/<id>", () => {
+    expect(normalizeReadJulesSessionArgs({ sessionId: "s-42" })).toBe("sessions/s-42");
+  });
+
+  it("keeps a fully qualified sessions/<id> value", () => {
+    expect(normalizeReadJulesSessionArgs({ sessionId: "sessions/s-42" })).toBe("sessions/s-42");
+  });
+
+  it("requires a sessionId", () => {
+    expect(() => normalizeReadJulesSessionArgs({})).toThrow(/sessionId/i);
+  });
+});
+
+describe("normalizeMessageJulesSessionArgs", () => {
+  it("parses the session and message", () => {
+    expect(
+      normalizeMessageJulesSessionArgs({ sessionId: "s-42", message: "Also add tests" }),
+    ).toEqual({ session: "sessions/s-42", message: "Also add tests" });
+  });
+
+  it("requires a message", () => {
+    expect(() => normalizeMessageJulesSessionArgs({ sessionId: "s-42" })).toThrow(/message/i);
+  });
+});
+
+describe("summarizeJulesSession", () => {
+  it("maps a session to a compact read shape with pull requests", () => {
+    const summary = summarizeJulesSession({
+      name: "sessions/s-9",
+      id: "s-9",
+      title: "Add auth",
+      prompt: "Add authentication",
+      state: "completed",
+      url: "https://jules.google/s-9",
+      createTime: "2025-01-01T00:00:00Z",
+      updateTime: "2025-01-02T00:00:00Z",
+      outputs: [
+        {
+          pullRequest: {
+            url: "https://github.com/acme/repo/pull/7",
+            title: "feat: auth",
+            description: "Adds authentication",
+          },
+        },
+        { pullRequest: { url: "https://github.com/acme/repo/pull/8" } },
+      ],
+    });
+    expect(summary).toEqual({
+      id: "s-9",
+      title: "Add auth",
+      state: "completed",
+      url: "https://jules.google/s-9",
+      prompt: "Add authentication",
+      createTime: "2025-01-01T00:00:00Z",
+      updateTime: "2025-01-02T00:00:00Z",
+      pullRequests: [
+        { title: "feat: auth", url: "https://github.com/acme/repo/pull/7" },
+        { url: "https://github.com/acme/repo/pull/8" },
+      ],
+    });
+  });
+
+  it("falls back to the session id as the title", () => {
+    const summary = summarizeJulesSession({ name: "sessions/s-1", id: "s-1", state: "planning" });
+    expect(summary.title).toBe("s-1");
+    expect(summary.pullRequests).toEqual([]);
   });
 });
