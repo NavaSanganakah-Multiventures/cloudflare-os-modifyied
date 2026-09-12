@@ -33,9 +33,10 @@ export type WebFetchEnv = {
 
 export type WebFetchInput = {
   url: string;
-  // If true, return the exact response bytes (decoded as UTF-8) without any document
-  // conversion. If false or omitted, supported document formats (HTML, PDF, DOCX, ...) are
-  // converted to Markdown via env.WORKERS_AI.toMarkdown().
+  // If true, return the exact response bytes (decoded using the response's declared charset,
+  // defaulting to UTF-8) without any document conversion. If false or omitted, supported
+  // document formats (HTML, PDF, DOCX, ...) are converted to Markdown via
+  // env.WORKERS_AI.toMarkdown().
   raw?: boolean;
   // Caller-requested cap on body length (characters). Server enforces its own hard cap on top.
   maxBytes?: number;
@@ -140,8 +141,92 @@ async function readBodyCapped(
   return { bytes: combined, truncated };
 }
 
-function decodeUtf8(bytes: Uint8Array): string {
-  return new TextDecoder("utf-8", { fatal: false, ignoreBOM: false }).decode(bytes);
+// TextDecoder labels we are willing to honor from a response's Content-Type charset.
+// Anything else (including a bogus or malicious header) falls back to UTF-8 rather than
+// throwing. The single-byte Western labels cover the common real-world cases where decoding
+// as UTF-8 would otherwise mangle text into mojibake.
+const SUPPORTED_CHARSET_LABELS = new Map<string, string>([
+  ["utf-8", "utf-8"],
+  ["utf8", "utf-8"],
+  ["unicode-1-1-utf-8", "utf-8"],
+  ["us-ascii", "us-ascii"],
+  ["ascii", "us-ascii"],
+  ["iso-8859-1", "iso-8859-1"],
+  ["iso8859-1", "iso-8859-1"],
+  ["iso_8859-1", "iso-8859-1"],
+  ["latin1", "iso-8859-1"],
+  ["l1", "iso-8859-1"],
+  ["windows-1252", "windows-1252"],
+  ["cp1252", "windows-1252"],
+  ["x-cp1252", "windows-1252"],
+  ["utf-16le", "utf-16le"],
+  ["utf-16", "utf-16le"],
+  ["ucs-2", "utf-16le"],
+  ["unicode", "utf-16le"],
+  ["utf-16be", "utf-16be"],
+]);
+
+// Extract the charset parameter from a Content-Type header, e.g.
+// `text/html; charset=windows-1252` or `text/html; charset="utf-8"`.
+function contentCharset(contentType: string): string | null {
+  const match = /(?:^|;)\s*charset\s*=\s*(?:"([^"]*)"|([^;\s]*))/i.exec(contentType);
+  if (!match) return null;
+  return (match[1] ?? match[2] ?? "").trim() || null;
+}
+
+// Map a server-declared charset to a TextDecoder label, defaulting to UTF-8.
+function decoderLabel(contentType: string): string {
+  const charset = contentCharset(contentType);
+  if (!charset) return "utf-8";
+  return SUPPORTED_CHARSET_LABELS.get(charset.trim().toLowerCase()) ?? "utf-8";
+}
+
+// Decode body bytes using the charset declared in Content-Type, falling back to UTF-8.
+// `fatal: false` preserves the previous behaviour for genuinely invalid bytes (they become
+// U+FFFD), while honouring the declared charset prevents mojibake on non-UTF-8 pages.
+function decodeBody(bytes: Uint8Array, contentType: string): string {
+  const label = decoderLabel(contentType);
+  return new TextDecoder(label, { fatal: false, ignoreBOM: false }).decode(bytes);
+}
+
+// When `readBodyCapped` stops at a byte budget, the final code point may have been cut in
+// half. TextDecoder would emit a replacement character (U+FFFD) for that incomplete tail.
+// Drop it so truncated bodies end cleanly instead of with garbage at the cut.
+function trimIncompleteTail(
+  bytes: Uint8Array,
+  contentType: string,
+  truncated: boolean,
+): Uint8Array {
+  if (!truncated || bytes.byteLength === 0) return bytes;
+
+  const label = decoderLabel(contentType);
+  if (label === "utf-16le" || label === "utf-16be") {
+    // UTF-16 code units are two bytes; a body cut mid-unit decodes as garbage.
+    return bytes.byteLength % 2 === 1 ? bytes.subarray(0, bytes.byteLength - 1) : bytes;
+  }
+  if (label !== "utf-8") {
+    // Single-byte encodings never split a code point across a byte boundary.
+    return bytes;
+  }
+
+  // UTF-8: walk back from the end over continuation bytes to find the start of the final
+  // code point; if its promised length exceeds what is present, drop the whole sequence.
+  let i = bytes.byteLength - 1;
+  let continuations = 0;
+  while (i >= 0 && (bytes[i] & 0xc0) === 0x80) {
+    continuations++;
+    i--;
+  }
+  if (i < 0) return bytes;
+  const lead = bytes[i];
+  let expected = 0;
+  if (lead >= 0x80) expected = 1; // 2-byte sequence
+  if (lead >= 0xe0) expected = 2; // 3-byte sequence
+  if (lead >= 0xf0) expected = 3; // 4-byte sequence
+  if (continuations < expected) {
+    return bytes.subarray(0, i);
+  }
+  return bytes;
 }
 
 // Strip parameters from a Content-Type header (e.g. `text/html; charset=utf-8` -> `text/html`).
@@ -326,13 +411,14 @@ export async function webFetch(
   }
 
   const { bytes, truncated } = await readBodyCapped(response, maxBytes);
+  const decodedBytes = trimIncompleteTail(bytes, contentType, truncated);
 
   let body: string;
   if (input.raw) {
-    body = decodeUtf8(bytes);
+    body = decodeBody(decodedBytes, contentType);
   } else {
     const md = await convertToMarkdown(env, bytes, contentType, finalUrl);
-    body = md !== null ? md : decodeUtf8(bytes);
+    body = md !== null ? md : decodeBody(decodedBytes, contentType);
   }
 
   return {

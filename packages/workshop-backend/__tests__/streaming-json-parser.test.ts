@@ -134,6 +134,26 @@ describe('StreamingToolInputParser', () => {
       expect(p.streamingValue).toBe("x\u00e9y");
       expect(p.streamComplete).toBe(true);
     });
+
+    it('joins surrogate pairs so emoji are never emitted as lone surrogates', () => {
+      // 😀 is U+1F600, serialized in JSON as the surrogate pair \ud83d\ude00.
+      let json = '{"content": "hi \\ud83d\\ude00 bye"}';
+      testAllStrategies("content", json, p => {
+        expect(p.hasError).toBe(false);
+        expect(p.streamingValue).toBe("hi \u{1F600} bye");
+        expect(p.streamComplete).toBe(true);
+      });
+
+      // Split exactly between the high and low surrogate escapes; the high surrogate must
+      // be held back until the low half arrives rather than emitted on its own.
+      let p = new StreamingToolInputParser("content");
+      p.append('{"content": "\\ud83d');
+      expect(p.streamingValue).toBe("");
+      expect(p.streamComplete).toBe(false);
+      p.append('\\ude00"}');
+      expect(p.streamingValue).toBe("\u{1F600}");
+      expect(p.streamComplete).toBe(true);
+    });
   });
 
   // ===========================================================================

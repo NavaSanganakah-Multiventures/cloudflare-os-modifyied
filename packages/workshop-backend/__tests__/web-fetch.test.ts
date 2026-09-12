@@ -276,6 +276,46 @@ describe("webFetch document conversion", () => {
     // only cares that the call didn't go through toMarkdown.
     expect(typeof result.body).toBe("string");
   });
+
+  it("decodes raw text using the charset parameter (windows-1252)", async () => {
+    // 0x93/0x94 are the Windows-1252 encodings of the curly quotes “ and ”. Decoding these
+    // bytes as UTF-8 would mangle them, so the charset parameter must be honoured.
+    mockResponse(
+      new Uint8Array([0x48, 0x69, 0x20, 0x93, 0x68, 0x69, 0x94]),
+      "text/plain; charset=windows-1252",
+    );
+
+    const env = makeEnv();
+    const result = await webFetch(env, { url: "https://example.com/x.txt" });
+    expect(result.body).toBe("Hi \u201chi\u201d");
+  });
+
+  it("passes Devanagari text through without mojibake", async () => {
+    mockResponse("नमस्ते दुनिया", "text/plain; charset=utf-8");
+
+    const env = makeEnv();
+    const result = await webFetch(env, { url: "https://example.com/x.txt" });
+    expect(result.body).toBe("नमस्ते दुनिया");
+  });
+
+  it("falls back to UTF-8 for an unknown charset", async () => {
+    mockResponse("हिन्दी", "text/plain; charset=x-bogus");
+
+    const env = makeEnv();
+    const result = await webFetch(env, { url: "https://example.com/x.txt" });
+    expect(result.body).toBe("हिन्दी");
+  });
+
+  it("drops an incomplete multi-byte character at the truncation boundary", async () => {
+    // "न" is a three-byte UTF-8 sequence; capping to two bytes cuts it in half.
+    mockResponse("नमस्ते", "text/plain; charset=utf-8");
+
+    const env = makeEnv();
+    const result = await webFetch(env, { url: "https://example.com/x.txt", maxBytes: 2 });
+    expect(result.truncated).toBe(true);
+    expect(result.body).toBe("");
+    expect(result.body).not.toContain("\ufffd");
+  });
 });
 
 describe("formatWebFetchResult", () => {
