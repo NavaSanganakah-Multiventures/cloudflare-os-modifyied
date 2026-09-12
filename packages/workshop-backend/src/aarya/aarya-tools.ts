@@ -7,6 +7,7 @@ import { normalizeSetReminderArgs, summarizeReminder } from "./aarya-reminders";
 import { normalizeSendEmailArgs } from "./aarya-email";
 import {
   normalizeCommentGithubIssueArgs,
+  normalizeGithubCommentBody,
   normalizeGithubIssueNumberArg,
   normalizeGithubPrNumberArg,
   normalizeGithubRepoArg,
@@ -506,8 +507,7 @@ const DEFAULT_AARYA_TOOLS: AaryaToolDefinition[] = [
       if (!github) throw new Error("GitHub is not configured for this call.");
       const repo = normalizeGithubRepoArg(args);
       const prNumber = normalizeGithubPrNumberArg(args);
-      const body = typeof args.body === "string" ? args.body : "";
-      if (!body.trim()) throw new Error("A comment body is required.");
+      const body = normalizeGithubCommentBody(args);
       await github.commentPr(repo, prNumber, body);
       return { commented: true, repo, prNumber };
     },
