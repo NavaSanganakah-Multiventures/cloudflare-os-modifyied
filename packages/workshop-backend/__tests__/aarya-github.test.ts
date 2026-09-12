@@ -5,19 +5,24 @@ import {
   findRepoTextMatches,
   isSearchableRepoFile,
   levenshteinDistance,
+  normalizeCommentGithubIssueArgs,
+  normalizeGithubIssueNumberArg,
   normalizeGithubPrNumberArg,
   normalizeGithubRepoArg,
+  normalizeGithubWorkSearchArgs,
   normalizeRepoFilePathArg,
   normalizeRepoPathArg,
   normalizeRepoRefArg,
   normalizeRepoSearchQueryArg,
   normalizeReviewPrArgs,
+  rankGithubWorkSearchHits,
   selectRepoSearchMatches,
   serializePrDiffFiles,
+  summarizeGithubIssueDiscussion,
   summarizePrDiff,
   tokenizeRepoSearchTerm,
 } from "../src/aarya/aarya-github";
-import type { AaryaGithubCursor, AaryaGithubDiff, AaryaGithubDiffFile } from "../src/aarya/aarya-github";
+import type { AaryaGithubCursor, AaryaGithubDiff, AaryaGithubDiffFile, AaryaGithubIssueDiscussionEntry } from "../src/aarya/aarya-github";
 
 function mockCursor<T>(pages: T[][]): AaryaGithubCursor<T> {
   let i = 0;
@@ -289,5 +294,98 @@ describe("selectRepoSearchMatches fuzzy typo matching", () => {
     ];
     const hits = selectRepoSearchMatches(entries, "voise");
     expect(hits.map((h) => h.name)).toContain("voice.ts");
+  });
+});
+
+describe("normalizeGithubIssueNumberArg", () => {
+  it("accepts issueNumber as number or numeric string", () => {
+    expect(normalizeGithubIssueNumberArg({ issueNumber: 12 })).toBe(12);
+    expect(normalizeGithubIssueNumberArg({ number: 13 })).toBe(13);
+    expect(normalizeGithubIssueNumberArg({ issueNumber: "14" })).toBe(14);
+  });
+
+  it("rejects missing, zero, negative, or non-numeric values", () => {
+    expect(() => normalizeGithubIssueNumberArg({})).toThrow(/issueNumber/);
+    expect(() => normalizeGithubIssueNumberArg({ issueNumber: 0 })).toThrow(/issueNumber/);
+    expect(() => normalizeGithubIssueNumberArg({ issueNumber: -3 })).toThrow(/issueNumber/);
+    expect(() => normalizeGithubIssueNumberArg({ issueNumber: "abc" })).toThrow(/issueNumber/);
+  });
+});
+
+describe("normalizeGithubWorkSearchArgs", () => {
+  it("requires and trims a query", () => {
+    expect(normalizeGithubWorkSearchArgs({ query: "  voice capture  " })).toEqual({ text: "voice capture" });
+  });
+
+  it("keeps only valid state filters", () => {
+    expect(normalizeGithubWorkSearchArgs({ query: "voice", state: "open" })).toEqual({ text: "voice", state: "open" });
+    expect(normalizeGithubWorkSearchArgs({ query: "voice", state: "bogus" })).toEqual({ text: "voice" });
+  });
+
+  it("rejects empty or too-long queries", () => {
+    expect(() => normalizeGithubWorkSearchArgs({})).toThrow(/query/);
+    expect(() => normalizeGithubWorkSearchArgs({ query: "x".repeat(201) })).toThrow(/200/);
+  });
+});
+
+describe("normalizeCommentGithubIssueArgs", () => {
+  it("parses repo, issueNumber, and body", () => {
+    expect(
+      normalizeCommentGithubIssueArgs({ repo: "NavaSanganakah-Multiventures/cloudflare-os-modifyied", issueNumber: 5, body: "Looking into this." }),
+    ).toEqual({
+      repo: "NavaSanganakah-Multiventures/cloudflare-os-modifyied",
+      issueNumber: 5,
+      body: "Looking into this.",
+    });
+  });
+
+  it("requires a body and a valid repo", () => {
+    expect(() => normalizeCommentGithubIssueArgs({ issueNumber: 5 })).toThrow(/repo/i);
+    expect(() =>
+      normalizeCommentGithubIssueArgs({ repo: "NavaSanganakah-Multiventures/cloudflare-os-modifyied", issueNumber: 5, body: "  " }),
+    ).toThrow(/comment body/i);
+  });
+});
+
+describe("rankGithubWorkSearchHits", () => {
+  it("ranks related titles above unrelated ones", () => {
+    const hits = [
+      { number: 1, title: "Fix voice capture bug" },
+      { number: 2, title: "Update README" },
+      { number: 3, title: "Voice capture retry" },
+    ];
+    const ranked = rankGithubWorkSearchHits(hits, "voice capture");
+    expect(ranked.map((h) => h.number)).toEqual([1, 3]);
+  });
+
+  it("returns an empty array when nothing matches", () => {
+    expect(rankGithubWorkSearchHits([{ number: 1, title: "Docs" }], "zzzz")).toEqual([]);
+  });
+});
+
+describe("summarizeGithubIssueDiscussion", () => {
+  it("keeps only human comments and caps their length", async () => {
+    const cursor = mockCursor<AaryaGithubIssueDiscussionEntry>([
+      [
+        { kind: "comment", author: { login: "alice" }, bodyMarkdown: "First." },
+        { kind: "review", author: { login: "bob" }, bodyMarkdown: "review body" },
+        { kind: "comment", author: null, bodyMarkdown: "anonymous" },
+        { kind: "comment", author: { login: "carol" }, bodyMarkdown: "y".repeat(2500) },
+      ],
+    ]);
+    const comments = await summarizeGithubIssueDiscussion(cursor);
+    expect(comments).toEqual([
+      { author: "alice", body: "First." },
+      { author: "", body: "anonymous" },
+      { author: "carol", body: "y".repeat(2000) },
+    ]);
+  });
+
+  it("stops when the cursor is exhausted", async () => {
+    const cursor = mockCursor<AaryaGithubIssueDiscussionEntry>([
+      [{ kind: "comment", author: { login: "alice" }, bodyMarkdown: "Hello" }],
+    ]);
+    const comments = await summarizeGithubIssueDiscussion(cursor, 20, 5);
+    expect(comments).toEqual([{ author: "alice", body: "Hello" }]);
   });
 });
