@@ -27,6 +27,72 @@ export interface AaryaGithubPrSummary {
   state: string;
 }
 
+/** One issue or pull request surfaced by GitHub issue/PR text search. */
+export interface AaryaGithubWorkSearchHit {
+  number: number;
+  title: string;
+  state: string;
+  author: string;
+}
+
+/** One entry returned by searchIssues(). */
+export interface AaryaGithubIssueSearchEntry {
+  id: string;
+  title: string;
+  state: string;
+  author: { login: string } | null;
+  commentCount?: number;
+}
+
+/** One entry returned by searchPullRequests(). */
+export interface AaryaGithubPrSearchEntry extends AaryaGithubIssueSearchEntry {
+  draft?: boolean;
+  merged?: boolean;
+  head?: { ref?: string };
+}
+
+/** A GitHub issue's details (only the fields Aarya reads). */
+export interface AaryaGithubIssueDetails {
+  id: string;
+  title: string;
+  state: string;
+  author: { login: string } | null;
+  bodyMarkdown?: string;
+  commentCount?: number;
+}
+
+/** One human comment in an issue/PR discussion. */
+export interface AaryaGithubIssueCommentSummary {
+  author: string;
+  body: string;
+}
+
+/** One entry in an issue/PR discussion cursor. */
+export interface AaryaGithubIssueDiscussionEntry {
+  kind: "comment" | "review";
+  author: { login: string } | null;
+  bodyMarkdown?: string;
+  createdAt?: string;
+}
+
+/** The subset of the GitHub issue capability Aarya uses. */
+export interface AaryaGithubIssue {
+  getDetails(): Promise<AaryaGithubIssueDetails>;
+  readDiscussion(): Promise<AaryaGithubCursor<AaryaGithubIssueDiscussionEntry>>;
+  postComment(bodyMarkdown: string): Promise<void>;
+}
+
+/** An issue read result returned to the model. */
+export interface AaryaGithubIssueReadResult {
+  number: number;
+  title: string;
+  state: string;
+  author: string;
+  body?: string;
+  commentCount?: number;
+  comments: AaryaGithubIssueCommentSummary[];
+}
+
 /** Full pull request details from getDetails(). Only the fields Aarya reads are declared. */
 export interface AaryaGithubPrDetails {
   id: string;
@@ -76,6 +142,8 @@ export interface AaryaGithubPullRequest {
     decision: AaryaReviewDecision;
     bodyMarkdown?: string;
   }): Promise<void>;
+  readDiscussion(): Promise<AaryaGithubCursor<AaryaGithubIssueDiscussionEntry>>;
+  postComment(bodyMarkdown: string): Promise<void>;
 }
 
 /** One entry returned by listDirectory(). */
@@ -96,7 +164,16 @@ export interface AaryaGithubFileContent {
 /** The subset of the GitHub repo session Aarya uses. */
 export interface AaryaGithubRepoSession {
   getPullRequest(id: string): Promise<AaryaGithubPullRequest>;
+  getIssue(id: string): Promise<AaryaGithubIssue>;
   listPullRequests(options?: { state?: string }): Promise<AaryaGithubCursor<AaryaGithubListPr>>;
+  searchIssues(query: {
+    text: string;
+    state?: "open" | "closed" | "all";
+  }): Promise<AaryaGithubCursor<AaryaGithubIssueSearchEntry>>;
+  searchPullRequests(query: {
+    text: string;
+    state?: "open" | "closed" | "all";
+  }): Promise<AaryaGithubCursor<AaryaGithubPrSearchEntry>>;
   readFile(path: string, ref?: string): Promise<AaryaGithubFileContent>;
   listDirectory(path: string, ref?: string): Promise<AaryaGithubDirectoryEntry[]>;
 }
@@ -113,6 +190,7 @@ export interface AaryaGithubPrReadResult {
   changedFiles?: number;
   mergeable?: boolean;
   diff: string;
+  comments?: AaryaGithubIssueCommentSummary[];
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +219,32 @@ export function normalizeGithubPrNumberArg(args: Record<string, unknown>): numbe
   return prNumber;
 }
 
+/** Normalize and validate an issue number argument. */
+export function normalizeGithubIssueNumberArg(args: Record<string, unknown>): number {
+  const raw = args.issueNumber ?? args.number;
+  const issueNumber =
+    typeof raw === "number" ? raw
+    : typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw)
+    : NaN;
+  if (!Number.isFinite(issueNumber) || issueNumber <= 0) {
+    throw new Error("A valid positive issueNumber is required.");
+  }
+  return issueNumber;
+}
+
+/** Normalize and validate the text query shared by issue/PR search tools. */
+export function normalizeGithubWorkSearchArgs(
+  args: Record<string, unknown>,
+): { text: string; state?: "open" | "closed" | "all" } {
+  const text = typeof args.query === "string" ? args.query.trim() : "";
+  if (!text) throw new Error('A search query is required (e.g. "voice capture").');
+  if (text.length > 200) throw new Error("Search query must be at most 200 characters.");
+  if (text.includes("\0")) throw new Error("query must not contain NUL bytes.");
+  const state =
+    args.state === "open" || args.state === "closed" || args.state === "all" ? args.state : undefined;
+  return { text, ...(state ? { state } : {}) };
+}
+
 export interface ReviewPrInput {
   repo: string;
   prNumber: number;
@@ -162,6 +266,21 @@ export function normalizeReviewPrArgs(args: Record<string, unknown>): ReviewPrIn
     throw new Error("A review body is required for comment/requestChanges reviews.");
   }
   return { repo, prNumber, decision: decisionRaw, body };
+}
+
+export interface CommentGithubIssueInput {
+  repo: string;
+  issueNumber: number;
+  body: string;
+}
+
+/** Normalize and validate arguments for the comment_github_issue tool. */
+export function normalizeCommentGithubIssueArgs(args: Record<string, unknown>): CommentGithubIssueInput {
+  const repo = normalizeGithubRepoArg(args);
+  const issueNumber = normalizeGithubIssueNumberArg(args);
+  const body = typeof args.body === "string" ? args.body : "";
+  if (!body.trim()) throw new Error("A comment body is required.");
+  return { repo, issueNumber, body };
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +320,27 @@ export async function summarizePrDiff(diff: AaryaGithubDiff, maxBytes = 20000): 
     collected.push(...page);
   }
   return serializePrDiffFiles(collected, maxBytes);
+}
+
+/** Page an issue/PR discussion cursor and return a small list of human comments. */
+export async function summarizeGithubIssueDiscussion(
+  cursor: AaryaGithubCursor<AaryaGithubIssueDiscussionEntry>,
+  maxComments = 20,
+  maxPages = 5,
+): Promise<AaryaGithubIssueCommentSummary[]> {
+  const comments: AaryaGithubIssueCommentSummary[] = [];
+  for (let page = 0; page < maxPages && comments.length < maxComments; page++) {
+    const entries = await cursor.next();
+    if (!entries) break;
+    for (const entry of entries) {
+      if (comments.length >= maxComments) break;
+      if (entry.kind !== "comment") continue;
+      const body = entry.bodyMarkdown?.trim();
+      if (!body) continue;
+      comments.push({ author: entry.author?.login ?? "", body: body.slice(0, 2000) });
+    }
+  }
+  return comments;
 }
 
 // ---------------------------------------------------------------------------
@@ -395,6 +535,36 @@ export function selectRepoSearchMatches(
       (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
     .slice(0, limit)
     .map(({ path, name, type }) => ({ path, name, type }));
+}
+
+/** Score one issue/PR title against query tokens (same forgiving token match as repo search). */
+export function scoreGithubWorkSearchMatch(title: string, queryTokens: string[]): number {
+  const titleTokens = tokenizeRepoSearchTerm(title);
+  let score = 0;
+  for (const query of queryTokens) {
+    for (const token of titleTokens) {
+      score += scoreTokenMatch(query, token, 4, 3, 2, 2);
+    }
+  }
+  const phrase = queryTokens.join(" ");
+  if (phrase.length >= 3 && title.toLowerCase().includes(phrase)) score += 8;
+  return score;
+}
+
+/** Re-rank issue/PR search results so related titles surface near the top. Pure for testing. */
+export function rankGithubWorkSearchHits<T extends { title: string }>(
+  hits: T[],
+  query: string,
+  limit = 20,
+): T[] {
+  const queryTokens = tokenizeRepoSearchTerm(query);
+  if (queryTokens.length === 0) return hits.slice(0, limit);
+  return hits
+    .map((hit) => ({ hit, score: scoreGithubWorkSearchMatch(hit.title, queryTokens) }))
+    .filter((entry) => entry.score > 0)
+    .toSorted((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((entry) => entry.hit);
 }
 
 // ---------------------------------------------------------------------------
